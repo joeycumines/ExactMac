@@ -38,7 +38,7 @@ include $(PROJECT_ROOT)/make/release.mk
 ##@ Core Targets
 
 .PHONY: all
-all: proto-lint release.test ## Build all components and run all non-integration checks.
+all: proto-lint threat-model.validate release.test ## Build all components and run all non-integration checks.
 	$(MAKE) --no-print-directory swift.all
 	ls -alh $(PROJECT_ROOT)/Server/.build/release/
 	$(MAKE) --no-print-directory go.all GO_TEST_FLAGS=$(call escape_command_arg,$(GO_TEST_FLAGS)$(if $(filter -count,$(GO_TEST_FLAGS))$(filter -count=%,$(GO_TEST_FLAGS)),, -count=1)$(if $(filter -timeout,$(GO_TEST_FLAGS))$(filter -timeout=%,$(GO_TEST_FLAGS)),, -timeout=20m))

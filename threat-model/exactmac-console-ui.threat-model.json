@@ -72,7 +72,7 @@
       ],
       "access_token_expires": false,
       "can_user_logout": false,
-      "can_system_logout": true
+      "can_system_logout": false
     },
     {
       "trust_zone_a": "consent-console-zone",
@@ -1238,7 +1238,7 @@
       "impact": "severe",
       "impact_description": "A single approval of a well-formed fake dialog is sufficient for arbitrary code execution as the operator, with the genuine console showing nothing at all, so the operator has no signal that anything unusual occurred.",
       "score": 15,
-      "level": "high"
+      "level": "very_high"
     },
     {
       "symbolic_name": "risk-misleading-but-genuine-prompt",
@@ -1252,7 +1252,7 @@
       "impact": "major",
       "impact_description": "Systematic misapproval of high-consequence actions under conditions where nothing appears anomalous, producing exactly the class of loss the consent plane was built to prevent while reporting every request as approved.",
       "score": 16,
-      "level": "high"
+      "level": "very_high"
     },
     {
       "symbolic_name": "risk-approval-applied-to-wrong-request",
@@ -1266,7 +1266,7 @@
       "impact": "severe",
       "impact_description": "A single occurrence authorizes an action the operator examined and rejected, and because the audit records a legitimate approval the discrepancy may not be noticed until the damage is done.",
       "score": 10,
-      "level": "medium"
+      "level": "high"
     },
     {
       "symbolic_name": "risk-consent-fatigue-by-flooding",
@@ -1279,7 +1279,7 @@
       "impact": "major",
       "impact_description": "The consent plane is neutralised wholesale while continuing to report that every request was individually decided, which is the most dangerous failure mode in the model because it produces no signal that anything is wrong.",
       "score": 16,
-      "level": "high"
+      "level": "very_high"
     },
     {
       "symbolic_name": "risk-approval-content-exposed-to-session",
@@ -1293,7 +1293,7 @@
       "impact": "moderate",
       "impact_description": "Disclosure of paths, URLs, business data, and occasionally tokens, to an attacker already resident on the machine. Material, but secondary to the loss of the approval decision itself.",
       "score": 12,
-      "level": "medium"
+      "level": "high"
     },
     {
       "symbolic_name": "risk-biometric-gate-degraded-or-coerced",
@@ -1307,7 +1307,7 @@
       "impact": "major",
       "impact_description": "Approval of a global persistent or script-executing grant obtained under conditions the operator would not recognise as illegitimate, with the system's own ceremony supplying false assurance that the decision was deliberate.",
       "score": 8,
-      "level": "low"
+      "level": "medium"
     },
     {
       "symbolic_name": "risk-invisible-standing-permission",
@@ -1321,7 +1321,7 @@
       "impact": "major",
       "impact_description": "A durable over-permission the operator cannot see and therefore does not revoke, which converts a transient compromise into a persistent one and is discovered only incidentally.",
       "score": 12,
-      "level": "medium"
+      "level": "high"
     },
     {
       "symbolic_name": "risk-misleading-forensic-view",
@@ -1334,7 +1334,7 @@
       "impact": "major",
       "impact_description": "The one surface available for after-the-fact investigation becomes a means of being misled about it, so an ongoing compromise is neither detected nor correctly scoped.",
       "score": 12,
-      "level": "medium"
+      "level": "high"
     },
     {
       "symbolic_name": "risk-absence-treated-as-consent",
@@ -1347,7 +1347,7 @@
       "impact": "severe",
       "impact_description": "Unattended execution of whatever the agent asked for, including code execution, with no human present at any point in the chain.",
       "score": 10,
-      "level": "medium"
+      "level": "high"
     },
     {
       "symbolic_name": "risk-degraded-evidence-read-as-clean",
@@ -1360,7 +1360,7 @@
       "impact": "major",
       "impact_description": "The graded-evidence model becomes a false assurance: the system knows it has weak evidence and is compensating, while the operator is shown a reassuring badge, which is the specific dishonesty this design is meant to avoid.",
       "score": 12,
-      "level": "medium"
+      "level": "high"
     }
   ]
 }

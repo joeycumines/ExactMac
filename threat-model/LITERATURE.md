@@ -38,11 +38,32 @@ with any tool provided the output converts to the schema's JSON, and its recomme
 `check-jsonschema` or `jsonschema`. The second recommendation is why `validate.py` uses the `jsonschema`
 library directly, which is also what is installed here.
 
-**Specification** — referenced by the schema's own `$comment` as the `div-specification` anchor on
-<https://owasp.org/www-project-threat-model-library/>. The schema points at it as the authority for the risk
-scoring matrix, and this project follows that matrix: score is likelihood x impact on five-point scales, and
-`validate.py` derives the level bands as 0-4 `very_low`, 5-9 `low`, 10-14 `medium`, 15-19 `high`, 20-24
-`very_high`, 25 `critical`.
+**Specification** — <https://owasp.org/www-project-threat-model-library/>, the specification section reachable
+from the `div-specification` anchor the schema's own `$comment` points at. The schema states no scoring formula and
+no banding, so this document is the authority for both, and this project follows it: score is likelihood x impact on
+five-point scales, and the level bands are OWASP's own table.
+
+| Risk score | Risk level |
+|---|---|
+| 1-2 | Very Low |
+| 3-4 | Low |
+| 5-9 | Medium |
+| 10-12 | High |
+| 13-16 | Very High |
+| 20-25 | Critical |
+
+Two observations about that table, both of which had to be dealt with rather than glossed. It **leaves 17-19
+unbanded**; those scores are in fact unreachable, because a cross product of two five-point scales can only produce
+1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 20, or 25, and `validate.py` closes the gap upwards anyway so an
+out-of-range score can never be reported as less severe than the band below it. And the specification's likelihood
+value 5 is labelled "Almost Certain" where the schema's enum says `certain`; the two are the same value.
+
+**This table corrects a real error in the first version of this work.** `validate.py` initially used a locally
+invented ladder (0-4 very_low through 25 critical) while `LITERATURE.md` described it as OWASP's matrix. Because
+the invented ladder understated every band, **21 of the 23 risks present at the time were reported one or two levels below what OWASP
+assigns them**; the only two that agreed were the two scoring 25, which is why a skim of the register did not reveal
+it. Three further risks have been added since, all of them banded under the corrected table. The ladder is now OWASP's, and the corrected result is materially more alarming than the first version: the level distribution in
+`RISKS.md`'s generated shape table, in which nothing is rated low or very_low.
 
 **Reference model** — `threat-models/ai-ml-systems/husky-ai-threat-model.json` in the same tag, retrieved and
 run through `validate.py` as an independent test of the harness. Used for: proving the tool accepts real

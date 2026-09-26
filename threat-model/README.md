@@ -69,10 +69,12 @@ they are protected when they are not.
 
 Start with `scope` and `description` in each file — they carry the reasoning, not just the classification.
 Then the `trust_boundaries`, which is where the variants diverge. `components` names what exists today
-alongside what is planned, with `control.status` distinguishing `active` from `scheduled`: **twelve of the
-server model's sixteen controls and all but one of the console model's are `scheduled`, six of them at
-critical priority.** That is the accurate statement of the gap. The entire mitigation set is unbuilt, and a
-model that marked these controls active would be describing a system that does not exist.
+alongside what is planned, with `control.status` distinguishing `active` from `scheduled`. **The large
+majority of controls in both models are `scheduled`, and most of those are priority `critical`.** The
+exact counts are in the generated shape table in [`RISKS.md`](RISKS.md) and are deliberately not restated
+here, because a number copied into prose is a number that will be wrong the next time a model changes. That
+distribution is the accurate statement of the gap: the mitigation set is unbuilt, and a model marking these
+controls active would be describing a system that does not exist.
 
 `threats` carry CAPEC and CWE cross-references; see [`LITERATURE.md`](LITERATURE.md) for what each is used
 for and for the two references that were removed rather than left plausible-sounding.
@@ -93,14 +95,16 @@ cannot express either:
    reference and never verifies the referenced `symbolic_name` exists, so a model full of dangling references
    validates cleanly and is useless. This resolves every cross-reference, and distinguishes a dangling name
    from one defined as the wrong kind.
-3. **Risk matrix and register coverage.** The schema constrains the likelihood and impact enums and the 0-25
-   score range independently and states no formula, so a model can claim a severe impact while reporting a
-   comfortable score. `score` must equal likelihood x impact, the level band must follow from the score, and
-   every risk must appear in `RISKS.md` exactly once.
+3. **Risk matrix and register coverage.** The schema constrains the likelihood and impact enums and the 0-25 score
+   range independently and states no formula and no banding, so a model can claim a severe impact while reporting a
+   comfortable score. `score` must equal likelihood x impact, the level band must follow from OWASP's published band
+   table, and every risk must appear in `RISKS.md` exactly once. Deleting `RISKS.md` is itself a failure, so a gate
+   cannot be made to pass by removing the artifact it checks.
 
 `validate.py` has been hardened against malformed input: a model whose root is not an object, a collection
-holding a non-array, a truncated file, or invalid JSON is reported as a per-file `FAIL` and the run continues,
-so one broken model cannot hide the verdict of every model after it.
+holding a non-array, a truncated file, or invalid JSON is reported as a per-file `FAIL` and the run continues, so one
+broken model cannot hide the verdict of every model after it. It also rejects a trust boundary that bounds a zone to
+itself, a cyclic `parent_component` chain, and a `RISKS.md` that is absent or unreadable.
 
 ### Known gap, stated rather than hidden
 

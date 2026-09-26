@@ -275,6 +275,13 @@ class IntegrityChecker:
             if not isinstance(boundary, dict):
                 self.errors.append((prefix, "entry must be an object"))
                 continue
+            if (
+                boundary.get("trust_zone_a") is not None
+                and boundary["trust_zone_a"] == boundary.get("trust_zone_b")
+            ):
+                self.errors.append(
+                    (prefix, "a trust boundary must separate two distinct zones, not bound a zone to itself")
+                )
             for key in ("trust_zone_a", "trust_zone_b"):
                 self._resolve_bare(
                     [boundary.get(key)] if boundary.get(key) is not None else [],
@@ -318,6 +325,27 @@ class IntegrityChecker:
                     f"{prefix}.parent_component",
                     "parent_component",
                 )
+
+        # A component hierarchy must be acyclic: the checker already rejects a
+        # component that is its own parent, which is the trivial case of this.
+        parent_of = {
+            entry["symbolic_name"]: entry["parent_component"]
+            for entry in self._items("components")
+            if isinstance(entry, dict)
+            and isinstance(entry.get("symbolic_name"), str)
+            and isinstance(entry.get("parent_component"), str)
+        }
+        for name in parent_of:
+            seen = [name]
+            cursor = parent_of[name]
+            while cursor in parent_of:
+                if cursor in seen:
+                    self.errors.append(
+                        (f"components[{name}].parent_component", f"parent chain forms a cycle at {cursor!r}")
+                    )
+                    break
+                seen.append(cursor)
+                cursor = parent_of[cursor]
 
         # data-store.trust_zone is a REQUIRED symbolic-name reference into
         # trust_zones, and is checked here alongside the sibling fields on actor and
@@ -461,19 +489,27 @@ def validate_schema(model: dict[str, Any], validator: Draft202012Validator) -> l
 def risk_level_band(score: int) -> str:
     """The OWASP risk level band for a 0-25 risk score.
 
-    The schema constrains the enums and the score range but states no formula, so the
-    banding is stated here explicitly and applied to every risk. Encoding it means a
-    score can no longer be quietly lowered to reach a more comfortable band.
+    These are OWASP's own bands, taken from the threat model library specification
+    at https://owasp.org/www-project-threat-model-library/ under the risk scoring
+    section, and reproduced here because the schema states no formula and no banding:
+
+        1-2 very_low, 3-4 low, 5-9 medium, 10-12 high, 13-16 very_high, 20-25 critical
+
+    The specification's table has a gap: 17-19 falls in no band. Those scores are
+    unreachable in practice, because a cross product of two five-point scales can
+    only produce 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 20, or 25. The gap is
+    closed upwards anyway, to very_high, so an out-of-range score can never be
+    reported as less severe than the band below it.
     """
-    if score <= 4:
+    if score <= 2:
         return "very_low"
-    if score <= 9:
+    if score <= 4:
         return "low"
-    if score <= 14:
+    if score <= 9:
         return "medium"
-    if score <= 19:
+    if score <= 12:
         return "high"
-    if score <= 24:
+    if score <= 16:
         return "very_high"
     return "critical"
 
@@ -526,11 +562,16 @@ def validate_risk_register(models: list[dict[str, Any]]) -> list[str]:
     """
     register = THREAT_MODEL_DIR / "RISKS.md"
     if not register.exists():
-        return []
+        # Deleting the artifact a gate checks must not make the gate pass. A4's
+        # criterion is that every risk appears in the register, which is vacuously
+        # true of no register at all.
+        return ["RISKS.md is missing; the risk register cannot be checked"]
     try:
         text = register.read_text(encoding="utf-8")
-    except OSError:
-        return []
+    except (OSError, ValueError) as error:
+        # UnicodeDecodeError is a ValueError, and a register that cannot be decoded
+        # is a failure, not an absent check.
+        return [f"RISKS.md could not be read as UTF-8 text: {error}"]
 
     # Count only within the register's table rows. The narrative sections below the
     # tables legitimately discuss a risk again — the accepted-residuals paragraph
