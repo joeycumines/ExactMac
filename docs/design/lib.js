@@ -20,7 +20,13 @@ function hexToRgb(hex) {
   };
 }
 
-const solid = (hex) => [{ type: "SOLID", color: hexToRgb(hex), opacity: 1 }];
+// A component that is an ANNOTATION rather than a box passes no fill at all, and
+// asking for "no fill" used to mean calling hexToRgb on an empty array. Anything that
+// is not a colour string yields no paint, so callers can pass `fill: []` to mean
+// "transparent" without special-casing every primitive.
+const solid = (hex) => (typeof hex === "string"
+  ? [{ type: "SOLID", color: hexToRgb(hex), opacity: 1 }]
+  : []);
 
 // Documentation keys are not tokens.
 function entries(obj) {

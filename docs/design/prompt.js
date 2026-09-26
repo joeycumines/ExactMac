@@ -114,12 +114,12 @@ function promptHeader(scheme, o) {
   if (o.reason === null) {
     const missing = makeFrame(null, {
       name: "reason-missing", w: INNER, h: 40,
-      fill: sk(scheme, "surface-sunken"), radius: SR["radius-sm"], stroke: sk(scheme, "caution"),
+      fill: sk(scheme, "surface-sunken"), radius: SR["radius-sm"], stroke: sk(scheme, "control-border"),
     });
-    const bar = makeRect(null, { name: "bar", w: 3, h: 24, fill: sk(scheme, "caution"), radius: 1.5 });
+    const bar = makeRect(null, { name: "bar", w: 3, h: 24, fill: sk(scheme, "control-border"), radius: 1.5 });
     const lbl = makeText(null, {
       name: "label", chars: "THE AGENT GAVE NO REASON", size: 10, style: "Semi Bold",
-      color: sk(scheme, "caution"), wrap: INNER - 40,
+      color: sk(scheme, "text-primary"), wrap: INNER - 40,
     });
     const hint = makeText(null, {
       name: "hint", chars: "Decline, or allow only for this exact request.", size: 11,
@@ -145,7 +145,10 @@ function promptHeader(scheme, o) {
       name: "implication", w: INNER, h: 34, fill: sk(scheme, "surface-sunken"),
       radius: SR["radius-sm"],
     });
-    const bar = makeRect(null, { name: "bar", w: 3, h: 18, fill: sk(scheme, "caution"), radius: 1.5 });
+    // A NEUTRAL bar, because this text is derived by the system, not supplied by the
+    // caller. It shares the untrusted field's amber hairline in the render directly
+    // above it, which made the one mark meaning "not verified" also mean "verified".
+    const bar = makeRect(null, { name: "bar", w: 3, h: 18, fill: sk(scheme, "control-border"), radius: 1.5 });
     const txt = makeText(null, {
       name: "text", chars: o.implicationText ||
         "Also permits screen capture and reading the focused window's text.",
@@ -340,7 +343,9 @@ function approvalPrompt(o) {
     const outcome = makeFrame(null, {
       name: "outcome", w: INNER, h: 20, fill: sk(scheme, "surface-raised"), radius: SR["radius-md"],
     });
-    const tone = state === "denied" ? "danger" : state === "expired" ? "caution" : "text-secondary";
+    // Deny is the one outcome that earns red. Expired and unreachable are quiet: both
+    // mean nothing happened, and colouring them implied something did.
+    const tone = state === "denied" ? "danger" : "text-secondary";
     const h2 = makeText(null, {
       name: "headline", chars: o.outcomeTitle || "Denied", size: 14, style: "Semi Bold",
       color: sk(scheme, tone), wrap: INNER - 24,
@@ -401,11 +406,11 @@ function envelopeReview(scheme, o) {
   // The band. Nothing else in the product uses this treatment, so the surface is
   // identifiable at a glance from across the desk.
   const band = makeFrame(null, {
-    name: "envelope-band", w: PW, h: 34, fill: sk(scheme, "caution"), radius: SR["radius-lg"],
+    name: "envelope-band", w: PW, h: 34, fill: sk(scheme, "surface-raised"), radius: SR["radius-lg"],
   });
   const bandText = makeText(null, {
     name: "band-label", chars: "PRE-AUTHORIZATION ENVELOPE", size: 11, style: "Semi Bold",
-    color: sk(scheme, "surface"), wrap: INNER,
+    color: sk(scheme, "text-primary"), wrap: INNER,
   });
   flow(band, [{ node: bandText, w: INNER, h: bandText.height }], {
     direction: "HORIZONTAL", padLeft: PAD, padRight: PAD, padTop: 9, padBottom: 9,

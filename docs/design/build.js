@@ -68,11 +68,15 @@ const TEXT_TOKENS = [
 ];
 const SURFACES = ["surface", "surface-raised", "surface-sunken"];
 
-// Ink on a saturated FILL is text too, and is a different check: the primary
-// button's label and the envelope band. Ungated, both were unverified.
+// Ink on a saturated FILL is text too, and is a different check from ink on a
+// surface. The list is the set of saturated fills the design actually uses, and it is
+// derived by hand, so it must be re-derived whenever a fill changes: the envelope band
+// WAS a caution fill with surface-coloured text, and when its fill became neutral its
+// label silently became 1.07:1 against it while this gate passed, because the gate only
+// ever checked the pair the design used to have. That is the whole argument for keeping
+// the list short and re-deriving it, rather than for deleting it.
 const FILL_PAIRS = [
   { ink: "on-accent", fill: "accent", what: "primary button label" },
-  { ink: "surface", fill: "caution", what: "envelope band label" },
 ];
 
 const lum = (hex) => {

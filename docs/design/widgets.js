@@ -32,10 +32,15 @@ function signatureBadge(o) {
   // silently got the state's default and had no way to fit a dense row.
   const bw = o.w || s.w;
   const tone = s.tone === "neutral" ? "text-secondary" : s.tone;
+  // NO CHROME. This began as an outlined pill and it read as a heavy lozenge floating
+  // at the end of every process row: two borders, two fills and two radii competing
+  // with the row's own text for attention, on the one surface where the operator is
+  // trying to read a process TREE. The signature state is an annotation on a list row,
+  // not a chip, so it is a dot and a word. It stays a component because the
+  // implementation cites it by name, and a component is not required to be a box.
   const c = makeComponent(null, {
     name: "SignatureBadge/" + s.key,
-    w: bw, h: 20, fill: ink(scheme, "surface-raised"), radius: R["radius-pill"],
-    stroke: ink(scheme, tone === "neutral" ? "control-border" : tone),
+    w: bw, h: 20, fill: [], radius: 0,
   });
   // A dot plus the word: color alone never carries the state, so the badge still
   // reads correctly in grayscale or for a colorblind operator.
@@ -43,12 +48,15 @@ function signatureBadge(o) {
   // The word is wrapped into the pill rather than sized to fit: 30pt of the badge is
   // chrome (dot, gap, padding), and at the larger no-wrap margin "Unnotarized"
   // measured 105pt inside a 96pt pill and was cut.
+  // The label is PRIMARY ink in every state. Six badges ringing a prompt in six
+  // semantic colours read as a highlighter set; the words already say which state
+  // this is, so the dot carries the colour and the text stays quiet.
   const label = makeText(c, {
-    name: "label", chars: s.label, size: 11, style: "Semi Bold",
-    color: ink(scheme, tone), wrap: Math.max(24, bw - 30),
+    name: "label", chars: s.label, size: 11,
+    color: ink(scheme, "text-secondary"), wrap: Math.max(24, bw - 30),
   });
   flow(c, [{ node: dot }, { node: label }], {
-    direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 3, padBottom: 3,
+    direction: "HORIZONTAL", gap: 6, padLeft: 0, padRight: 0, padTop: 3, padBottom: 3,
     align: "CENTER", hugW: false, fixedW: bw,
   });
   // Height follows the content: the 11pt Semi Bold label is ~16pt, so a 20pt pill
@@ -225,9 +233,11 @@ function untrustedField(o) {
   });
   const rule = makeRect(f, { name: "rule", w: 3, h: 40, fill: ink(scheme, "caution"), radius: 1.5 });
   const stack = makeFrame(null, { name: "stack", w: w - 40, h: 40, fill: ink(scheme, "surface-sunken") });
+  // The amber RULE is the mark, and it is one hairline rather than a coloured band.
+  // The caption is primary ink: "NOT VERIFIED" in amber shouted the warning twice.
   const caption = makeText(null, {
     name: "caption", chars: o.caption || "FROM THE CALLER — NOT VERIFIED",
-    size: 10, style: "Semi Bold", color: ink(scheme, "caution"),
+    size: 10, style: "Semi Bold", color: ink(scheme, "text-primary"),
   });
   const value = makeText(null, {
     name: "value", chars: o.value, size: 12, mono: true, wrap: w - 40,
@@ -294,7 +304,7 @@ const BUTTON_VARIANTS = {
   secondary:{ fill: "surface-raised", ink: "text-primary", h: 34, w: 150, style: "Regular", stroke: "control-border" },
   deny:     { fill: "surface", ink: "danger",  h: 34, w: 96,  style: "Semi Bold", stroke: "control-border" },
   quiet:    { fill: "surface", ink: "text-secondary", h: 28, w: 110, style: "Regular" },
-  caution:  { fill: "surface-raised", ink: "caution", h: 34, w: 190, style: "Semi Bold", stroke: "caution" },
+  caution:  { fill: "surface-raised", ink: "text-primary", h: 34, w: 190, style: "Semi Bold", stroke: "control-border" },
 };
 
 function button(o) {
@@ -351,11 +361,11 @@ function riskChip(o) {
   const c = makeComponent(null, {
     name: "RiskChip/" + o.level, w: 92, h: 22,
     fill: cw(scheme, "surface-raised"), radius: CR["radius-pill"],
-    stroke: cw(scheme, lv.tone === "text-secondary" ? "control-border" : lv.tone),
+    stroke: cw(scheme, "control-border"),
   });
   const dot = makeRect(null, { name: "dot", w: 6, h: 6, fill: cw(scheme, lv.tone), radius: 3 });
   const label = makeText(null, {
-    name: "label", chars: lv.label, size: 11, style: "Semi Bold", color: cw(scheme, lv.tone),
+    name: "label", chars: lv.label, size: 11, style: "Semi Bold", color: cw(scheme, "text-primary"),
   });
   flow(c, [{ node: dot }, { node: label }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 4, padBottom: 4,
@@ -571,12 +581,12 @@ function serviceStatus(o) {
   const c = makeComponent(null, {
     name: "ServiceStatus/" + s.key, w: w, h: 20,
     fill: cw(scheme, "surface-raised"), radius: CR["radius-pill"],
-    stroke: cw(scheme, s.tone === "text-secondary" ? "control-border" : s.tone),
+    stroke: cw(scheme, "control-border"),
   });
   const dot = makeRect(null, { name: "dot", w: 6, h: 6, fill: cw(scheme, s.tone), radius: 3 });
   const label = makeText(null, {
     name: "label", chars: s.label, size: 11, style: "Semi Bold",
-    color: cw(scheme, s.tone), wrap: w - 30,
+    color: cw(scheme, "text-primary"), wrap: w - 30,
   });
   flow(c, [{ node: dot }, { node: label }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 10, padRight: 10, padTop: 3, padBottom: 3,
@@ -734,7 +744,10 @@ function failClosedBand(o) {
     name: "FailClosedBand/" + o.reason, w: w, h: 56,
     fill: cw(scheme, "surface-sunken"), radius: CR["radius-sm"],
   });
-  const rule = makeRect(band, { name: "rule", w: 3, h: 40, fill: cw(scheme, "caution"), radius: 1.5 });
+  // NEUTRAL rule. An amber bar down the side of the state that means "you are
+  // protected" told the operator the opposite, and this surface's acceptance asks it
+  // to be reassuring. The words carry it; the rule only separates.
+  const rule = makeRect(band, { name: "rule", w: 3, h: 40, fill: cw(scheme, "control-border"), radius: 1.5 });
   const stackW = w - 13 - 10 - 10;
   const title = makeText(null, {
     name: "title", chars: o.title || spec.title, size: 12, style: "Semi Bold",
@@ -794,14 +807,19 @@ function countdownChip(o) {
   const w = Math.ceil(measure(label, 11, "Semi Bold", true)) + 20;
   const c = makeComponent(null, {
     name: "CountdownChip/" + (o.state || "live"), w: w, h: 18,
-    fill: cw(scheme, "surface"), radius: CR["radius-pill"], stroke: cw(scheme, "separator"),
+    fill: cw(scheme, "surface"), radius: CR["radius-pill"], stroke: cw(scheme, "control-border"),
   });
+  // Only a grant about to lapse earns a colour, and it earns one dot rather than a
+  // coloured pill: a countdown is a clock, not a warning.
   const text = makeText(null, {
     name: "label", chars: label, size: 11, style: "Semi Bold",
-    color: cw(scheme, tone), wrap: w - 16,
+    color: cw(scheme, "text-primary"), wrap: w - 25,
   });
-  flow(c, [{ node: text }], {
-    direction: "HORIZONTAL", padLeft: 8, padRight: 8, align: "CENTER",
+  flow(c, [
+    { node: makeRect(null, { name: "dot", w: 5, h: 5, fill: cw(scheme, tone), radius: 2.5 }), w: 5, h: 5 },
+    { node: text },
+  ], {
+    direction: "HORIZONTAL", gap: 6, padLeft: 8, padRight: 8, align: "CENTER",
     hugW: false, fixedW: w,
   });
   return { node: c, w: w, h: c.height };
@@ -971,12 +989,14 @@ function integrityBadge(o) {
   const c = makeComponent(null, {
     name: "IntegrityBadge/" + (o.state || "verified"), w: w, h: 20,
     fill: cw(scheme, "surface-raised"), radius: CR["radius-pill"],
-    stroke: cw(scheme, s.tone === "text-secondary" ? "control-border" : s.tone),
+    stroke: cw(scheme, "control-border"),
   });
   const dot = makeRect(null, { name: "dot", w: 6, h: 6, fill: cw(scheme, s.tone), radius: 3 });
+  // A doctored log is the one place in the console where red is the honest colour,
+  // so the word is red there and nowhere else.
   const text = makeText(null, {
     name: "label", chars: label, size: 11, style: "Semi Bold",
-    color: cw(scheme, s.tone), wrap: w - 30,
+    color: cw(scheme, o.state === "broken" ? "danger" : "text-primary"), wrap: w - 30,
   });
   flow(c, [{ node: dot }, { node: text }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 10, padRight: 10, padTop: 3, padBottom: 3,
@@ -1005,26 +1025,38 @@ const POSTURES = [
 
 function segmentedControl(o) {
   const scheme = o.scheme || "light";
-  const w = o.w || 664;
-  const inner = w - 6;
-  const optW = Math.floor(inner / 3);
+  // SIZED TO ITS CONTENT, and split into UNEQUAL segments. It used to take the full
+  // 664pt content width and divide it three ways, which stretched three short labels
+  // across the whole panel: the selected chip floated in the middle of a long grey bar
+  // and read as a text field with a box in it rather than as a control.
+  //
+  // No blue either. The selected segment is a raised chip with PRIMARY ink and a
+  // neutral border. Three signals at once — blue outline, blue text, white fill — was
+  // the reason it looked wonky, and the same rule that quieted the signature badges
+  // applies here: colour in the ink only where it carries meaning, chrome neutral.
+  const segs = POSTURES.map((p) => Math.max(
+    88, Math.ceil(measure(p.title, 11, "Semi Bold", true)) + 30,
+  ));
+  const w = o.w || segs.reduce((a, b) => a + b, 0) + 6;
   const box = makeComponent(null, {
     name: "SegmentedControl/" + o.selected, w: w, h: 32,
     fill: cw(scheme, "surface-sunken"), radius: CR["radius-md"],
   });
-  const opts = POSTURES.map((p) => {
+  const opts = POSTURES.map((p, i) => {
+    const optW = segs[i];
     const sel = p.key === o.selected;
     const c = makeComponent(null, {
       name: "SegmentedOption/" + p.key, w: optW, h: 26,
       fill: cw(scheme, sel ? "surface" : "surface-sunken"), radius: CR["radius-sm"],
-      stroke: sel ? cw(scheme, "accent") : undefined,
+      stroke: sel ? cw(scheme, "control-border") : undefined,
     });
     const label = makeText(null, {
       name: "label", chars: p.title, size: 11, style: sel ? "Semi Bold" : "Regular",
-      color: cw(scheme, sel ? "accent-text" : "text-secondary"), align: "CENTER", wrap: optW - 12,
+      color: cw(scheme, sel ? "text-primary" : "text-secondary"), align: "CENTER",
+      wrap: optW - 16,
     });
-    flow(c, [{ node: label, w: optW - 12, h: label.height }], {
-      direction: "HORIZONTAL", padLeft: 6, padRight: 6, align: "CENTER", mainAlign: "CENTER",
+    flow(c, [{ node: label, w: optW - 16, h: label.height }], {
+      direction: "HORIZONTAL", padLeft: 8, padRight: 8, align: "CENTER", mainAlign: "CENTER",
       hugW: false, hugH: false, fixedW: optW, fixedH: 26,
     });
     c.resize(optW, 26);
@@ -1045,19 +1077,16 @@ function targetChip(o) {
   const c = makeComponent(null, {
     name: "TargetChip/" + (o.listed ? "listed" : "placeholder"), w: w, h: 24,
     fill: cw(scheme, o.listed ? "surface-raised" : "surface"), radius: CR["radius-pill"],
-    stroke: cw(scheme, o.listed ? "caution" : "control-border"),
+    stroke: cw(scheme, o.listed ? "control-border" : "separator"),
   });
-  const items = [];
-  if (o.listed) {
-    items.push({ node: makeRect(null, { name: "dot", w: 6, h: 6, fill: cw(scheme, "caution"), radius: 3 }), w: 6, h: 6 });
-  }
+  // No dot. The row's own title already says these applications always escalate, so
+  // a dot on every chip repeated the point in colour and added nothing.
   const text = makeText(null, {
     name: "label", chars: label, size: 11, style: o.listed ? "Semi Bold" : "Regular",
-    color: cw(scheme, o.listed ? "text-primary" : "text-tertiary"), wrap: w - (o.listed ? 40 : 24),
+    color: cw(scheme, o.listed ? "text-primary" : "text-tertiary"), wrap: w - 24,
   });
-  items.push({ node: text });
-  flow(c, items, {
-    direction: "HORIZONTAL", gap: 8, padLeft: o.listed ? 12 : 12, padRight: 12, padTop: 4, padBottom: 4,
+  flow(c, [{ node: text }], {
+    direction: "HORIZONTAL", padLeft: 12, padRight: 12, padTop: 4, padBottom: 4,
     align: "CENTER", hugW: false, fixedW: w,
   });
   return { node: c, w: w, h: c.height };
@@ -1120,7 +1149,7 @@ function settingRow(o) {
     items.push({
       node: makeText(null, {
         name: "locked-note", chars: "Required — this cannot be turned off",
-        size: 10, style: "Semi Bold", color: cw(scheme, "caution"), wrap: inner,
+        size: 10, style: "Semi Bold", color: cw(scheme, "text-secondary"), wrap: inner,
       }),
       w: inner,
     });
@@ -1234,7 +1263,7 @@ function errorState(o) {
   const stackW = w - 13 - 10 - 10;
   const title = makeText(null, {
     name: "title", chars: o.title || spec.title, size: 13, style: "Semi Bold",
-    color: cw(scheme, "caution"), wrap: stackW,
+    color: cw(scheme, "text-primary"), wrap: stackW,
   });
   const body = makeText(null, {
     name: "body", chars: o.body || spec.body, size: 11,
@@ -1246,7 +1275,7 @@ function errorState(o) {
   // button beside a full-width message pushed the row 100pt past its own container.
   const head = makeFrame(null, { name: "head", w: stackW + 13, h: 40, fill: cw(scheme, "surface-sunken") });
   flow(head, [
-    { node: makeRect(null, { name: "rule", w: 3, h: 40, fill: cw(scheme, "caution"), radius: 1.5 }), w: 3, h: 40 },
+    { node: makeRect(null, { name: "rule", w: 3, h: 40, fill: cw(scheme, "control-border"), radius: 1.5 }), w: 3, h: 40 },
     { node: stack, w: stackW, h: stack.height },
   ], { direction: "HORIZONTAL", gap: 10, align: "CENTER", hugW: false, fixedW: stackW + 13 });
   const items = [{ node: head, w: head.width, h: head.height }];
