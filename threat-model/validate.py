@@ -517,6 +517,49 @@ def validate_risk_matrix(model: dict[str, Any]) -> list[tuple[str, str]]:
     return errors
 
 
+def validate_risk_register(models: list[dict[str, Any]]) -> list[str]:
+    """Check threat-model/RISKS.md lists every modeled risk exactly once.
+
+    The register is the join between the models and the implementation, so a risk
+    that is not in it has no named owner and will not get built. Asserting coverage
+    in prose is not the same as checking it, so it is checked here.
+    """
+    register = THREAT_MODEL_DIR / "RISKS.md"
+    if not register.exists():
+        return []
+    try:
+        text = register.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    # Count only within the register's table rows. The narrative sections below the
+    # tables legitimately discuss a risk again — the accepted-residuals paragraph
+    # does exactly that — so counting the whole document would be a false positive.
+    rows = [line for line in text.splitlines() if line.lstrip().startswith("|")]
+
+    errors: list[str] = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        risks = model.get("risks")
+        if not isinstance(risks, list):
+            continue
+        for risk in risks:
+            if not isinstance(risk, dict):
+                continue
+            name = risk.get("symbolic_name")
+            if not isinstance(name, str):
+                continue
+            occurrences = sum(row.count(f"`{name}`") for row in rows)
+            if occurrences == 0:
+                errors.append(f"RISKS.md does not list risk {name!r}")
+            elif occurrences > 1:
+                errors.append(
+                    f"RISKS.md lists risk {name!r} {occurrences} times; expected exactly once"
+                )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quiet", action="store_true", help="only print failures and the summary")
@@ -535,6 +578,7 @@ def main() -> int:
         return 1
 
     failed = 0
+    loaded: list[dict[str, Any]] = []
     for path in models:
         relative = path.relative_to(REPO_ROOT)
         # A per-file verdict is guaranteed for every discovered model: a read or
@@ -549,6 +593,7 @@ def main() -> int:
             continue
 
         try:
+            loaded.append(model)
             schema_errors = validate_schema(model, validator)
             integrity_errors = IntegrityChecker(model).run() + validate_risk_matrix(model)
         except Exception as error:  # noqa: BLE001 - a validator must not abort the run
@@ -568,6 +613,13 @@ def main() -> int:
             print(f"PASS {relative}")
 
     total = len(models)
+    register_errors = validate_risk_register(loaded)
+    if register_errors:
+        failed += len(register_errors)
+        print("FAIL threat-model/RISKS.md")
+        for message in register_errors:
+            print(f"  refs:   {message}")
+
     if failed:
         print(f"\n{failed} of {total} threat model(s) failed validation.")
         return 1
