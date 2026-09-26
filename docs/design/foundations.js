@@ -6,12 +6,6 @@ const ORDER = [
   "accent", "danger", "caution", "success",
 ];
 
-// Colors that carry meaning as text or as a button fill, and so must clear AA.
-const TEXTUAL = [
-  "text-primary", "text-secondary", "text-tertiary",
-  "accent", "danger", "caution", "success",
-];
-
 function buildFoundations() {
   const page = figma.root.children.find((p) => p.name === "Foundations");
   if (!page) throw new Error("Foundations page not found");
@@ -31,7 +25,7 @@ function buildFoundations() {
   let y = M;
 
   makeText(root, {
-    name: "fnd/title", chars: "Foundations", size: 22, style: "Semibold",
+    name: "fnd/title", chars: "Foundations", size: 22, style: "Semi Bold",
     color: C["text-primary"].light, x: M, y,
   });
   y += 36;
@@ -49,7 +43,7 @@ function buildFoundations() {
     makeText(root, {
       name: "fnd/color-" + scheme + "-label",
       chars: isDark ? "Dark" : "Light",
-      size: 15, style: "Semibold",
+      size: 15, style: "Semi Bold",
       color: C["text-primary"].light, x: M, y,
     });
     y += 26;
@@ -88,56 +82,70 @@ function buildFoundations() {
     y += 128 + 44;
   }
 
-  // ---- contrast: the evidence behind the tertiary-ink decision
+  // ---- contrast: the evidence, computed from the SAME declaration the build gate
+  //      uses, and reporting the WORST surface rather than only `surface`. The table
+  //      previously listed `accent` (a fill, not text) and omitted `accent-text`, so
+  //      it could print "AA" for a token the build rejected.
   makeText(root, {
-    name: "fnd/contrast-label", chars: "Contrast", size: 15, style: "Semibold",
+    name: "fnd/contrast-label", chars: "Contrast", size: 15, style: "Semi Bold",
     color: C["text-primary"].light, x: M, y,
   });
-  y += 26;
+  y += 24;
+  const ROWS = TEXT_TOKENS.length;
   const colW = (W - M * 2 - 24) / 2;
   for (const scheme of ["light", "dark"]) {
     const isDark = scheme === "dark";
     const bg = isDark ? C.surface.dark : C.surface.light;
     const panel = makeFrame(root, {
       name: "fnd/contrast-" + scheme,
-      x: M + (isDark ? colW + 24 : 0), y, w: colW, h: 34 + TEXTUAL.length * 22,
+      x: M + (isDark ? colW + 24 : 0), y, w: colW, h: 40 + ROWS * 22,
       fill: bg, radius: R["radius-lg"],
       stroke: isDark ? C.separator.dark : C.separator.light,
     });
     makeText(panel, {
       name: "contrast-head-" + scheme,
-      chars: (isDark ? "Dark" : "Light") + " on " + bg.toUpperCase(),
-      size: 11, style: "Semibold", color: C["text-secondary"][scheme], x: 14, y: 10,
+      chars: (isDark ? "Dark" : "Light") + " — worst case over " + SURFACES.length + " surfaces",
+      size: 11, style: "Semi Bold", color: C["text-secondary"][scheme], x: 14, y: 12,
     });
-    TEXTUAL.forEach((name, i) => {
+    TEXT_TOKENS.forEach((name, i) => {
       const hex = C[name][scheme];
-      const r = contrast(hex, bg);
-      const ok = r >= 4.5;
-      const rowY = 30 + i * 22;
+      const wc = worstContrast(name, scheme);
+      const rowY = 34 + i * 22;
       makeText(panel, {
         name: "contrast-name-" + scheme + "-" + name, chars: name, size: 11, mono: true,
         color: C["text-primary"][scheme], x: 14, y: rowY,
       });
       makeText(panel, {
         name: "contrast-hex-" + scheme + "-" + name, chars: hex.toUpperCase(), size: 11, mono: true,
-        color: C["text-tertiary"][scheme], x: 150, y: rowY,
+        color: C["text-tertiary"][scheme], x: 128, y: rowY,
       });
       makeText(panel, {
         name: "contrast-ratio-" + scheme + "-" + name,
-        chars: r.toFixed(2) + ":1", size: 11, mono: true,
-        color: C["text-secondary"][scheme], x: 250, y: rowY,
+        chars: wc.ratio.toFixed(2) + ":1", size: 11, mono: true,
+        color: C["text-secondary"][scheme], x: 218, y: rowY,
+      });
+      makeText(panel, {
+        name: "contrast-surface-" + scheme + "-" + name,
+        chars: "on " + wc.surface.replace("surface-", ""), size: 10, mono: true,
+        color: C["text-tertiary"][scheme], x: 288, y: rowY + 1,
       });
       makeText(panel, {
         name: "contrast-status-" + scheme + "-" + name,
-        chars: ok ? "AA" : "FAIL", size: 11, mono: true,
-        color: ok ? C.success[scheme] : C.danger[scheme], x: 320, y: rowY,
+        chars: wc.pass ? "AA" : "FAIL", size: 11, mono: true,
+        color: wc.pass ? C.success[scheme] : C.danger[scheme], x: 372, y: rowY,
       });
     });
   }
-  y += 34 + TEXTUAL.length * 22 + 44;
+  y += 40 + ROWS * 22 + 20;
+  makeText(root, {
+    name: "fnd/contrast-note",
+    chars: "Checked by docs/design/build.js on every build. accent is absent because it is a FILL; accent-text is the ink form and is gated here.",
+    size: 10, color: C["text-tertiary"].light, x: M, y, wrap: W - M * 2,
+  });
+  y += 26;
 
   makeText(root, {
-    name: "fnd/space-label", chars: "Space", size: 15, style: "Semibold",
+    name: "fnd/space-label", chars: "Space", size: 15, style: "Semi Bold",
     color: C["text-primary"].light, x: M, y,
   });
   y += 26;
@@ -160,7 +168,7 @@ function buildFoundations() {
   y += 92 + 44;
 
   makeText(root, {
-    name: "fnd/radius-label", chars: "Radius", size: 15, style: "Semibold",
+    name: "fnd/radius-label", chars: "Radius", size: 15, style: "Semi Bold",
     color: C["text-primary"].light, x: M, y,
   });
   y += 26;
@@ -180,7 +188,7 @@ function buildFoundations() {
   y += 64 + 52;
 
   makeText(root, {
-    name: "fnd/type-label", chars: "Type", size: 15, style: "Semibold",
+    name: "fnd/type-label", chars: "Type", size: 15, style: "Semi Bold",
     color: C["text-primary"].light, x: M, y,
   });
   y += 30;

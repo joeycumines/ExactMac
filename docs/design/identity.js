@@ -20,13 +20,13 @@ function buildIdentity() {
     const t = makeText(root, { name, chars, size, style: style || "Regular", color, x, y: yy });
     return t.height;
   };
-  const heading = (chars) => { y += text("cmp/h", chars, 15, ink(L, "text-primary"), M, y, "Semibold") + 10; };
+  const heading = (chars) => { y += text("cmp/h", chars, 15, ink(L, "text-primary"), M, y, "Semi Bold") + 10; };
   const note = (chars) => {
     const t = makeText(root, { name: "cmp/note", chars, size: 11, color: ink(L, "text-tertiary"), x: M, y, wrap: W - M * 2 });
     y += t.height + 18;
   };
 
-  y += text("cmp/title", "Components", 22, ink(L, "text-primary"), M, y, "Semibold") + 12;
+  y += text("cmp/title", "Components", 22, ink(L, "text-primary"), M, y, "Semi Bold") + 12;
   y += text("cmp/subtitle",
     "Caller identity. Every state is its own component; the gallery is real instances.",
     13, ink(L, "text-secondary"), M, y) + 34;

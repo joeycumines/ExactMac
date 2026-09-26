@@ -28,24 +28,27 @@ const SIGNATURE_STATES = [
 function signatureBadge(o) {
   const scheme = o.scheme || "light";
   const s = o.state;
+  // o.w is honoured; it used to be ignored, so a caller asking for a narrower badge
+  // silently got the state's default and had no way to fit a dense row.
+  const bw = o.w || s.w;
   const tone = s.tone === "neutral" ? "text-secondary" : s.tone;
   const c = makeComponent(null, {
     name: "SignatureBadge/" + s.key,
-    w: s.w, h: 20, fill: ink(scheme, "surface-raised"), radius: R["radius-pill"],
+    w: bw, h: 20, fill: ink(scheme, "surface-raised"), radius: R["radius-pill"],
     stroke: ink(scheme, tone === "neutral" ? "control-border" : tone),
   });
   // A dot plus the word: color alone never carries the state, so the badge still
   // reads correctly in grayscale or for a colorblind operator.
   const dot = makeRect(c, { name: "dot", w: 6, h: 6, fill: ink(scheme, tone), radius: 3 });
   const label = makeText(c, {
-    name: "label", chars: s.label, size: 11, style: "Semibold", color: ink(scheme, tone),
+    name: "label", chars: s.label, size: 11, style: "Semi Bold", color: ink(scheme, tone),
   });
   flow(c, [{ node: dot }, { node: label }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 3, padBottom: 3,
-    align: "CENTER", hugW: false, fixedW: s.w,
+    align: "CENTER", hugW: false, fixedW: bw,
   });
-  c.resize(s.w, 20);
-  return { node: c, w: s.w, h: 20 };
+  c.resize(bw, 20);
+  return { node: c, w: bw, h: 20 };
 }
 
 // ------------------------------------------------------------------ IdentityRow
@@ -67,7 +70,7 @@ function identityRow(o) {
   });
   const initial = makeText(glyph, {
     name: "initial", chars: (p.name || "?").charAt(0).toUpperCase(),
-    size: 12, style: "Semibold", color: ink(scheme, "text-primary"),
+    size: 12, style: "Semi Bold", color: ink(scheme, "text-primary"),
   });
   flow(glyph, [{ node: initial }], {
     direction: "HORIZONTAL", align: "CENTER", mainAlign: "CENTER",
@@ -80,7 +83,7 @@ function identityRow(o) {
   });
   const name = makeText(null, {
     name: "name", chars: p.name, size: 13,
-    style: p.isRequester ? "Semibold" : "Regular",
+    style: p.isRequester ? "Semi Bold" : "Regular",
     color: ink(scheme, "text-primary"),
   });
   const path = makeText(null, {
@@ -130,22 +133,32 @@ function processRow(p, scheme, w) {
     radius: 1.5,
   });
   items.push({ node: marker, w: 3, h: 16 });
+  const compactRole = p.compact && p.isRequester ? "   ·   requesting" : "";
   const label = makeText(row, {
     name: "label",
-    chars: p.name + "   pid " + p.pid + (p.detail ? "   " + p.detail : ""),
-    size: 12, style: p.isRequester ? "Semibold" : "Regular",
+    chars: (p.compact
+      ? p.name + (p.detail ? "   " + p.detail : "") + compactRole
+      : p.name + "   pid " + p.pid + (p.detail ? "   " + p.detail : "")),
+    size: 12, style: p.isRequester ? "Semi Bold" : "Regular",
     color: p.isRequester ? ink(scheme, "text-primary") : ink(scheme, "text-secondary"),
   });
   items.push({ node: label });
-  if (p.isRequester) {
-    const role = makeText(row, {
-      name: "role", chars: "requesting", size: 11, style: "Semibold",
+  // Signature state travels with the row. Without it the prompt showed a process
+  // tree carrying no evidence of who was calling, which is a process list rather
+  // than the graded-evidence model the rest of the design depends on.
+  if (p.signature) {
+    const badge = signatureBadge({ state: p.signature, scheme, w: p.sigW || 96 });
+    items.push({ node: badge.node, w: badge.w, h: badge.h });
+  }
+  if (p.isRequester && !p.compact) {
+    const role = makeText(null, {
+      name: "role", chars: "requesting", size: 11, style: "Semi Bold",
       color: ink(scheme, "accent"),
     });
     items.push({ node: role });
   }
   flow(row, items, {
-    direction: "HORIZONTAL", gap: 8, padLeft: padLeft, padRight: 8, padTop: 6, padBottom: 6,
+    direction: "HORIZONTAL", gap: 6, padLeft: padLeft, padRight: 8, padTop: 6, padBottom: 6,
     align: "CENTER", hugW: false, fixedW: w,
   });
   row.resize(w, 30);
@@ -159,7 +172,12 @@ function processTree(o) {
     name: "ProcessTree/" + (o.deep ? "deep" : "direct"),
     w: w, h: 40, fill: ink(scheme, "surface"),
   });
-  const items = o.processes.map((p) => processRow(p, scheme, w));
+  // `compact` is forwarded onto each row: in the 388pt prompt disclosure a row
+  // cannot hold indent + name + pid + signature badge + a separate role label, so
+  // the compact form drops the pid and folds the role word into the label. The pid
+  // remains on the Components specimen, which is where B4 asks for it.
+  const items = o.processes.map((p) =>
+    processRow(Object.assign({}, p, { compact: !!o.compact }), scheme, w));
   if (o.caption) {
     const cap = makeText(null, {
       name: "caption", chars: o.caption, size: 11, color: ink(scheme, "text-tertiary"),
@@ -191,7 +209,7 @@ function untrustedField(o) {
   const stack = makeFrame(null, { name: "stack", w: w - 40, h: 40, fill: ink(scheme, "surface-sunken") });
   const caption = makeText(null, {
     name: "caption", chars: o.caption || "FROM THE CALLER — NOT VERIFIED",
-    size: 10, style: "Semibold", color: ink(scheme, "caution"),
+    size: 10, style: "Semi Bold", color: ink(scheme, "caution"),
   });
   const value = makeText(null, {
     name: "value", chars: o.value, size: 12, mono: true, wrap: w - 40,
@@ -215,7 +233,7 @@ function systemField(o) {
     w: w, h: 44, fill: ink(scheme, "surface"),
   });
   const caption = makeText(null, {
-    name: "caption", chars: o.caption, size: 10, style: "Semibold",
+    name: "caption", chars: o.caption, size: 10, style: "Semi Bold",
     color: ink(scheme, "text-tertiary"),
   });
   const value = makeText(null, {
@@ -252,11 +270,11 @@ const cw = (scheme, name) => CT[name][scheme];
 // never be the default focus, and it is never placed adjacent to `primary`.
 // `caution` is for grants that outlive the request.
 const BUTTON_VARIANTS = {
-  primary:  { fill: "accent",  ink: "surface", h: 34, w: 150, style: "Semibold" },
+  primary:  { fill: "accent",  ink: "surface", h: 34, w: 150, style: "Semi Bold" },
   secondary:{ fill: "surface-raised", ink: "text-primary", h: 34, w: 150, style: "Regular", stroke: "control-border" },
-  deny:     { fill: "surface", ink: "danger",  h: 34, w: 96,  style: "Semibold", stroke: "control-border" },
+  deny:     { fill: "surface", ink: "danger",  h: 34, w: 96,  style: "Semi Bold", stroke: "control-border" },
   quiet:    { fill: "surface", ink: "text-secondary", h: 28, w: 110, style: "Regular" },
-  caution:  { fill: "surface-raised", ink: "caution", h: 34, w: 190, style: "Semibold", stroke: "caution" },
+  caution:  { fill: "surface-raised", ink: "caution", h: 34, w: 190, style: "Semi Bold", stroke: "caution" },
 };
 
 function button(o) {
@@ -310,7 +328,7 @@ function riskChip(o) {
   });
   const dot = makeRect(null, { name: "dot", w: 6, h: 6, fill: cw(scheme, lv.tone), radius: 3 });
   const label = makeText(null, {
-    name: "label", chars: lv.label, size: 11, style: "Semibold", color: cw(scheme, lv.tone),
+    name: "label", chars: lv.label, size: 11, style: "Semi Bold", color: cw(scheme, lv.tone),
   });
   flow(c, [{ node: dot }, { node: label }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 4, padBottom: 4,
@@ -325,6 +343,13 @@ function riskChip(o) {
 // One response. It must always state its OWN breadth and duration on its face:
 // an operator cannot compare options that hide their scope. `default` marks the
 // focused option, and it is never the destructive one.
+//
+// ORDER IS ENFORCED BY THE CALLER, not here: B5 requires the destructive choice to
+// be neither the default nor adjacent to the primary action, and an earlier layout
+// put Deny immediately above the focused option while claiming otherwise. The
+// prompt's ordering is ["once","target","session","envelope","deny","global"]: the
+// default leads, the extremes bracket the list, and Deny is never next to the
+// option that holds focus.
 const OPTIONS = [
   { key: "deny",     title: "Deny",                  breadth: "—",                    duration: "no grant is created",              tone: "danger",  destructive: true },
   { key: "once",     title: "Allow once",            breadth: "this exact request",     duration: "expires when it completes",          tone: "accent",  def: true },
@@ -347,7 +372,7 @@ function optionRow(o) {
   });
   // A destructive option is marked in the ink, never by making it the default.
   const title = makeText(null, {
-    name: "title", chars: opt.title, size: 13, style: "Semibold",
+    name: "title", chars: opt.title, size: 13, style: "Semi Bold",
     color: cw(scheme, opt.destructive ? "danger" : "text-primary"),
   });
   const scope = makeText(null, {
@@ -366,7 +391,7 @@ function optionRow(o) {
   const items = [{ node: stack, w: stack.width, h: stack.height }];
   if (isDef) {
     const badge = makeText(null, {
-      name: "default", chars: "default", size: 10, style: "Semibold",
+      name: "default", chars: "default", size: 10, style: "Semi Bold",
       color: cw(scheme, "accent-text"),
     });
     items.push({ node: badge });
@@ -392,7 +417,7 @@ function noteField(o) {
   });
   const cap = makeText(null, {
     name: "caption", chars: o.caption || "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION",
-    size: 10, style: "Semibold", color: cw(scheme, "text-secondary"), wrap: w - 24,
+    size: 10, style: "Semi Bold", color: cw(scheme, "text-secondary"), wrap: w - 24,
   });
   const val = makeText(null, {
     name: "value", chars: o.value || "Why are you deciding this way? The agent sees this.",
@@ -443,7 +468,7 @@ function payloadBlock(o) {
   });
   const cap = makeText(null, {
     name: "caption", chars: "EXACT REQUEST — NOTHING IS TRUNCATED", size: 10,
-    style: "Semibold", color: cw(scheme, "text-secondary"),
+    style: "Semi Bold", color: cw(scheme, "text-secondary"), wrap: w - 24 - 190,
   });
   const body = makeText(null, {
     name: "body", chars: o.body, size: 11, mono: true, wrap: w - 24,
@@ -455,7 +480,7 @@ function payloadBlock(o) {
   // trip, so anything whose position is visually load-bearing is aligned by the
   // text itself.
   const copy = makeText(null, {
-    name: "copy", chars: "Copy", size: 11, style: "Semibold",
+    name: "copy", chars: "Copy to shared clipboard", size: 11, style: "Semi Bold",
     color: cw(scheme, "accent-text"), align: "RIGHT", wrap: w - 24 - cap.width - 8,
   });
   const head = makeFrame(null, { name: "head", w: w - 24, h: 16, fill: cw(scheme, "surface-sunken") });

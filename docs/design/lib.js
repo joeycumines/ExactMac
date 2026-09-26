@@ -32,10 +32,21 @@ function entries(obj) {
     .map((k) => [k, obj[k]]);
 }
 
-const CHAR_W = 0.68;
+// The sandbox has no text metrics, so width is estimated from character count.
+// MEASURED Inter advance is ~0.458, from a rendered specimen. 0.58 keeps a real
+// safety margin over that: under-allocating CLIPS INK, a silent and serious
+// failure, while over-allocating only inflates a wrap-derived height. The previous
+// 0.68 over-allocated ~48% and its comment claimed a different value entirely.
+const CHAR_W = 0.58;
 const LINE_H = 1.45;
-function measure(chars, size) {
-  return Math.max(24, Math.ceil(chars.length * size * CHAR_W));
+// SemiBold and Bold are wider than Regular at the same point size. Measuring them
+// at the Regular advance under-allocates just enough to wrap a four-letter word
+// ("Deny" rendered as "Den" / "y"), which is invisible in code review and obvious
+// in a render.
+const WEIGHT_W = { Regular: 1, Medium: 1.04, "Semi Bold": 1.09, Bold: 1.13 };
+function measure(chars, size, style) {
+  const f = WEIGHT_W[style] || 1;
+  return Math.max(24, Math.ceil(chars.length * size * CHAR_W * f));
 }
 
 function makeText(parent, o) {
@@ -43,7 +54,10 @@ function makeText(parent, o) {
   t.name = o.name;
   // Figma requires fontName before characters.
   t.fontName = {
-    family: o.mono ? TOKENS.type.designMono : TOKENS.type.designSans,
+    // designMono is null because the renderer bundles no monospace family; a
+    // mono-styled node falls back to the sans rather than asking for null. The
+    // mono INTENT stays recorded in tokens.json for the app to honour.
+    family: (o.mono && TOKENS.type.designMono) || TOKENS.type.designSans,
     style: o.style || "Regular",
   };
   t.characters = o.chars;
@@ -53,12 +67,13 @@ function makeText(parent, o) {
   if (o.mono) t.characters = o.chars;
 
   const lineH = o.size * LINE_H;
+  const style = o.style || "Regular";
   let w, h;
   if (o.wrap) {
     w = o.wrap;
-    h = Math.max(1, Math.ceil(measure(o.chars, o.size) / w)) * lineH;
+    h = Math.max(1, Math.ceil(measure(o.chars, o.size, style) / w)) * lineH;
   } else {
-    w = measure(o.chars, o.size);
+    w = measure(o.chars, o.size, style);
     h = lineH;
   }
   t.resize(Math.max(1, w), Math.max(1, h));
@@ -161,6 +176,15 @@ function flow(parent, items, o) {
 
   const sized = items.map((it) => {
     const n = it.node || it;
+    // A plain object here means the caller double-wrapped a {node,w,h} item. It
+    // used to append a bare object and yield a NaN height that reached the .fig and
+    // then broke PNG export document-wide, with no error at any step.
+    if (!n || typeof n.appendChild !== "function") {
+      throw new Error(
+        "flow(): item is not a node — did you wrap a {node,w,h} item in another " +
+        "{node: ...}? got " + JSON.stringify(it),
+      );
+    }
     parent.appendChild(n);
     return {
       node: n,
@@ -190,9 +214,16 @@ function flow(parent, items, o) {
   const h = o.fixedH !== undefined ? o.fixedH : (o.hugH === false ? parent.height : contentH);
   parent.resize(Math.max(1, w), Math.max(1, h));
 
+  // Sizing modes must be derived from the direction, because the primary axis is
+  // horizontal for HORIZONTAL and vertical for VERTICAL. They were previously never
+  // passed at all, so every container was AUTO/AUTO and a "fixed height" region
+  // quietly became a hug.
+  const mainFixed = dir === "HORIZONTAL" ? o.fixedW !== undefined : o.fixedH !== undefined;
+  const crossFixed = dir === "HORIZONTAL" ? o.fixedH !== undefined : o.fixedW !== undefined;
   auto(parent, dir, {
     spacing: gap, padLeft: pl, padRight: pr, padTop: pt, padBottom: pb,
     align: o.align, mainAlign: o.mainAlign,
+    hugMain: !mainFixed, fixedCross: crossFixed,
   });
 
   // Main-axis placement. Centering must be relative to the CONTAINER's inner
@@ -243,4 +274,18 @@ function contrast(a, b) {
   const l1 = luminance(a), l2 = luminance(b);
   const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
   return (hi + 0.05) / (lo + 0.05);
+}
+
+// Worst (lowest) ratio for a token across every surface it can sit on, plus the
+// surface that produced it. TEXT_TOKENS and SURFACES are injected by build.js, so
+// the table drawn on the Foundations page is driven by the same declaration the
+// build gate enumerates. The gate deliberately does NOT use this summary: it walks
+// every pair so it can report each failure, and the shared invariant is the list.
+function worstContrast(token, scheme) {
+  let worst = Infinity, on = null;
+  for (const surface of SURFACES) {
+    const r = contrast(TOKENS.color[token][scheme], TOKENS.color[surface][scheme]);
+    if (r < worst) { worst = r; on = surface; }
+  }
+  return { ratio: worst, surface: on, pass: worst >= 4.5 };
 }

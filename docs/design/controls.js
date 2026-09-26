@@ -16,7 +16,7 @@ function buildControls() {
 
   const heading = (chars) => {
     makeText(root, {
-      name: "ctl/h", chars, size: 15, style: "Semibold",
+      name: "ctl/h", chars, size: 15, style: "Semi Bold",
       color: cw(L, "text-primary"), x: M, y,
     });
     y += 26;
@@ -32,7 +32,7 @@ function buildControls() {
   };
 
   makeText(root, {
-    name: "ctl/title", chars: "Controls", size: 22, style: "Semibold",
+    name: "ctl/title", chars: "Controls", size: 22, style: "Semi Bold",
     color: cw(L, "text-primary"), x: M, y,
   });
   y += 52;

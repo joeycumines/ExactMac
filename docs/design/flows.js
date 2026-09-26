@@ -22,7 +22,7 @@ function stepCard(o) {
     radius: 9,
   });
   const numText = makeText(null, {
-    name: "n", chars: String(o.n), size: 10, style: "Semibold",
+    name: "n", chars: String(o.n), size: 10, style: "Semi Bold",
     color: fk(scheme, o.tone === "quiet" ? "surface" : "on-accent"), align: "CENTER", wrap: 18,
   });
   flow(num, [{ node: numText, w: 18, h: numText.height }], {
@@ -32,11 +32,11 @@ function stepCard(o) {
 
   const head = makeFrame(null, { name: "head", w: w - 38, h: 18, fill: fk(scheme, "surface-raised") });
   const actor = makeText(null, {
-    name: "actor", chars: o.actor, size: 10, style: "Semibold", mono: true,
+    name: "actor", chars: o.actor, size: 10, style: "Semi Bold", mono: true,
     color: fk(scheme, "text-tertiary"), wrap: w - 38,
   });
   const action = makeText(null, {
-    name: "action", chars: o.action, size: 12, style: "Semibold",
+    name: "action", chars: o.action, size: 12, style: "Semi Bold",
     color: fk(scheme, o.tone === "quiet" ? "text-secondary" : "text-primary"), wrap: w - 38,
   });
   flow(head, [{ node: actor }, { node: action }], { direction: "VERTICAL", gap: 2, fixedW: w - 38 });
@@ -97,7 +97,7 @@ function buildFlows() {
 
   const h1 = (chars) => {
     const t = makeText(sheet, {
-      name: "fl/h", chars, size: 15, style: "Semibold", color: fk("light", "text-primary"), x: M, y,
+      name: "fl/h", chars, size: 15, style: "Semi Bold", color: fk("light", "text-primary"), x: M, y,
     });
     y += t.height + 6;
   };
@@ -109,7 +109,7 @@ function buildFlows() {
   };
   const body = (chars, size, tone) => {
     const t = makeText(sheet, {
-      name: "fl/body", chars, size: size || 13, style: "Semibold",
+      name: "fl/body", chars, size: size || 13, style: "Semi Bold",
       color: fk("light", tone || "text-primary"), x: M, y, wrap: W,
     });
     y += t.height + 6;
