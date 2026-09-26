@@ -255,6 +255,8 @@ enum AuthorizationPolicy {
     static func breadthFactor(_ scope: AuthorizationScope) -> Double {
         var factor = scope.application.isGlobal ? 1.0 : 0.45
         if case .processIdentifier = scope.application { factor = 0.25 }
+        // One process instance is narrower still, and the digest is what makes it so.
+        if scope.application.isProcessInstance { factor = 0.2 }
         if scope.window != .any { factor *= 0.8 }
         return factor
     }
@@ -510,6 +512,7 @@ enum AuthorizationPolicy {
     ) -> Bool {
         switch scope.application {
         case .bundleIdentifier(let requested): requested == bundleIdentifier
+        case .opaqueApplication(_, let resolved): resolved == bundleIdentifier
         case .any: false
         case .processIdentifier: anyTargetsListed
         }

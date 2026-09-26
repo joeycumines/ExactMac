@@ -214,9 +214,30 @@ enum TargetApplication: Sendable, Equatable, Hashable {
     case any
     case bundleIdentifier(String)
     case processIdentifier(Int32)
+    /// The API's own application resource name, `applications/<sha256>`, derived from the
+    /// pid AND the process start time, so it identifies one PROCESS INSTANCE rather than
+    /// one application.
+    ///
+    /// This case exists because that is the name production actually emits. A parser that
+    /// expected a pid found nothing in a 64-character hex digest and silently produced a
+    /// global scope, which defeated the entire scope column — and the digest is better
+    /// than the pid it replaced, because a recycled pid cannot inherit a grant aimed at the
+    /// process that used to hold it.
+    ///
+    /// `resolvedBundleIdentifier` is carried alongside so a grant scoped to an application
+    /// the operator NAMED can still cover a request that arrived naming the opaque form,
+    /// without making `covers` impure.
+    case opaqueApplication(resourceName: String, resolvedBundleIdentifier: String?)
 
     var isGlobal: Bool {
         if case .any = self { return true }
+        return false
+    }
+
+    /// A grant on the opaque form is narrower than any other named target, and that is
+    /// deliberate: it names one process instance, not an application.
+    var isProcessInstance: Bool {
+        if case .opaqueApplication = self { return true }
         return false
     }
 
@@ -234,9 +255,34 @@ enum TargetApplication: Sendable, Equatable, Hashable {
                 return granted == requested
             case (.processIdentifier(let granted), .processIdentifier(let requested)):
                 return granted == requested
-            case (.bundleIdentifier, .processIdentifier), (.processIdentifier, .bundleIdentifier),
-                 (.bundleIdentifier, .any), (.processIdentifier, .any):
+            // A grant on the opaque form covers that exact process instance, and the same
+            // instance resolved to a bundle — because the resource name is derived from the
+            // pid and the start time, so an identical name IS the same process.
+            case (.opaqueApplication(let granted, _), .opaqueApplication(let requested, _)):
+                return granted == requested
+            case (.opaqueApplication(_, let resolved), .bundleIdentifier(let requested)):
+                return resolved == requested
+            // A grant naming a bundle never covers a request that named the opaque form,
+            // even though the resolver may know they are the same application: the grant
+            // was made for an application and this request named an instance, and the
+            // conservative direction is to ask again rather than assume.
+            case (.bundleIdentifier, .opaqueApplication):
                 return false
+            // A grant naming one process INSTANCE does not cover a request that named
+            // only a pid: the instance is identified by pid AND start time, and a bare pid
+            // is exactly the identity a recycled process could present. Refusing here is
+            // the conservative direction and costs nothing in practice, because a resolved
+            // request derives a bundle scope rather than an opaque one.
+            case (.bundleIdentifier, .processIdentifier), (.processIdentifier, .bundleIdentifier),
+                 (.bundleIdentifier, .any), (.processIdentifier, .any),
+                 (.opaqueApplication, .any),
+                 (.processIdentifier, .opaqueApplication),
+                 (.opaqueApplication, .processIdentifier):
+                return false
+            // Exhaustiveness is asserted rather than papered over with a `default`, because
+            // a `default` here would turn every pairing nobody thought about into "allowed".
+            // Adding a case to TargetApplication therefore fails the build until its
+            // coverage is decided.
             }
         }
     }

@@ -52,6 +52,8 @@ enum RPCAuthorizationMap {
         case parseOnlyScript
         /// The literal text destined for the clipboard.
         case clipboardText
+        /// Clearing the clipboard, which destroys what is on it.
+        case destructiveClipboardClear
         /// Keys, or a coordinate in Global Display Coordinates (top-left origin).
         case synthesizedInput
         /// The target element and the selector that found it.
@@ -219,8 +221,10 @@ enum RPCAuthorizationMap {
         // global because there is nothing to narrow to, and reading their `name` would find
         // a reference that does not parse as one and fall back to global anyway.
         simple(.clipboardRead, .global, ["GetClipboard", "GetClipboardHistory"], summary: .none)
-        simple(.clipboardWrite, .global, ["WriteClipboard", "ClearClipboard"],
-               summary: .clipboardText)
+        add(.clipboardWrite, [
+            ("WriteClipboard", .global, .unary, .clipboardText),
+            ("ClearClipboard", .global, .unary, .destructiveClipboardClear),
+        ])
 
         // File dialogs, driven against one application.
         simple(.fileDialogAutomate, .applicationField, [
@@ -274,22 +278,34 @@ enum RPCAuthorizationMap {
     }
 }
 
-/// Resolves a process identifier to the application that owns it.
-///
-/// The scope a request derives has to name an APPLICATION as well as a process, because
-/// an operator who says "allow this for TextEdit" is naming a bundle identifier and a
-/// grant scoped that way must be able to cover a request that arrived naming a pid. A
-/// pid alone would make every application-scoped grant unusable and push every request
-/// back to a global grant, which is the opposite of what the granularity is for.
-protocol ApplicationTargetResolving: Sendable {
-    func bundleIdentifier(forProcessIdentifier: Int32) -> String?
+/// What the server knows about the process behind an application resource name.
+struct ResolvedApplicationTarget: Sendable, Equatable {
+    var processIdentifier: Int32
+    var bundleIdentifier: String?
 }
 
-/// A resolver that knows nothing, so the derivation degrades to a pid scope rather than
-/// failing. Used where no platform lookup is available and in tests that are about the
-/// mapping rather than about resolution.
+/// Resolves an application RESOURCE NAME to the process behind it.
+///
+/// The name, not a pid, because that is what a request carries: production emits
+/// `applications/<sha256 of pid + start time>`. Resolving it is a lookup in the server's
+/// own application catalog, which is also how a recycled pid is told apart from the
+/// process that used to hold the name.
+///
+/// The scope a request derives has to name an APPLICATION as well as a process instance,
+/// because an operator who says "allow this for TextEdit" names a bundle and a grant
+/// scoped that way has to cover a request that arrived naming the opaque form. Without
+/// this resolution every application-scoped grant would be unusable and every request
+/// would fall back to a global grant, which is the opposite of what the granularity is for.
+protocol ApplicationTargetResolving: Sendable {
+    func applicationTarget(forResourceName: String) async -> ResolvedApplicationTarget?
+}
+
+/// A resolver that knows nothing. The derivation then produces an OPAQUE scope rather than
+/// a global one: the request named a specific process instance and a scope that said "some
+/// unknown application" would be a lie, while the opaque scope is narrow and cannot be
+/// covered by anything the operator did not aim at it.
 struct UnresolvableApplicationTarget: ApplicationTargetResolving {
-    func bundleIdentifier(forProcessIdentifier _: Int32) -> String? { nil }
+    func applicationTarget(forResourceName _: String) async -> ResolvedApplicationTarget? { nil }
 }
 
 /// The request's own contents, read once, from the WIRE FORMAT and the SAME descriptor
@@ -311,6 +327,20 @@ struct RequestFacts: Sendable {
         case nested(RequestFacts)
         case list([Value])
         case opaque(String)
+
+        /// Appends in place rather than rebuilding the array, so a long repeated field costs
+        /// linear rather than quadratic time. The accumulator used to rebuild the whole
+        /// list per element, which made a 96KB request take nineteen seconds on the path
+        /// that runs before any consent decision.
+        fileprivate mutating func listAppend(_ value: Value) {
+            switch self {
+            case .list(var existing):
+                existing.append(value)
+                self = .list(existing)
+            case .text, .unsigned, .double, .boolean, .nested, .opaque:
+                self = .list([self, value])
+            }
+        }
     }
 
     private var fields: [String: Value] = [:]
@@ -333,16 +363,11 @@ struct RequestFacts: Sendable {
     private struct Accumulator {
         var fields: [String: Value] = [:]
 
+        /// In place, and the difference is not cosmetic. Rebuilding the array on every
+        /// append made a 96KB request — well under gRPC's 4 MiB default — take nineteen
+        /// seconds, quadratically, on the path that runs before any consent decision.
         mutating func append(_ name: String, _ value: Value) {
-            switch fields[name] {
-            case .list(var existing):
-                existing.append(value)
-                fields[name] = .list(existing)
-            case .some(let existing):
-                fields[name] = .list([existing, value])
-            case nil:
-                fields[name] = .list([value])
-            }
+            fields[name, default: .list([])].listAppend(value)
         }
     }
 
@@ -505,6 +530,45 @@ struct RequestFacts: Sendable {
         }
     }
 
+    /// A map field, or a repeated message field, rendered as `key: value` lines.
+    ///
+    /// A protobuf map arrives on the wire as a LIST of nested messages, each with a `key`
+    /// and a `value` field — which is why `texts()` returned nothing for the shell's
+    /// environment variables and the macro's parameter values, and why the summaries
+    /// silently dropped the payloads an operator most needs to see.
+    func entries(_ key: String) -> [String] {
+        switch fields[key] {
+        case .list(let values):
+            return values.compactMap { value in
+                guard case .nested(let entry) = value else { return nil }
+                let name = entry.text("key") ?? ""
+                switch entry.text("value") {
+                case .some(let text) where !text.isEmpty: return "\(name): \(text)"
+                case .some: return name
+                case nil: return entry.describe()
+                }
+            }
+        case .nested(let entry):
+            return [entry.describe()]
+        case .text(let value):
+            return [value]
+        case nil, .unsigned, .double, .boolean, .opaque:
+            return []
+        }
+    }
+
+    /// A one-line description of a nested message, for the cases where a map's value is
+    /// itself a message.
+    func describe() -> String {
+        var parts: [String] = []
+        for key in fields.keys.sorted() {
+            guard let value = text(key), !value.isEmpty else { continue }
+            // The keys are already normalised on the way in.
+            parts.append("\(key): \(value)")
+        }
+        return parts.joined(separator: " ")
+    }
+
     func nested(_ key: String) -> RequestFacts? {
         guard case .nested(let value) = fields[key] else { return nil }
         return value
@@ -520,20 +584,37 @@ struct RequestFacts: Sendable {
     }
 }
 
-/// Parses the AIP resource names the API uses, and nothing else. A name that does not
-/// parse yields no application, which widens the scope rather than narrowing it.
+/// Parses the application resource names the API uses, and nothing else.
+///
+/// THE PRODUCTION FORM IS THE OPAQUE ONE. `AppStateStore.applicationResourceName(for:)`
+/// returns `applications/<sha256 of pid + start time>`, and `ParsingHelpers` requires 64
+/// hex characters. A parser that expected a pid found nothing in a 64-character digest
+/// and returned nil, so `scope(for:)` fell through to a global scope for every request —
+/// which is why the scope column appeared to do nothing. The digest is also strictly better
+/// than the pid it replaced, because a recycled pid cannot inherit a grant aimed at the
+/// process that used to hold the name.
+///
+/// The legacy `applications/<pid>` form is still accepted, because
+/// `ExactMacService.legacyPIDResourceNamesForTests` still emits it and rejecting it would
+/// break the test surface rather than improve it.
 enum ResourceReference: Sendable, Equatable {
-    case application(processIdentifier: Int32, window: String?)
+    case opaqueApplication(resourceName: String, window: String?)
+    case legacyProcess(processIdentifier: Int32, window: String?)
 
     static func parse(_ name: String) -> ResourceReference? {
         let parts = name.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-        guard parts.count >= 2, parts[0] == "applications" else { return nil }
-        guard let pid = Int32(parts[1]), pid > 0 else { return nil }
+        guard parts.count >= 2, parts[0] == "applications", !parts[1].isEmpty else { return nil }
         var window: String?
         if parts.count >= 4, parts[2] == "windows" {
-            window = parts[3]
+            // An EMPTY window segment is not a window. Treating "" as a window identifier
+            // would produce a scope naming window "", which a grant could then cover.
+            window = parts[3].isEmpty ? nil : parts[3]
         }
-        return .application(processIdentifier: pid, window: window)
+        if parts[1].count == 64, parts[1].allSatisfy({ $0.isHexDigit && !$0.isUppercase }) {
+            return .opaqueApplication(resourceName: name, window: window)
+        }
+        guard let pid = Int32(parts[1]), pid > 0 else { return nil }
+        return .legacyProcess(processIdentifier: pid, window: window)
     }
 }
 
@@ -549,21 +630,30 @@ enum AuthorizationRequestDeriver {
         requestID: AuthorizationRequestID,
         agentReason: String?,
         origin: RequestOrigin,
+        /// The transaction's declared operation count, which the API does not carry in the
+        /// request: it lives in the server's own transaction state, so the interceptor
+        /// supplies it. Without it a transaction is authorized UNBOUNDED, which is the
+        /// consent-bypass the blueprint names.
+        operationLimit: Int? = nil,
         resolver: any ApplicationTargetResolving = UnresolvableApplicationTarget(),
-    ) -> AuthorizationRequest? {
+    ) async -> AuthorizationRequest? {
         guard let entry = RPCAuthorizationMap.authorization(forMethod: method) else {
             // An unmapped method is not a request. Returning nil here is what makes an
             // unmapped RPC a DENIAL at the interceptor rather than a silent allow.
             return nil
         }
         let facts = RequestFacts(message: message, policy: policy)
-        let scope = scope(for: entry.scopeSource, facts: facts, resolver: resolver)
+        let scope = await scope(
+            for: entry.scopeSource, facts: facts, resolver: resolver, operationLimit: operationLimit,
+        )
         return AuthorizationRequest(
             id: requestID,
             rpcName: method,
             capability: entry.capability,
             scope: scope,
-            argumentSummary: summary(for: entry.summary, facts: facts, method: method),
+            argumentSummary: summary(
+                for: entry.summary, facts: facts, method: method, operationLimit: operationLimit,
+            ),
             agentReason: agentReason,
             origin: origin,
         )
@@ -573,7 +663,8 @@ enum AuthorizationRequestDeriver {
         for source: RPCAuthorizationMap.ScopeSource,
         facts: RequestFacts,
         resolver: any ApplicationTargetResolving,
-    ) -> AuthorizationScope {
+        operationLimit: Int? = nil,
+    ) async -> AuthorizationScope {
         guard source != .global else { return AuthorizationScope() }
         let keys: [String] = switch source {
         case .resourceName: ["name"]
@@ -581,24 +672,44 @@ enum AuthorizationRequestDeriver {
         case .applicationField: ["application"]
         case .global: []
         }
-        guard let reference = facts.firstText(among: keys),
-              case .application(let processIdentifier, let window) =
-                ResourceReference.parse(reference.value)
-        else {
-            // The request named something that is not an application reference. The scope
-            // stays global, which is the safe direction: a global scope cannot be covered
-            // by a narrow grant, so nothing is under-restricted by failing to parse.
-            return AuthorizationScope()
+        guard let reference = facts.firstText(among: keys) else {
+            // The request named nothing this derivation can read. The scope stays global,
+            // which is the safe direction: a global scope cannot be covered by a narrow
+            // grant, so nothing is under-restricted by failing to parse.
+            return AuthorizationScope(operationLimit: operationLimit)
+        }
+        let parsed = ResourceReference.parse(reference.value)
+        if case .none = parsed {
+            return AuthorizationScope(operationLimit: operationLimit)
+        }
+        let window: TargetWindow = switch parsed {
+        case .opaqueApplication(_, let window), .legacyProcess(_, let window):
+            window.map(TargetWindow.identifier) ?? .any
+        case nil:
+            .any
         }
         let application: TargetApplication
-        if let bundle = resolver.bundleIdentifier(forProcessIdentifier: processIdentifier) {
-            application = .bundleIdentifier(bundle)
-        } else {
+        switch parsed {
+        case .opaqueApplication(let resourceName, _):
+            // Resolved, the operator's application-scoped grant can cover this request;
+            // unresolved, the scope names the PROCESS INSTANCE, which is narrow and cannot
+            // be covered by anything aimed at a different application.
+            if let resolved = await resolver.applicationTarget(forResourceName: resourceName) {
+                application = resolved.bundleIdentifier.map { TargetApplication.bundleIdentifier($0) }
+                    ?? .processIdentifier(resolved.processIdentifier)
+            } else {
+                application = .opaqueApplication(resourceName: resourceName, resolvedBundleIdentifier: nil)
+            }
+        case .legacyProcess(let processIdentifier, _):
             application = .processIdentifier(processIdentifier)
+        case nil:
+            application = .any
         }
+
         return AuthorizationScope(
             application: application,
-            window: window.map { TargetWindow.identifier($0) } ?? .any,
+            window: window,
+            operationLimit: operationLimit,
         )
     }
 
@@ -608,13 +719,19 @@ enum AuthorizationRequestDeriver {
         for kind: RPCAuthorizationMap.ArgumentSummary,
         facts: RequestFacts,
         method: String,
+        operationLimit: Int? = nil,
     ) -> String {
         if facts.text("__absent__") != nil {
             return "the request could not be read for display; it is shown uninspected"
         }
         switch kind {
         case .none:
-            return "no arguments; this call reads metadata only"
+            // NOT "reads metadata only", which is what this used to say about
+            // GetClipboardHistory — a record of everything the operator has ever copied,
+            // each entry with its content and its source application — and about
+            // GetSessionSnapshot, which returns the session's operation records. Telling an
+            // operator a content read is a metadata read is worse than saying nothing.
+            return "no arguments"
         case .resourceName:
             return describeReference(facts)
         case .shellInvocation:
@@ -626,8 +743,18 @@ enum AuthorizationRequestDeriver {
                 parts.append("(in \(directory))")
             }
             if let shell = facts.text("shell"), !shell.isEmpty { parts.append("via \(shell)") }
+            // The environment is carried LITERALLY. `LD_PRELOAD=/tmp/evil.dylib` and
+            // `AWS_SECRET_ACCESS_KEY=...` are the payloads an operator most needs to see
+            // before approving a shell, and this used to drop the map entirely because a
+            // map field arrives as a list of nested messages rather than a string.
+            let environment = facts.entries("environmentVariables")
+            if !environment.isEmpty {
+                parts.append("(with \(environment.joined(separator: ", ")))")
+            }
+            // And the standard input is shown, not counted. A here-doc body is an
+            // argument, and the invariant names arguments.
             if let standardInput = facts.text("stdin"), !standardInput.isEmpty {
-                parts.append("with \(standardInput.count) bytes on stdin")
+                parts.append("(with stdin: \(standardInput))")
             }
             return parts.isEmpty ? "an empty shell invocation" : parts.joined(separator: " ")
         case .scriptText:
@@ -641,6 +768,10 @@ enum AuthorizationRequestDeriver {
             return "parse only, no execution (\(type)): \(facts.text("script") ?? "")"
         case .clipboardText:
             return describeClipboardWrite(facts)
+        case .destructiveClipboardClear:
+            // A destructive clear is not a write, and describing it as "an empty clipboard
+            // write" told the operator they were being asked to do nothing.
+            return "clear the clipboard, destroying its contents"
         case .synthesizedInput:
             return describeInput(facts)
         case .elementTarget:
@@ -648,6 +779,16 @@ enum AuthorizationRequestDeriver {
             if let parent = facts.text("parent") { parts.append("in \(parent)") }
             if let name = facts.text("name") { parts.append(name) }
             if let element = facts.text("elementId"), !element.isEmpty { parts.append(element) }
+            // The SELECTOR, which is how most of these methods name their target: the
+            // request either carries an element id or a selector, and reading only the
+            // first meant the operator saw "in applications/4211" and nothing about WHAT
+            // was about to be clicked — which is the whole question.
+            if let selector = describeSelector(facts.nested("selector")) {
+                parts.append(selector)
+            }
+            if let action = facts.text("action"), !action.isEmpty {
+                parts.append("performing \(action)")
+            }
             if let value = facts.text("value"), !value.isEmpty { parts.append("value \(value)") }
             // A right-click and a double-click on the same element are different requests,
             // so the click type is named rather than left in the request.
@@ -669,39 +810,106 @@ enum AuthorizationRequestDeriver {
                 )
             }
             if let format = enumName(facts.number("format"), imageFormatNames) { parts.append(format) }
+            if let padding = facts.number("padding"), padding > 0 {
+                parts.append("with \(formatted(padding))pt padding")
+            }
+            if facts.boolean("shadowEnabled") == true { parts.append("including window shadows") }
             if facts.boolean("ocrEnabled") == true { parts.append("with OCR") }
-            if let quality = facts.number("quality") { parts.append("quality \(Int(quality))") }
+            if let quality = facts.number("quality") { parts.append("quality \(formatted(quality))") }
             return parts.isEmpty ? "the whole screen" : parts.joined(separator: ", ")
         case .macroDefinition:
+            // The proto spells it `actions`, not `steps`, has no `step_count` at all, and
+            // ExecuteMacro's `macro` is a STRING while CreateMacro's is a message. The
+            // previous reader looked for fields that do not exist, so every macro
+            // summarized to the constant "a macro" and a three-action macro displayed as
+            // zero steps — while the operator was asked to approve inputSynthesize and
+            // transactionManage on the strength of it.
             var parts: [String] = []
             if let name = facts.text("name"), !name.isEmpty { parts.append(name) }
+            if let reference = facts.text("macro"), !reference.isEmpty { parts.append(reference) }
             if let macro = facts.nested("macro") {
-                let steps = macro.texts("steps").count
-                let declared = macro.number("stepCount").map(Int.init) ?? steps
-                parts.append("\(declared) recorded steps")
+                let declared = macro.texts("actions").count
+                parts.append("\(declared) recorded actions")
+                for (index, action) in macro.entries("actions").enumerated() {
+                    parts.append("action \(index + 1): \(action)")
+                }
             }
-            return parts.isEmpty ? "a macro" : parts.joined(separator: ", ")
+            // The parameter values are the macro's arguments, and they are what it will
+            // actually type or open.
+            let parameters = facts.entries("parameterValues")
+            if !parameters.isEmpty { parts.append("(\(parameters.joined(separator: ", ")))") }
+            return parts.isEmpty ? "a macro with nothing recorded" : parts.joined(separator: ", ")
         case .transactionScope:
-            // The count is not in the request: it lives in the transaction's own state, so
-            // the interceptor supplies it and this reports what it was told.
-            if let declared = facts.number("operationCount") { return "up to \(Int(declared)) operations" }
-            return "a transaction whose declared operation count the server holds"
+            // The count is NOT in the request — no request message in the API has such a
+            // field — it lives in the server's own transaction state, so the interceptor
+            // supplies it. The placeholder string this used to return unconditionally was
+            // the ONLY reachable output, and a test asserting that the summary "mentions
+            // the operation count" passed on it while the behaviour was absent.
+            guard let declared = operationLimit else {
+                return "a transaction of UNBOUNDED length: the server holds no declared count"
+            }
+            let target = facts.firstText(among: ["name", "session"])?.value ?? "this transaction"
+            return "up to \(declared) operations, batched under \(target)"
         case .fileDialog:
             var parts: [String] = []
             if let application = facts.text("application") { parts.append(application) }
             if let title = facts.text("title"), !title.isEmpty { parts.append("title \(title)") }
+            // The destination. A save dialog aimed at ~/.ssh/authorized_keys and one aimed
+            // at the Desktop are different requests, and the invariant names paths first.
+            if let path = facts.text("filePath"), !path.isEmpty { parts.append("writing \(path)") }
+            if let directory = facts.text("defaultDirectory"), !directory.isEmpty {
+                parts.append("starting in \(directory)")
+            }
+            if let filename = facts.text("defaultFilename"), !filename.isEmpty {
+                parts.append("naming it \(filename)")
+            }
             return parts.isEmpty ? "a file dialog" : parts.joined(separator: ", ")
         case .observationFilter:
             var parts: [String] = []
             if let name = facts.text("name") { parts.append(name) }
             if let parent = facts.text("parent") { parts.append(parent) }
-            if let filter = facts.nested("filter"), let kind = filter.text("kind"), !kind.isEmpty {
-                parts.append(kind)
+            // CreateObservation nests the observation, and the filter inside it. Reading a
+            // top-level `filter` found nothing, so the roles an observation would watch
+            // and whether it is focus-only were both invisible.
+            let filter = facts.nested("filter")
+                ?? facts.nested("observation")?.nested("filter")
+            if let filter {
+                for role in filter.texts("roles") where !role.isEmpty { parts.append("watching \(role)") }
+                for attribute in filter.texts("attributes") { parts.append("attribute \(attribute)") }
+                if filter.boolean("focusOnly") == true { parts.append("focused elements only") }
+                if let kind = filter.text("kind"), !kind.isEmpty { parts.append(kind) }
+            }
+            if let observation = facts.nested("observation") {
+                if let name = observation.text("name"), !name.isEmpty { parts.append(name) }
             }
             return parts.isEmpty ? "every accessibility change" : parts.joined(separator: ", ")
         }
     }
 
+
+    /// An `ElementSelector` in words. This is how most element methods name their target,
+    /// and reading only the parent left the operator looking at "in applications/4211"
+    /// with no idea what was about to be clicked.
+    private static func describeSelector(_ selector: RequestFacts?) -> String? {
+        guard let selector else { return nil }
+        var parts: [String] = []
+        if let role = selector.text("role"), !role.isEmpty { parts.append("role \(role)") }
+        if let subrole = selector.text("subrole"), !subrole.isEmpty { parts.append("subrole \(subrole)") }
+        if let title = selector.text("title"), !title.isEmpty { parts.append("titled \"\(title)\"") }
+        if let value = selector.text("value"), !value.isEmpty { parts.append("with value \"\(value)\"") }
+        if let text = selector.text("text"), !text.isEmpty { parts.append("with text \"\(text)\"") }
+        if let description = selector.text("description"), !description.isEmpty {
+            parts.append("described \"\(description)\"")
+        }
+        if let identifier = selector.text("identifier"), !identifier.isEmpty {
+            parts.append("with identifier \(identifier)")
+        }
+        for attribute in selector.texts("attributes") {
+            parts.append("attribute \(attribute)")
+        }
+        if selector.boolean("focusOnly") == true { parts.append("focused elements only") }
+        return parts.isEmpty ? nil : "selecting " + parts.joined(separator: ", ")
+    }
 
     /// The one arm of `InputAction` that is set, described in words.
     ///
@@ -727,7 +935,12 @@ enum AuthorizationRequestDeriver {
             }
         }
         if content.has("image") { return "an image" }
-        if content.has("files") { return "a set of file paths" }
+        if content.has("files") {
+            let files = content.entries("files")
+            return files.isEmpty
+                ? "a set of file paths"
+                : "the file paths \(files.joined(separator: ", "))"
+        }
         if let url = content.text("url"), !url.isEmpty { return "the URL \(url)" }
         return "an empty clipboard write"
     }
@@ -785,12 +998,45 @@ enum AuthorizationRequestDeriver {
             } else {
                 parts.append("press \(keys.joined(separator: " + "))")
             }
+            let pressModifiers = press.texts("modifiers")
+            if !pressModifiers.isEmpty {
+                parts.append("with \(pressModifiers.joined(separator: "+").lowercased())")
+            }
+        }
+        if let hover = action.nested("hoverAction") {
+            // The seventh arm. It was unhandled, so a hover summarized to "an input with no
+            // described action" — which reads as a malformed request rather than a move of
+            // the pointer.
+            position(hover.nested("position"), "hover at")
+        }
+        if let click = action.nested("mouseClick") {
+            let clickModifiers = click.texts("modifiers")
+            if !clickModifiers.isEmpty {
+                parts.append("with \(clickModifiers.joined(separator: "+").lowercased())")
+            }
+        }
+        if let drag = action.nested("mouseDrag") {
+            if let button = enumName(drag.number("button"), clickTypeNames) { parts.append(button) }
+            let waypoints = drag.entries("waypoints")
+            if !waypoints.isEmpty {
+                parts.append("through \(waypoints.count) waypoints")
+            }
         }
         return parts.isEmpty ? "an input with no described action" : parts.joined(separator: ", ")
     }
 
+    /// A double that is finite but beyond `Int.max` used to go through `Int(_:)`, which
+    /// TRAPS — and the only numeric gate on these fields accepts anything finite, so
+    /// `region.x = 1e30` killed the server on the path that gates every other request. A
+    /// crash is not the fail-closed deny the invariant requires, and a caller with socket
+    /// access should not be able to take the process down with a number.
     private static func formatted(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(value)
+        guard value.isFinite else { return String(value) }
+        let rounded = value.rounded()
+        if rounded.magnitude < 9.0e15, rounded == rounded.rounded() {
+            return String(Int64(rounded))
+        }
+        return String(value)
     }
 
     /// Enum names are read from the GENERATED Swift types rather than a hand-written
