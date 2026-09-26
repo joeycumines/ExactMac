@@ -204,7 +204,7 @@ function buildFoundations() {
     });
     makeText(root, {
       name: "type-meta-" + step.role,
-      chars: step.role + " · " + step.size + " · " + step.style + (step.mono ? " · mono" : ""),
+      chars: step.role + " · " + step.size + " · " + step.style,
       size: 11, mono: true, color: C["text-tertiary"].light,
       x: metaX, y: y + Math.max(0, step.size * 0.35),
     });

@@ -40,8 +40,12 @@ function signatureBadge(o) {
   // A dot plus the word: color alone never carries the state, so the badge still
   // reads correctly in grayscale or for a colorblind operator.
   const dot = makeRect(c, { name: "dot", w: 6, h: 6, fill: ink(scheme, tone), radius: 3 });
+  // The word is wrapped into the pill rather than sized to fit: 30pt of the badge is
+  // chrome (dot, gap, padding), and at the larger no-wrap margin "Unnotarized"
+  // measured 105pt inside a 96pt pill and was cut.
   const label = makeText(c, {
-    name: "label", chars: s.label, size: 11, style: "Semi Bold", color: ink(scheme, tone),
+    name: "label", chars: s.label, size: 11, style: "Semi Bold",
+    color: ink(scheme, tone), wrap: Math.max(24, bw - 30),
   });
   flow(c, [{ node: dot }, { node: label }], {
     direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 3, padBottom: 3,
@@ -136,6 +140,16 @@ function processRow(p, scheme, w) {
   });
   items.push({ node: marker, w: 3, h: 16 });
   const compactRole = p.compact && p.isRequester ? "   ·   requesting" : "";
+  // The label is WRAPPED into a budget computed from the actual sibling widths, not
+  // sized to fit: with the larger no-wrap margin a long label measured 296pt inside
+  // a 500pt row and pushed the role off the end. Over-allocating a no-wrap box is
+  // free; under-allocating clips, and the gate caught it.
+  const badgeW = p.signature
+    ? (p.sigW || (SIGNATURE_STATES.find((x) => x.key === p.signature.key) || { w: 100 }).w)
+    : 0;
+  const roleW = p.isRequester && !p.compact ? 92 : 0;
+  const chrome = padLeft + 8 + (p.depth > 0 ? 1 + 6 : 0) + 3 + 6 +
+    (badgeW ? badgeW + 6 : 0) + (roleW ? roleW + 6 : 0);
   const label = makeText(row, {
     name: "label",
     chars: (p.compact
@@ -143,19 +157,20 @@ function processRow(p, scheme, w) {
       : p.name + "   pid " + p.pid + (p.detail ? "   " + p.detail : "")),
     size: 12, style: p.isRequester ? "Semi Bold" : "Regular",
     color: p.isRequester ? ink(scheme, "text-primary") : ink(scheme, "text-secondary"),
+    wrap: Math.max(90, w - chrome),
   });
   items.push({ node: label });
   // Signature state travels with the row. Without it the prompt showed a process
   // tree carrying no evidence of who was calling, which is a process list rather
   // than the graded-evidence model the rest of the design depends on.
   if (p.signature) {
-    const badge = signatureBadge({ state: p.signature, scheme, w: p.sigW || 96 });
+    const badge = signatureBadge({ state: p.signature, scheme, w: p.sigW });
     items.push({ node: badge.node, w: badge.w, h: badge.h });
   }
   if (p.isRequester && !p.compact) {
     const role = makeText(null, {
       name: "role", chars: "requesting", size: 11, style: "Semi Bold",
-      color: ink(scheme, "accent"),
+      color: ink(scheme, "accent"), wrap: 92,
     });
     items.push({ node: role });
   }
@@ -163,8 +178,9 @@ function processRow(p, scheme, w) {
     direction: "HORIZONTAL", gap: 6, padLeft: padLeft, padRight: 8, padTop: 6, padBottom: 6,
     align: "CENTER", hugW: false, fixedW: w,
   });
-  row.resize(w, 30);
-  return { node: row, w: w, h: 30 };
+  // Height follows the content: a label that wraps to two lines needs ~41pt, and
+  // pinning the row to 30 clipped the badge and the second line of the label.
+  return { node: row, w: w, h: row.height };
 }
 
 function processTree(o) {

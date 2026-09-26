@@ -185,10 +185,22 @@ for (const tree of __all.filter((n) => n.name && n.name.startsWith("ProcessTree/
   if (rows > 0 && badged !== rows) __s.push(tree.name + ": " + (rows - badged) + " of " + rows + " rows carry no signature badge");
 }
 
+// The title is NESTED inside the stack frame, so a direct-children lookup never found it and
+// and this check was dead code: marking Deny as the default passed the gate. Search
+// descendants.
+function descendants(node, name, acc) {
+  acc = acc || [];
+  for (const c of node.children || []) {
+    if (c.name === name) acc.push(c);
+    descendants(c, name, acc);
+  }
+  return acc;
+}
 for (const opt of __all.filter((n) => n.name && n.name.startsWith("OptionRow/"))) {
-  const isDefault = (opt.children || []).some((c) => c.name === "default");
-  const destructive = (opt.children || []).some((c) => c.name === "title" && c.fills &&
-    c.fills[0].color && Math.abs(c.fills[0].color.r - 0.84) < 0.2);
+  const isDefault = descendants(opt, "default").length > 0;
+  const titles = descendants(opt, "title");
+  const destructive = titles.some((t) => t.fills && t.fills[0].color &&
+    Math.abs(t.fills[0].color.r - 0.84) < 0.2);
   if (isDefault && destructive) __s.push(opt.name + ": the default option must not be the destructive one");
 }
 
@@ -198,6 +210,16 @@ for (const row of __all.filter((n) => n.name === "actions" || n.name === "deny-r
   const di = kinds.findIndex((k) => k === "Button/deny");
   if (pi >= 0 && di >= 0 && Math.abs(pi - di) === 1) {
     __s.push("Deny sits immediately beside the primary action in " + row.name);
+  }
+}
+// Vertical adjacency too: a deny-row directly beneath the actions row is the same
+// misclick the horizontal rule forbids, and was not caught.
+for (const parent of __all) {
+  const kids = parent.children || [];
+  for (let i = 0; i + 1 < kids.length; i++) {
+    if (kids[i].name === "actions" && kids[i + 1].name === "deny-row") {
+      __s.push("deny-row sits directly beneath the primary action row in " + parent.name);
+    }
   }
 }
 console.log("__STRUCTURE__" + JSON.stringify(__s));

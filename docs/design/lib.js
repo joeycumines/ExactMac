@@ -52,15 +52,24 @@ const EM = (() => {
   };
 })();
 const WEIGHT_W = { Regular: 1, Medium: 1.04, "Semi Bold": 1.09, Bold: 1.13 };
-const MEASURE_MARGIN = 1.06;   // absorbs the estimate's residual error
+// TWO MARGINS, because the two cases have opposite costs. A node given an
+// explicit `wrap` is expected to wrap, so over-allocating only inflates its height
+// and can push a row taller than its siblings. A node with NO wrap must never wrap,
+// so over-allocating is free — the box is left-aligned and a wider box is invisible —
+// while under-allocating CLIPS INK. The no-wrap margin is therefore much larger.
+// At 1.06 both "danger" and "text-secondary" wrapped inside their own boxes and lost
+// their last characters, including on the Foundations contrast table that carries the
+// accessibility evidence.
+const MEASURE_MARGIN_WRAP = 1.06;
+const MEASURE_MARGIN_HUG = 1.28;
 const LINE_H = 1.45;
-function measure(chars, size, style) {
+function measure(chars, size, style, hug) {
   let em = 0;
   for (const ch of chars) em += EM(ch);
   // The floor is small on purpose: a 24pt floor made every 1-2 character string
   // (a step number, a digit in a circle) measure 24pt, compute two lines in an 18pt
   // box, and sit high in its own badge.
-  return Math.max(8, Math.ceil(em * size * (WEIGHT_W[style] || 1) * MEASURE_MARGIN));
+  return Math.max(8, Math.ceil(em * size * (WEIGHT_W[style] || 1) * (hug ? MEASURE_MARGIN_HUG : MEASURE_MARGIN_WRAP)));
 }
 
 function makeText(parent, o) {
@@ -85,10 +94,15 @@ function makeText(parent, o) {
   let w, h;
   if (o.wrap) {
     w = o.wrap;
-    h = Math.max(1, Math.ceil(measure(o.chars, o.size, style) / w)) * lineH;
+    h = Math.max(1, Math.ceil(measure(o.chars, o.size, style, false) / w)) * lineH;
   } else {
-    w = measure(o.chars, o.size, style);
+    w = measure(o.chars, o.size, style, true);
     h = lineH;
+    // NOT recorded, because recording it does not help: a no-wrap node that is too
+    // narrow for its own text CLIPS rather than wrapping, so its height is unchanged
+    // and no geometric check can detect it. Verified by shrinking the margin to 0.2 —
+    // the text was cut, not wrapped. The only defence is the generous hug margin
+    // above, and the only detection is looking at the render.
   }
   t.resize(Math.max(1, w), Math.max(1, h));
 
