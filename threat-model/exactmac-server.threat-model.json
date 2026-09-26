@@ -816,7 +816,7 @@
         },
         {
           "cwe_id": 78,
-          "cwe_title": "Improper Neutralization of Special Elements used in an OS Command"
+          "cwe_title": "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
         }
       ]
     },
@@ -836,7 +836,7 @@
       "attack_mechanisms": [
         {
           "capec_id": 118,
-          "capec_title": "Data Leakage"
+          "capec_title": "Collect and Analyze Information"
         }
       ],
       "weaknesses": [
@@ -862,7 +862,7 @@
       "attack_mechanisms": [
         {
           "capec_id": 118,
-          "capec_title": "Data Leakage"
+          "capec_title": "Collect and Analyze Information"
         }
       ],
       "weaknesses": [
@@ -892,7 +892,7 @@
       "attack_mechanisms": [
         {
           "capec_id": 118,
-          "capec_title": "Data Leakage"
+          "capec_title": "Collect and Analyze Information"
         }
       ],
       "weaknesses": [
@@ -917,12 +917,7 @@
         "adversary",
         "human_error"
       ],
-      "attack_mechanisms": [
-        {
-          "capec_id": 12,
-          "capec_title": "Blind Injection"
-        }
-      ],
+      "attack_mechanisms": [],
       "weaknesses": [
         {
           "cwe_id": 749,
@@ -991,7 +986,7 @@
       "weaknesses": [
         {
           "cwe_id": 77,
-          "cwe_title": "Improper Neutralization of Special Elements used in a Command"
+          "cwe_title": "Improper Neutralization of Special Elements used in a Command ('Command Injection')"
         },
         {
           "cwe_id": 20,
@@ -1023,7 +1018,8 @@
           "cwe_id": 269,
           "cwe_title": "Improper Privilege Management"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "consent-channel-impersonation",
@@ -1075,7 +1071,8 @@
           "cwe_id": 778,
           "cwe_title": "Insufficient Logging"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "unbounded-observation-surveillance",
@@ -1100,7 +1097,8 @@
           "cwe_id": 269,
           "cwe_title": "Improper Privilege Management"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "clipboard-write-content-injection",
@@ -1124,7 +1122,8 @@
           "cwe_id": 862,
           "cwe_title": "Missing Authorization"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "macro-persistence-as-lateral-movement",
@@ -1147,7 +1146,8 @@
           "cwe_id": 269,
           "cwe_title": "Improper Privilege Management"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "operator-consent-fatigue",
@@ -1168,7 +1168,8 @@
           "cwe_id": 863,
           "cwe_title": "Incorrect Authorization"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     }
   ],
   "controls": [

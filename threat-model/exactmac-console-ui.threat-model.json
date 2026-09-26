@@ -652,7 +652,8 @@
           "cwe_id": 20,
           "cwe_title": "Improper Input Validation"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "payload-truncation-approval",
@@ -673,7 +674,8 @@
           "cwe_id": 451,
           "cwe_title": "User Interface (UI) Misrepresentation of Critical Information"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "prompt-enforcement-divergence",
@@ -699,7 +701,7 @@
       "weaknesses": [
         {
           "cwe_id": 367,
-          "cwe_title": "Time-of-check Time-of-use Race Condition"
+          "cwe_title": "Time-of-check Time-of-use (TOCTOU) Race Condition"
         },
         {
           "cwe_id": 863,
@@ -730,11 +732,11 @@
       "weaknesses": [
         {
           "cwe_id": 367,
-          "cwe_title": "Time-of-check Time-of-use Race Condition"
+          "cwe_title": "Time-of-check Time-of-use (TOCTOU) Race Condition"
         },
         {
           "cwe_id": 362,
-          "cwe_title": "Concurrent Execution using Shared Resource with Improper Synchronization"
+          "cwe_title": "Concurrent Execution using Shared Resource with Improper Synchronization ('Race Condition')"
         }
       ]
     },
@@ -756,7 +758,7 @@
       "attack_mechanisms": [
         {
           "capec_id": 118,
-          "capec_title": "Data Leakage"
+          "capec_title": "Collect and Analyze Information"
         }
       ],
       "weaknesses": [
@@ -785,7 +787,7 @@
       "attack_mechanisms": [
         {
           "capec_id": 118,
-          "capec_title": "Data Leakage"
+          "capec_title": "Collect and Analyze Information"
         }
       ],
       "weaknesses": [
@@ -850,7 +852,8 @@
           "cwe_id": 290,
           "cwe_title": "Authentication Bypass by Spoofing"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "biometric-silent-downgrade",
@@ -875,7 +878,8 @@
           "cwe_id": 303,
           "cwe_title": "Incorrect Implementation of Authentication Algorithm"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "invisible-grant-accumulation",
@@ -900,7 +904,8 @@
           "cwe_id": 863,
           "cwe_title": "Incorrect Authorization"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "deceptive-activity-log",
@@ -924,7 +929,8 @@
           "cwe_id": 778,
           "cwe_title": "Insufficient Logging"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "unattended-approval-default",
@@ -950,7 +956,8 @@
           "cwe_id": 252,
           "cwe_title": "Unchecked Return Value"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     },
     {
       "symbolic_name": "degraded-evidence-presented-as-resolved",
@@ -974,7 +981,8 @@
           "cwe_id": 754,
           "cwe_title": "Improper Check for Unusual or Exceptional Conditions"
         }
-      ]
+      ],
+      "attack_mechanisms": []
     }
   ],
   "controls": [
