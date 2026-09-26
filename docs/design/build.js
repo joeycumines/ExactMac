@@ -13,25 +13,38 @@
 // Writing goes only to docs/design.fig, and only through the server.
 
 const { execFileSync } = require("node:child_process");
-const { readFileSync } = require("node:fs");
+const { readFileSync, existsSync } = require("node:fs");
 const { join, dirname } = require("node:path");
 
 const HERE = __dirname;                                   // docs/design/
 const FIG = join(HERE, "..", "design.fig");               // docs/design.fig
 const TOKENS = readFileSync(join(HERE, "tokens.json"), "utf8");
 
+// A page may be composed of several modules; they are concatenated in order
+// against one page so a design system's parts can live apart from the screens
+// that use them.
 const PAGES = {
-  foundations: { file: "foundations.js", label: "Foundations" },
-  components: { file: "components.js", label: "Components" },
+  foundations: { files: ["foundations.js"], label: "Foundations" },
+  components: { files: ["identity.js", "controls.js"], label: "Components" },
+  screens: { files: ["prompt.js"], label: "Screens" },
+  flows: { files: ["flows.js"], label: "Flows" },
 };
 
 function render(name) {
   const page = PAGES[name];
   if (!page) throw new Error(`unknown page: ${name}`);
+  // Skip a page whose modules are not written yet rather than requiring stubs;
+  // `node docs/design/build.js` therefore always builds what exists.
+  const present = page.files.filter((f) => existsSync(join(HERE, f)));
+  const missing = page.files.filter((f) => !existsSync(join(HERE, f)));
+  if (present.length === 0) {
+    console.log(`${name}: skipped (${page.files.join(", ")} not written yet)`);
+    return;
+  }
   // lib.js first: it holds the primitives and the sandbox guards, and depends on
   // TOKENS, which is injected ahead of both.
   const lib = readFileSync(join(HERE, "lib.js"), "utf8");
-  const draw = readFileSync(join(HERE, page.file), "utf8");
+  const draw = present.map((f) => readFileSync(join(HERE, f), "utf8")).join("\n");
   const script = `const TOKENS = ${TOKENS};\n${lib}\n${draw}`;
   const out = execFileSync(
     "openpencil",
@@ -39,7 +52,8 @@ function render(name) {
     { input: script, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
   );
   const m = out.match(/__RESULT__(\{.*\})/);
-  console.log(`${name}: ${m ? m[1] : out.trim().split("\n").pop()}`);
+  const suffix = missing.length ? ` (pending: ${missing.join(", ")})` : "";
+  console.log(`${name}: ${m ? m[1] : out.trim().split("\n").pop()}${suffix}`);
 }
 
 const wanted = process.argv.slice(2);

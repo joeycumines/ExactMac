@@ -254,9 +254,11 @@ const DIRECT_TREE = [
   { name: "Codex", pid: 8823, depth: 0, detail: "agent host", isRequester: true },
 ];
 
-function buildComponents() {
+function buildIdentity() {
   const page = figma.root.children.find((p) => p.name === "Components");
   if (!page) throw new Error("Components page not found");
+  // This module owns the page root; later modules draw into it rather than
+  // clearing, so the page is composed instead of overwritten.
   while (page.children.length > 0) page.children[0].remove();
 
   const W = TOKENS.layout.specimenWidth;
@@ -342,4 +344,8 @@ function buildComponents() {
   return { page: "Components", families: 4, states: SIGNATURE_STATES.length, instances: instItems.length };
 }
 
-console.log("__RESULT__" + JSON.stringify(buildComponents()));
+// Clears the page and draws the identity family. The page-level result is emitted
+// by the LAST module for the page (controls.js), which draws into the root created
+// here. Calling this is what keeps the page idempotent: without it nothing clears
+// the page and every controls build appends to the previous run's root.
+buildIdentity();

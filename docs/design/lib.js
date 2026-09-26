@@ -195,16 +195,35 @@ function flow(parent, items, o) {
     align: o.align, mainAlign: o.mainAlign,
   });
 
+  // Main-axis placement. Centering must be relative to the CONTAINER's inner
+  // length, not the content extent: a 150pt button holding an 88pt label has 62pt
+  // of slack in the button, which is the slack that has to be distributed. Using
+  // the content extent gave x=0, and using `across` (a height) for a horizontal
+  // axis was simply the wrong quantity. SPACE_BETWEEN distributes the slack too.
+  const innerMain = (dir === "HORIZONTAL" ? parent.width - pl - pr : parent.height - pt - pb);
+  const slack = Math.max(0, innerMain - along);
+  let mainStart, extraGap = 0;
+  if (o.mainAlign === "CENTER") {
+    mainStart = (dir === "HORIZONTAL" ? pl : pt) + slack / 2;
+  } else if (o.mainAlign === "MAX") {
+    mainStart = (dir === "HORIZONTAL" ? pl : pt) + slack;
+  } else if (o.mainAlign === "SPACE_BETWEEN" && sized.length > 1) {
+    mainStart = dir === "HORIZONTAL" ? pl : pt;
+    extraGap = slack / (sized.length - 1);
+  } else {
+    mainStart = dir === "HORIZONTAL" ? pl : pt;
+  }
+
   let cursor = 0;
   for (const s of sized) {
     if (dir === "HORIZONTAL") {
-      s.node.x = pl + cursor;
+      s.node.x = mainStart + cursor;
       s.node.y = o.align === "CENTER" ? pt + (across - s.h) / 2 : pt + (o.align === "MAX" ? across - s.h : 0);
-      cursor += s.w + gap;
+      cursor += s.w + gap + extraGap;
     } else {
       s.node.x = o.align === "CENTER" ? pl + (across - s.w) / 2 : pl + (o.align === "MAX" ? across - s.w : 0);
-      s.node.y = pt + cursor;
-      cursor += s.h + gap;
+      s.node.y = mainStart + cursor;
+      cursor += s.h + gap + extraGap;
     }
   }
   return parent;
