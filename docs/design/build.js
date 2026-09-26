@@ -44,8 +44,9 @@ function render(name) {
   // lib.js first: it holds the primitives and the sandbox guards, and depends on
   // TOKENS, which is injected ahead of both.
   const lib = readFileSync(join(HERE, "lib.js"), "utf8");
+  const widgets = readFileSync(join(HERE, "widgets.js"), "utf8");
   const draw = present.map((f) => readFileSync(join(HERE, f), "utf8")).join("\n");
-  const script = `const TOKENS = ${TOKENS};\n${lib}\n${draw}`;
+  const script = `const TOKENS = ${TOKENS};\n${lib}\n${widgets}\n${draw}`;
   const out = execFileSync(
     "openpencil",
     ["eval", FIG, "--stdin", "-w"],
