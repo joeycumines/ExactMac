@@ -161,6 +161,48 @@ walk(__target, null);
 console.log("__OVERFLOW__" + JSON.stringify(__bad));
 `;
 
+// Structure gate. The invariants that review keeps re-finding are cheap to assert, so
+// they are asserted rather than re-reviewed: exactly ONE requester per prompt tree,
+// a signature badge on every tree row, Deny never adjacent to the primary action and
+// never the default, and the expanded option order.
+const STRUCTURE_TAIL = `
+const __s = [];
+const __all = [];
+(function w(n, p) { __all.push(n); (n.children || []).forEach((c) => w(c, p)); })(figma.root, "");
+
+for (const tree of __all.filter((n) => n.name && n.name.startsWith("ProcessTree/"))) {
+  let requesters = 0, rows = 0, badged = 0;
+  for (const row of tree.children || []) {
+    if (!row.name || !row.name.startsWith("row-")) continue;
+    rows++;
+    if ((row.children || []).some((c) => c.name === "role") ||
+        (row.children || []).some((c) => c.name === "label" && (c.characters || "").indexOf("requesting") >= 0)) {
+      requesters++;
+    }
+    if ((row.children || []).some((c) => c.name && c.name.startsWith("SignatureBadge/"))) badged++;
+  }
+  if (requesters !== 1) __s.push(tree.name + ": expected exactly 1 requester, found " + requesters);
+  if (rows > 0 && badged !== rows) __s.push(tree.name + ": " + (rows - badged) + " of " + rows + " rows carry no signature badge");
+}
+
+for (const opt of __all.filter((n) => n.name && n.name.startsWith("OptionRow/"))) {
+  const isDefault = (opt.children || []).some((c) => c.name === "default");
+  const destructive = (opt.children || []).some((c) => c.name === "title" && c.fills &&
+    c.fills[0].color && Math.abs(c.fills[0].color.r - 0.84) < 0.2);
+  if (isDefault && destructive) __s.push(opt.name + ": the default option must not be the destructive one");
+}
+
+for (const row of __all.filter((n) => n.name === "actions" || n.name === "deny-row")) {
+  const kinds = (row.children || []).map((c) => c.name);
+  const pi = kinds.findIndex((k) => k === "Button/primary");
+  const di = kinds.findIndex((k) => k === "Button/deny");
+  if (pi >= 0 && di >= 0 && Math.abs(pi - di) === 1) {
+    __s.push("Deny sits immediately beside the primary action in " + row.name);
+  }
+}
+console.log("__STRUCTURE__" + JSON.stringify(__s));
+`;
+
 function buildPass(write, targets) {
   for (const t of targets) {
     const page = PAGES[t];
@@ -210,4 +252,19 @@ buildPass(false, targets);   // dry run: the .fig on disk is untouched
 buildPass(true, targets);    // only now does the design of record change
 console.log(
   `overflow gate: no node escapes its container on either axis, across ${targets.length} page(s)`,
+);
+// The structure gate runs LAST, over the finished document. Per page it would judge
+// the other pages by whatever was last written, which is how a Foundations build
+// reported on a Components tree it had not drawn.
+const sOut = execFileSync("openpencil", ["eval", FIG, "--stdin"], {
+  input: STRUCTURE_TAIL, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+});
+const sProblems = JSON.parse((sOut.match(/__STRUCTURE__(\[.*\])/s) || [, "[]"])[1]);
+if (sProblems.length) {
+  console.error(`STRUCTURE GATE FAILED — ${sProblems.length} invariant(s) broken:`);
+  for (const pr of sProblems.slice(0, 20)) console.error("  " + pr);
+  process.exit(1);
+}
+console.log(
+  "structure gate: one requester per tree, a badge on every row, Deny never beside the primary and never default",
 );

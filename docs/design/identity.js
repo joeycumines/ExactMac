@@ -77,7 +77,7 @@ function buildIdentity() {
 
   // ---- ProcessTree: deep and degenerate
   heading("ProcessTree");
-  note("The requester carries the accent rule and semibold weight. The degenerate single-process case is drawn because it is the common one and must not look broken.");
+  note("The requester carries the accent rule and semibold weight, and every row carries signature state, so the component an implementer cites demonstrates the evidence rather than just naming it. The degenerate single-process case is drawn because it is the common one and must not look broken.");
   const treeCol = makeFrame(root, { name: "cmp/trees", x: M, y, w: W - M * 2, h: 180, fill: C.surface[L] });
   const treeItems = [
     processTree({ scheme: L, deep: true, processes: DEEP_TREE, w: 500 }),

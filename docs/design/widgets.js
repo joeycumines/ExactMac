@@ -251,15 +251,17 @@ function systemField(o) {
 
 // -------------------------------------------------------------------- the page
 
+// Every row carries signature state, including an unresolved one, so the component
+// an implementer cites demonstrates the evidence rather than only naming it.
 const DEEP_TREE = [
-  { name: "Terminal", pid: 4211, depth: 0, detail: "host application" },
-  { name: "zsh", pid: 4402, depth: 1, detail: "login shell" },
-  { name: "node", pid: 4490, depth: 2, detail: "opencode" },
-  { name: "exactmac-mcp", pid: 4517, depth: 3, detail: "MCP client", isRequester: true },
+  { name: "Terminal", pid: 4211, depth: 0, detail: "host application", signature: SIGNATURE_STATES[0] },
+  { name: "zsh", pid: 4402, depth: 1, detail: "login shell", signature: SIGNATURE_STATES[5] },
+  { name: "node", pid: 4490, depth: 2, detail: "opencode", signature: SIGNATURE_STATES[3] },
+  { name: "exactmac-mcp", pid: 4517, depth: 3, detail: "MCP client", isRequester: true, signature: SIGNATURE_STATES[1] },
 ];
 
 const DIRECT_TREE = [
-  { name: "Codex", pid: 8823, depth: 0, detail: "agent host", isRequester: true },
+  { name: "Codex", pid: 8823, depth: 0, detail: "agent host", isRequester: true, signature: SIGNATURE_STATES[0] },
 ];
 
 const CT = TOKENS.color;
