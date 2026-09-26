@@ -45,8 +45,8 @@ const COLOR = JSON.parse(TOKENS).color;
 // one page so a design system's parts can live apart from the screens that use them.
 const PAGES = {
   foundations: { files: ["foundations.js"] },
-  components: { files: ["identity.js", "controls.js"] },
-  screens: { files: ["prompt.js"] },
+  components: { files: ["identity.js", "controls.js", "console-controls.js"] },
+  screens: { files: ["prompt.js", "console.js"] },
   flows: { files: ["flows.js"] },
 };
 // The page each module set clears and redraws, which is not always the key.
@@ -252,8 +252,11 @@ function buildPass(write, targets) {
       maxBuffer: 32 * 1024 * 1024,
     });
     if (write) {
-      const m = out.match(/__RESULT__(\{.*\})/);
-      console.log(`${t}: ${m ? m[1] : out.trim().split("\n").pop()}`);
+      // A page may be composed of several modules and each logs its own result, so
+      // every match is reported. Reading only the first reported the prompt page's
+      // counts and silently hid whether the console module had run at all.
+      const results = [...out.matchAll(/__RESULT__(\{.*\})/g)].map((m) => m[1]);
+      for (const r of results) console.log(`${t}: ${r}`);
     } else {
       const m = out.match(/__OVERFLOW__(\[.*\])/s);
       if (!m) throw new Error(`overflow check produced no result for page ${t}`);
