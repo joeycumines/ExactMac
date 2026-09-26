@@ -193,8 +193,15 @@ function promptBody(scheme, o) {
       // Marking both rows made the emphasis meaningless and misstated who was asking.
       // Every row carries signature state, because a tree with no evidence of who is
       // calling is not the graded-evidence model, it is a process list.
-      { name: "Codex", pid: 8823, depth: 0, detail: "agent host", signature: SIGNATURE_STATES[0] },
-      { name: "exactmac-mcp", pid: 8840, depth: 1, isRequester: true, signature: SIGNATURE_STATES[1] },
+      // The REAL chain, per Hana 2026-09-26: Terminal is the calling application,
+      // `exactmac` is the stdio MCP process and therefore the socket peer, and the
+      // agent is its parent. The requester marker is on the peer because that is what
+      // a grant binds to; the agent carries the origin marker because that is what the
+      // operator has in mind.
+      { name: "Terminal", pid: 4211, depth: 0, detail: "host", signature: SIGNATURE_STATES[0] },
+      { name: "zsh", pid: 4402, depth: 1, detail: "login shell", signature: SIGNATURE_STATES[5] },
+      { name: "opencode", pid: 4490, depth: 2, detail: "agent", isOrigin: true, signature: SIGNATURE_STATES[3] },
+      { name: "exactmac", pid: 4517, depth: 3, detail: "stdio MCP", isRequester: true, signature: SIGNATURE_STATES[1] },
     ],
   });
   items.push({ node: caller.node, w: INNER, h: caller.h });

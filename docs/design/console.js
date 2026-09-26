@@ -602,13 +602,20 @@ function buildConsole() {
     grantsManager({ scheme: "light", variant: "normal" }),
     grantsManager({ scheme: "dark", variant: "normal" }),
   ]);
-  row("scr/grants-states", [
+  // Every state in BOTH schemes. B6 asks for normal, empty, loading and error in light
+  // and dark, and drawing the states in light only was a real shortfall against it: a
+  // state that has never been seen in dark is a state whose contrast nobody checked.
+  row("scr/grants-empty", [
     grantsManager({ scheme: "light", variant: "empty" }),
+    grantsManager({ scheme: "dark", variant: "empty" }),
+  ]);
+  row("scr/grants-loading", [
     grantsManager({ scheme: "light", variant: "loading" }),
+    grantsManager({ scheme: "dark", variant: "loading" }),
   ]);
   row("scr/grants-error", [
     grantsManager({ scheme: "light", variant: "error" }),
-    settingsWindow({ scheme: "light" }),
+    grantsManager({ scheme: "dark", variant: "error" }),
   ]);
 
   // ---- activity timeline
@@ -622,9 +629,17 @@ function buildConsole() {
     activityTimeline({ scheme: "light", variant: "broken" }),
     activityTimeline({ scheme: "dark", variant: "broken" }),
   ]);
-  row("scr/activity-states", [
+  row("scr/activity-empty", [
     activityTimeline({ scheme: "light", variant: "empty" }),
+    activityTimeline({ scheme: "dark", variant: "empty" }),
+  ]);
+  row("scr/activity-loading", [
+    activityTimeline({ scheme: "light", variant: "loading" }),
+    activityTimeline({ scheme: "dark", variant: "loading" }),
+  ]);
+  row("scr/activity-error", [
     activityTimeline({ scheme: "light", variant: "error" }),
+    activityTimeline({ scheme: "dark", variant: "error" }),
   ]);
 
   // ---- settings
@@ -642,7 +657,8 @@ function buildConsole() {
     popovers: ["normal", "pending", "console-unreachable", "server-unreachable", "tcp-reduced", "stopped"],
     menuBarStates: SERVICE_STATES.map((s) => s.key),
     grants: ["normal", "empty", "loading", "error"],
-    activity: ["normal", "broken", "empty", "error"],
+    activity: ["normal", "broken", "empty", "loading", "error"],
+    everyStateInBothSchemes: true,
     settings: ["normal"],
   };
 }

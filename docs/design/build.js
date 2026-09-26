@@ -169,18 +169,32 @@ console.log("__OVERFLOW__" + JSON.stringify(__bad));
 // they are asserted rather than re-reviewed: exactly ONE requester per prompt tree,
 // a signature badge on every tree row, Deny never adjacent to the primary action and
 // never the default, and the expanded option order.
-const STRUCTURE_TAIL = `
+//
+// IT RUNS TWICE, and the second run exists because the first one was advisory. It used
+// to run only at the end, over the finished document, which is right for judging the
+// whole thing and wrong for protecting the file: a build whose tree had two requesters
+// printed the failure and had ALREADY written the broken tree to the design of record.
+// So the same check also runs in the dry pass, scoped to the page just drawn, and only a
+// clean dry run reaches the write — the same contract the overflow gate already had.
+const structureTail = (scope) => `
 const __s = [];
 const __all = [];
-(function w(n, p) { __all.push(n); (n.children || []).forEach((c) => w(c, p)); })(figma.root, "");
+(function w(n, p) { __all.push(n); (n.children || []).forEach((c) => w(c, p)); })(${scope}, "");
 
 for (const tree of __all.filter((n) => n.name && n.name.startsWith("ProcessTree/"))) {
   let requesters = 0, rows = 0, badged = 0;
   for (const row of tree.children || []) {
     if (!row.name || !row.name.startsWith("row-")) continue;
     rows++;
-    if ((row.children || []).some((c) => c.name === "role") ||
-        (row.children || []).some((c) => c.name === "label" && (c.characters || "").indexOf("requesting") >= 0)) {
+    // The role node's TEXT decides, not its name. A row now carries a role for the
+    // ORIGIN as well as for the requester, so counting every node named "role" made
+    // the deep tree report two requesters and the check would have been wrong rather
+    // than loud — it would have failed a correct tree and passed a wrong one.
+    const role = (row.children || []).find((c) => c.name === "role");
+    const label = (row.children || []).find((c) => c.name === "label");
+    const saysRequesting = (role && role.characters === "requesting") ||
+      (label && (label.characters || "").indexOf("requesting") >= 0);
+    if (saysRequesting) {
       requesters++;
     }
     if ((row.children || []).some((c) => c.name && c.name.startsWith("SignatureBadge/"))) badged++;
@@ -229,6 +243,13 @@ for (const parent of __all) {
 console.log("__STRUCTURE__" + JSON.stringify(__s));
 `;
 
+// Scoped to the page this pass just drew, which is the only page whose content the dry
+// run is authoritative about.
+const structureTailForPage = structureTail(
+  'figma.root.children.find((p) => p.name === __PAGE) || figma.root',
+);
+const structureTailForDocument = structureTail("figma.root");
+
 function buildPass(write, targets) {
   for (const t of targets) {
     const page = PAGES[t];
@@ -251,7 +272,7 @@ function buildPass(write, targets) {
     const args = ["eval", FIG, "--stdin"];
     if (write) args.push("-w");
     const out = execFileSync("openpencil", args, {
-      input: preamble + (write ? "" : CHECK_TAIL),
+      input: preamble + (write ? "" : CHECK_TAIL + "\n" + structureTailForPage),
       encoding: "utf8",
       maxBuffer: 32 * 1024 * 1024,
     });
@@ -262,12 +283,20 @@ function buildPass(write, targets) {
       const results = [...out.matchAll(/__RESULT__(\{.*\})/g)].map((m) => m[1]);
       for (const r of results) console.log(`${t}: ${r}`);
     } else {
-      const m = out.match(/__OVERFLOW__(\[.*\])/s);
+      const m = out.match(/__OVERFLOW__(\[[^\n]*\])/);
       if (!m) throw new Error(`overflow check produced no result for page ${t}`);
       const bad = JSON.parse(m[1]);
       if (bad.length) {
         console.error(`OVERFLOW GATE FAILED on ${t} — ${bad.length} node(s) escape a container:`);
         for (const b of bad.slice(0, 20)) console.error("  " + b);
+        process.exit(1);
+      }
+      const sm = out.match(/__STRUCTURE__(\[[^\n]*\])/);
+      if (!sm) throw new Error(`structure check produced no result for page ${t}`);
+      const problems = JSON.parse(sm[1]);
+      if (problems.length) {
+        console.error(`STRUCTURE GATE FAILED on ${t} — ${problems.length} invariant(s) broken:`);
+        for (const pr of problems.slice(0, 20)) console.error("  " + pr);
         process.exit(1);
       }
     }
@@ -286,14 +315,14 @@ console.log(
 // the other pages by whatever was last written, which is how a Foundations build
 // reported on a Components tree it had not drawn.
 const sOut = execFileSync("openpencil", ["eval", FIG, "--stdin"], {
-  input: STRUCTURE_TAIL, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+  input: structureTailForDocument, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
 });
-const sProblems = JSON.parse((sOut.match(/__STRUCTURE__(\[.*\])/s) || [, "[]"])[1]);
+const sProblems = JSON.parse((sOut.match(/__STRUCTURE__(\[[^\n]*\])/) || [, "[]"])[1]);
 if (sProblems.length) {
   console.error(`STRUCTURE GATE FAILED — ${sProblems.length} invariant(s) broken:`);
   for (const pr of sProblems.slice(0, 20)) console.error("  " + pr);
   process.exit(1);
 }
 console.log(
-  "structure gate: one requester per tree, a badge on every row, Deny never beside the primary and never default",
+  "structure gate: one requester per tree, a badge on every row, Deny never beside the primary and never default — checked in the dry run per page and again over the finished document",
 );

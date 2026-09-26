@@ -82,8 +82,24 @@ function buildIdentity() {
   const treeItems = [
     processTree({ scheme: L, deep: true, processes: DEEP_TREE, w: 540 }),
     processTree({ scheme: L, deep: false, processes: DIRECT_TREE, w: 540, caption: "Direct request — no intermediary process." }),
+    // Seven levels, which is what a shell inside a script inside a multiplexer inside
+    // an SSH session actually looks like. The indent caps at three and the rows past
+    // the cap carry an ellipsis, because a consent prompt may not hide a process.
+    processTree({ scheme: L, deep: true, variant: "deep-seven", processes: DEEPER_TREE, w: 540, caption: "Seven levels — the indent caps, and no process is hidden." }),
   ];
-  flow(treeCol, treeItems, { direction: "HORIZONTAL", gap: 32, hugW: false, fixedW: W - M * 2 });
+  // Two per row, not three: at 540pt each, three needed 1684pt of a 1112pt sheet and
+  // the overflow gate said so. Row-packing from the item widths rather than a hardcoded
+  // count, so adding a fourth tree does not need a second fix.
+  const treeRow = (items, gap) => {
+    const r = makeFrame(null, { name: "tree-row", w: W - M * 2, h: 20, fill: C.surface[L] });
+    flow(r, items, { direction: "HORIZONTAL", gap: gap, align: "MIN", hugW: false, fixedW: W - M * 2 });
+    return { node: r, w: W - M * 2, h: r.height };
+  };
+  const treeRows = [];
+  for (let i = 0; i < treeItems.length; i += 2) {
+    treeRows.push(treeRow(treeItems.slice(i, i + 2), 32));
+  }
+  flow(treeCol, treeRows, { direction: "VERTICAL", gap: 20, hugW: false, fixedW: W - M * 2 });
   y += treeCol.height + 12;
 
   const treeGal = makeFrame(root, { name: "cmp/trees-instances", x: M, y, w: W - M * 2, h: 140, fill: C.surface[L], clips: false });
@@ -92,7 +108,11 @@ function buildIdentity() {
     inst.name = "instance-" + it.node.name;
     return { node: inst, w: it.w, h: it.h };
   });
-  flow(treeGal, treeInst, { direction: "HORIZONTAL", gap: 32, hugW: false, fixedW: W - M * 2 });
+  const instRows = [];
+  for (let i = 0; i < treeInst.length; i += 2) {
+    instRows.push(treeRow(treeInst.slice(i, i + 2), 32));
+  }
+  flow(treeGal, instRows, { direction: "VERTICAL", gap: 20, hugW: false, fixedW: W - M * 2 });
   y += treeGal.height + 40;
 
   // ---- UntrustedField beside SystemField: the pair that proves the distinction

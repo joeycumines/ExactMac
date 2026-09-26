@@ -124,6 +124,10 @@ function identityRow(o) {
 
 // ----------------------------------------------------------------- ProcessTree
 
+// Three levels of indent is all a 388pt disclosure can spend on structure. Past this a
+// row is drawn at the cap and marked with an ellipsis, never dropped.
+const MAX_TREE_INDENT_DEPTH = 3;
+
 // A host application, any intermediaries, and finally the requesting process.
 // The requester is emphasised because it is the process whose identity lands in
 // the grant, and an operator scanning the tree must land on it first.
@@ -132,8 +136,14 @@ function processRow(p, scheme, w) {
     name: "row-" + p.name, w: w, h: 30, fill: ink(scheme, "surface"),
   });
   const items = [];
-  let padLeft = 8 + p.depth * 20;
-  if (p.depth > 0) {
+  // CAPPED indent. Beyond the cap a row draws at the cap and says so with an ellipsis,
+  // because a tree that indents without bound spends the width the label needs, and a
+  // tree that HIDES the layers past the cap is the one thing a consent prompt must
+  // never do: an unshown process is an unreviewed process.
+  const drawn = Math.min(p.depth, MAX_TREE_INDENT_DEPTH);
+  const overDepth = p.depth > MAX_TREE_INDENT_DEPTH;
+  let padLeft = 8 + drawn * 20;
+  if (drawn > 0) {
     // Drawn as a rule, not a box-drawing glyph: the design fonts carry no
     // └─ and a missing glyph rendered as a speck, which is worse than nothing.
     const guide = makeRect(row, {
@@ -147,7 +157,13 @@ function processRow(p, scheme, w) {
     radius: 1.5,
   });
   items.push({ node: marker, w: 3, h: 16 });
-  const compactRole = p.compact && p.isRequester ? "   ·   requesting" : "";
+  // Two markers, two meanings: the requester is the peer a grant binds to, and the
+  // origin is the agent that asked for it. Collapsing them into one word is what made
+  // the earlier tree a process list instead of the graded-evidence model.
+  const compactRole = p.compact && p.isRequester
+    ? "   ·   requesting"
+    : (p.compact && p.isOrigin ? "   ·   origin" : "");
+  const roleWord = p.isRequester ? "requesting" : (p.isOrigin ? "asked for this" : "");
   // The label is WRAPPED into a budget computed from the actual sibling widths, not
   // sized to fit: with the larger no-wrap margin a long label measured 296pt inside
   // a 500pt row and pushed the role off the end. Over-allocating a no-wrap box is
@@ -155,16 +171,28 @@ function processRow(p, scheme, w) {
   const badgeW = p.signature
     ? (p.sigW || (SIGNATURE_STATES.find((x) => x.key === p.signature.key) || { w: 100 }).w)
     : 0;
-  const roleW = p.isRequester && !p.compact ? 92 : 0;
-  const chrome = padLeft + 8 + (p.depth > 0 ? 1 + 6 : 0) + 3 + 6 +
+  const roleW = (p.isRequester || p.isOrigin) && !p.compact ? 92 : 0;
+  // The budget uses the DRAWN depth, not the real one, or a capped row reserves the
+  // indentation it did not draw and its label loses 60pt for nothing.
+  const chrome = padLeft + 8 + (drawn > 0 ? 1 + 6 : 0) + 3 + 6 + (overDepth ? 24 : 0) +
     (badgeW ? badgeW + 6 : 0) + (roleW ? roleW + 6 : 0);
   const label = makeText(row, {
     name: "label",
     chars: (p.compact
-      ? p.name + (p.detail ? "   " + p.detail : "") + compactRole
-      : p.name + "   pid " + p.pid + (p.detail ? "   " + p.detail : "")),
+      // In the compact form the REQUESTER drops its detail. Its label budget at the
+      // indent cap, beside a signature badge, is about 194pt, and
+      // "exactmac   stdio MCP   ·   requesting" measures wider than that and wrapped
+      // mid-marker — which put "requesting" on a line of its own, directly above the
+      // row it was labelling. The role marker is the load-bearing part; the detail is
+      // context the expanded disclosure and the grants manager both carry.
+      ? p.name + (p.detail && !(p.compact && p.isRequester) ? "   " + p.detail : "")
+        + (overDepth ? "  ..." : "") + compactRole
+      : p.name + "   pid " + p.pid + (p.detail ? "   " + p.detail : "")
+        + (overDepth ? "  ..." : "")),
     size: 12, style: p.isRequester ? "Semi Bold" : "Regular",
-    color: p.isRequester ? ink(scheme, "text-primary") : ink(scheme, "text-secondary"),
+    color: p.isRequester || p.isOrigin
+      ? ink(scheme, "text-primary")
+      : ink(scheme, "text-secondary"),
     wrap: Math.max(90, w - chrome),
   });
   items.push({ node: label });
@@ -175,12 +203,16 @@ function processRow(p, scheme, w) {
     const badge = signatureBadge({ state: p.signature, scheme, w: p.sigW });
     items.push({ node: badge.node, w: badge.w, h: badge.h });
   }
-  if (p.isRequester && !p.compact) {
+  if (roleWord && !p.compact) {
+    // The requester is stated in the accent because it is the load-bearing fact; the
+    // origin is stated in secondary ink because it is context, not the thing a grant
+    // binds to.
     const role = makeText(null, {
-      name: "role", chars: "requesting", size: 11, style: "Semi Bold",
-      color: ink(scheme, "accent"), wrap: 92,
+      name: "role", chars: roleWord, size: 11,
+      style: p.isRequester ? "Semi Bold" : "Regular",
+      color: ink(scheme, p.isRequester ? "accent" : "text-secondary"), wrap: 92,
     });
-    items.push({ node: role });
+    items.push({ node: role, w: 92 });
   }
   flow(row, items, {
     direction: "HORIZONTAL", gap: 6, padLeft: padLeft, padRight: 8, padTop: 6, padBottom: 6,
@@ -195,7 +227,10 @@ function processTree(o) {
   const scheme = o.scheme || "light";
   const w = o.w || 400;
   const tree = makeComponent(null, {
-    name: "ProcessTree/" + (o.deep ? "deep" : "direct"),
+    // `variant` names the shape when there is more than one deep tree, because a
+    // variant SET cannot be built in this shim and two components sharing a name would
+    // be uncitable — the implementation has to be able to say which one it implements.
+    name: "ProcessTree/" + (o.variant || (o.deep ? "deep" : "direct")),
     w: w, h: 40, fill: ink(scheme, "surface"),
   });
   // `compact` is forwarded onto each row: in the 388pt prompt disclosure a row
@@ -279,11 +314,37 @@ function systemField(o) {
 
 // Every row carries signature state, including an unresolved one, so the component
 // an implementer cites demonstrates the evidence rather than only naming it.
+// THE REAL TOPOLOGY, supplied by Hana on 2026-09-26 after she saw the invented one. In
+// most scenarios the calling APPLICATION is Terminal, `exactmac` is the command that
+// speaks stdio MCP and is therefore the PEER on the socket, and the agent the operator
+// has in mind is `exactmac`'s PARENT. Two things follow, and both are drawn:
+//
+//   The requester marker belongs on the PEER, because that is the process whose code
+//   identity a grant binds to, and the agent row is marked as the ORIGIN instead — so
+//   an operator reading the tree sees both the thing being consented to and the thing
+//   that asked for it. Marking both rows as "the requester" was the earlier defect.
+//
+//   Depth is not three. An agent can be launched from a shell inside a script inside a
+//   multiplexer inside an SSH session, so the tree carries a seven-level specimen and
+//   the indent CAPS rather than growing: a chain that indents without bound spends the
+//   width the label needs and starts wrapping names inside a 388pt disclosure.
 const DEEP_TREE = [
   { name: "Terminal", pid: 4211, depth: 0, detail: "host application", signature: SIGNATURE_STATES[0] },
   { name: "zsh", pid: 4402, depth: 1, detail: "login shell", signature: SIGNATURE_STATES[5] },
-  { name: "node", pid: 4490, depth: 2, detail: "opencode", signature: SIGNATURE_STATES[3] },
-  { name: "exactmac-mcp", pid: 4517, depth: 3, detail: "MCP client", isRequester: true, signature: SIGNATURE_STATES[1] },
+  { name: "opencode", pid: 4490, depth: 2, detail: "agent", isOrigin: true, signature: SIGNATURE_STATES[3] },
+  { name: "exactmac", pid: 4517, depth: 3, detail: "stdio MCP", isRequester: true, signature: SIGNATURE_STATES[1] },
+];
+
+// The case that used to be undrawn and is common on a developer machine: a longer
+// chain, with the indent capped so every name still fits on one line.
+const DEEPER_TREE = [
+  { name: "Terminal", pid: 4211, depth: 0, detail: "host application", signature: SIGNATURE_STATES[0] },
+  { name: "zsh", pid: 4402, depth: 1, detail: "login shell", signature: SIGNATURE_STATES[5] },
+  { name: "bootstrap", pid: 4431, depth: 2, detail: "script", signature: SIGNATURE_STATES[5] },
+  { name: "tmux", pid: 4455, depth: 3, detail: "multiplexer", signature: SIGNATURE_STATES[3] },
+  { name: "zsh", pid: 4460, depth: 4, detail: "nested shell", signature: SIGNATURE_STATES[5] },
+  { name: "claude", pid: 4478, depth: 5, detail: "agent", isOrigin: true, signature: SIGNATURE_STATES[0] },
+  { name: "exactmac", pid: 4517, depth: 6, detail: "stdio MCP", isRequester: true, signature: SIGNATURE_STATES[1] },
 ];
 
 const DIRECT_TREE = [
