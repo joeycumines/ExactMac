@@ -93,7 +93,9 @@ final class AuthorizationPolicyTests: XCTestCase {
 
     private func envelope(
         _ capability: Capability,
-        scope: AuthorizationScope = AuthorizationScope(),
+        scope: AuthorizationScope = AuthorizationScope(
+            application: .bundleIdentifier("com.apple.TextEdit"),
+        ),
         identity: CallerIdentity? = nil,
         durationSeconds: Int = 3600,
         id: String = "env-1",
@@ -631,8 +633,13 @@ final class AuthorizationPolicyTests: XCTestCase {
     // MARK: - Envelopes
 
     func testALiveEnvelopeAuthorisesAndAnExpiredOneDoesNot() {
+        // Scoped to an application, because a global batch is exactly what the admission
+        // check refuses — the fixture used to be inadmissible and the engine was right to
+        // ignore it.
         let inside = decide(
-            request(.clipboardRead),
+            request(.clipboardRead, scope: AuthorizationScope(
+                application: .bundleIdentifier("com.apple.TextEdit"),
+            )),
             envelopes: [envelope(.clipboardRead)],
         )
         XCTAssertEqual(inside.outcome, .allow)
@@ -643,13 +650,18 @@ final class AuthorizationPolicyTests: XCTestCase {
         }
 
         let outside = decide(
-            request(.inputSynthesize),
+            request(
+                .inputSynthesize,
+                scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            ),
             envelopes: [envelope(.clipboardRead)],
         )
         XCTAssertEqual(outside.basis, .promptRequired, "an envelope is not a blanket permission")
 
         let expired = decide(
-            request(.clipboardRead),
+            request(.clipboardRead, scope: AuthorizationScope(
+                application: .bundleIdentifier("com.apple.TextEdit"),
+            )),
             envelopes: [envelope(.clipboardRead, durationSeconds: -1)],
         )
         XCTAssertEqual(expired.basis, .promptRequired)
@@ -662,6 +674,12 @@ final class AuthorizationPolicyTests: XCTestCase {
         let global = envelope(.clipboardRead, scope: AuthorizationScope())
         XCTAssertTrue(global.isGlobalPersistent)
         XCTAssertFalse(AuthorizationPolicy.envelopeIsAdmissible(global))
+        XCTAssertTrue(
+            AuthorizationPolicy.envelopeIsAdmissible(
+                envelope(.clipboardRead),
+            ),
+            "a batch scoped to one application is admissible",
+        )
 
         let tooLong = envelope(.clipboardRead, durationSeconds: 9 * 60 * 60)
         XCTAssertFalse(AuthorizationPolicy.envelopeIsAdmissible(tooLong))
@@ -688,44 +706,49 @@ final class AuthorizationPolicyTests: XCTestCase {
     func testBiometricRequirementIsAPureFunctionOfWhatIsBeingAuthorised() {
         var required = 0
         var optional = 0
+        let oneApp = AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit"))
+        let everywhere = AuthorizationScope()
         for capability in Capability.allCases {
-            for kind in OfferedDecision.Kind.allCases {
-                for risk in RiskClass.allCases {
-                    for signature in [SignatureState.signedAndValid, .unsigned] {
-                        for high in [false, true] {
-                            let requirement = AuthorizationPolicy.biometricRequirement(
-                                capability: capability,
-                                riskClass: risk,
-                                targetIsHighConsequence: high,
-                                signature: signature,
-                                decisionKind: kind,
-                            )
-                            switch requirement {
-                            case .required: required += 1
-                            case .notRequired: optional += 1
-                            }
-                            // Script execution requires a ceremony at EVERY breadth and
-                            // every risk, including allow-once on a signed caller. My
-                            // first version of this assertion claimed the narrow
-                            // exemption applied to it, which is exactly the inversion the
-                            // table test was written to catch: a shell can read the
-                            // screen, the clipboard and the interface, so no script runs
-                            // on a hurried keystroke.
-                            if capability == .scriptExecute, kind == .allowOnce,
-                               risk == .routine, !high, signature == .signedAndValid {
-                                XCTAssertEqual(
-                                    requirement,
-                                    .required(reason: "running a shell reaches everything this Mac can do"),
+            for scope in [oneApp, everywhere] {
+                for duration in [GrantDuration.once, .monotonicSeconds(900), .monotonicSeconds(28_800)] {
+                    for risk in RiskClass.allCases {
+                        for signature in [SignatureState.signedAndValid, .unsigned] {
+                            for high in [false, true] {
+                                let requirement = AuthorizationPolicy.biometricRequirement(
+                                    capability: capability,
+                                    scope: scope,
+                                    duration: duration,
+                                    riskClass: risk,
+                                    targetIsHighConsequence: high,
+                                    signature: signature,
                                 )
-                            }
-                            // The exemption itself, on a capability where it does apply.
-                            if capability == .clipboardRead, kind == .allowOnce,
-                               risk == .routine, !high, signature == .signedAndValid {
-                                XCTAssertEqual(
-                                    requirement,
-                                    .notRequired,
-                                    "a narrow clipboard read is where friction is deliberately not spent",
-                                )
+                                switch requirement {
+                                case .required: required += 1
+                                case .notRequired: optional += 1
+                                }
+                                // Script execution requires a ceremony at EVERY breadth and
+                                // every risk, including allow-once on a signed caller. My
+                                // first version of this assertion claimed the narrow
+                                // exemption applied to it, which is exactly the inversion the
+                                // table test was written to catch: a shell can read the
+                                // screen, the clipboard and the interface, so no script runs
+                                // on a hurried keystroke.
+                                if capability == .scriptExecute, duration == .once,
+                                   risk == .routine, !high, signature == .signedAndValid {
+                                    XCTAssertEqual(
+                                        requirement,
+                                        .required(reason: "running a shell reaches everything this Mac can do"),
+                                    )
+                                }
+                                // The exemption itself, on a capability where it does apply.
+                                if capability == .clipboardRead, duration == .once, !scope.application.isGlobal,
+                                   risk == .routine, !high, signature == .signedAndValid {
+                                    XCTAssertEqual(
+                                        requirement,
+                                        .notRequired,
+                                        "a narrow clipboard read is where friction is deliberately not spent",
+                                    )
+                                }
                             }
                         }
                     }
@@ -752,20 +775,50 @@ final class AuthorizationPolicyTests: XCTestCase {
     func testAGlobalPersistentGrantAlwaysNeedsABiometric() {
         for capability in Capability.allCases {
             // Asserted as a CASE, not as a string. A shell answers with its own reason
-            // before the global-grant one, and that ordering is deliberate: the ceremony
+            // before the breadth one, and that ordering is deliberate: the ceremony
             // should name the most dangerous thing being authorised.
             guard case .required(let reason) = AuthorizationPolicy.biometricRequirement(
                 capability: capability,
+                scope: AuthorizationScope(),
+                duration: .monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds),
                 riskClass: .routine,
                 targetIsHighConsequence: false,
                 signature: .signedAndValid,
-                decisionKind: .allowGlobalPersistent,
             ) else {
                 XCTFail("\(capability.rawValue) allowed a global persistent grant with no ceremony")
                 continue
             }
             XCTAssertFalse(reason.isEmpty, "\(capability.rawValue) must name what is being authorized")
         }
+    }
+
+    /// BREADTH x PERSISTENCE, which is the rule the design's own worked example states.
+    func testBreadthTimesPersistenceIsWhatCostsACeremony() {
+        let everyApp = AuthorizationScope()
+        let oneApp = AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit"))
+        let eightHours = GrantDuration.monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds)
+
+        XCTAssertEqual(
+            AuthorizationPolicy.biometricRequirement(
+                capability: .clipboardRead, scope: everyApp, duration: eightHours,
+            ),
+            .required(reason: "a standing permission over every application until you revoke it"),
+            "gf-2 states this case explicitly: every application, continuously, costs a biometric",
+        )
+        XCTAssertEqual(
+            AuthorizationPolicy.biometricRequirement(
+                capability: .clipboardRead, scope: everyApp, duration: .once,
+            ),
+            .notRequired,
+            "a single global read is not a standing permission",
+        )
+        XCTAssertEqual(
+            AuthorizationPolicy.biometricRequirement(
+                capability: .clipboardRead, scope: oneApp, duration: eightHours,
+            ),
+            .notRequired,
+            "a narrow long grant is a standing permission, but a narrow one",
+        )
     }
 
     // MARK: - The offered decisions
@@ -783,8 +836,12 @@ final class AuthorizationPolicyTests: XCTestCase {
                     )
                     let defaults = offered.filter(\.isDefault)
                     XCTAssertEqual(defaults.count, 1, "\(capability) \(entry.name) \(risk)")
+                    // Guarded rather than subscripted: a drop to zero used to trap here and
+                    // kill the process, which is the one failure mode a table this size
+                    // cannot afford.
+                    guard let focused = defaults.first else { continue }
                     XCTAssertFalse(
-                        defaults[0].isDestructive,
+                        focused.isDestructive,
                         "\(capability) \(entry.name) \(risk) defaults to a destructive option",
                     )
                     // Deny is always marked destructive, which is what makes "the
@@ -801,8 +858,19 @@ final class AuthorizationPolicyTests: XCTestCase {
                     // Deny on its own row below a hairline rather than in the list at all.
                     // With three or more, Deny must touch neither the focused option nor
                     // the primary action.
-                    if offered.count >= 3,
-                       let defaultIndex = offered.firstIndex(where: \.isDefault),
+                    if offered.count < 3 {
+                        // The strict posture's only two options. Adjacency is unavoidable
+                        // in a list of two, and the DESIGN puts Deny on its own row below
+                        // a hairline rather than in the list at all — so what is asserted
+                        // here is that the two are ordered least-destructive first.
+                        XCTAssertEqual(
+                            offered.map(\.kind),
+                            [.allowOnce, .deny],
+                            "\(capability) \(entry.name) \(risk) changed the strict-posture pair",
+                        )
+                        continue
+                    }
+                    if let defaultIndex = offered.firstIndex(where: \.isDefault),
                        let denyIndex = offered.firstIndex(where: { $0.kind == .deny }),
                        let primaryIndex = offered.firstIndex(where: \.isPrimary) {
                         XCTAssertNotEqual(
@@ -871,5 +939,525 @@ final class AuthorizationPolicyTests: XCTestCase {
         let base = MonotonicInstant(nanoseconds: 1_000)
         XCTAssertEqual(base.remaining(until: MonotonicInstant(nanoseconds: 1_500)), .nanoseconds(500))
         XCTAssertNil(base.remaining(until: base), "a deadline in the past leaves nothing")
+    }
+}
+
+/// Regressions for the six blocking findings an independent review returned on C1.
+/// Each one is a defect that compiled, passed its own tests, and was found by
+/// construction-fuzzing or by reading the code against the design rather than by
+/// writing a test — so each is now pinned.
+final class AuthorizationPolicyReviewRegressionTests: XCTestCase {
+    private let now = MonotonicInstant(nanoseconds: 1_000_000_000_000)
+
+    private func instant(offsetSeconds: Int) -> MonotonicInstant {
+        let base = Int64(bitPattern: now.nanoseconds)
+        let delta = Int64(offsetSeconds) &* 1_000_000_000
+        return MonotonicInstant(nanoseconds: UInt64(bitPattern: base &+ delta))
+    }
+
+    private func peerIdentity(
+        signature: SignatureState = .adHoc,
+        path: String = "/usr/local/bin/exactmac",
+        bundleIdentifier: String? = "io.github.joeycumines.exactmac",
+        requirement: String? = "identifier \"io.github.joeycumines.exactmac\" and anchor apple generic",
+        isFullyResolved: Bool = true,
+    ) -> CallerIdentity {
+        CallerIdentity(
+            processIdentifier: 4517,
+            effectiveUserIdentifier: 501,
+            parentProcessIdentifier: 4490,
+            code: CodeIdentity(
+                executablePath: path,
+                bundleIdentifier: bundleIdentifier,
+                designatedRequirement: requirement,
+                signature: signature,
+            ),
+            isFullyResolved: isFullyResolved,
+        )
+    }
+
+    private func request(
+        _ capability: Capability,
+        scope: AuthorizationScope = AuthorizationScope(),
+        reason: String? = "because the test says so",
+        origin: RequestOrigin = .directSocket,
+    ) -> AuthorizationRequest {
+        AuthorizationRequest(
+            id: AuthorizationRequestID(rawValue: "req-1"),
+            rpcName: "exactmac.v1.ExactMac/Test",
+            capability: capability,
+            scope: scope,
+            argumentSummary: "a representative argument",
+            agentReason: reason,
+            origin: origin,
+        )
+    }
+
+    private func grant(
+        _ capability: Capability,
+        scope: AuthorizationScope = AuthorizationScope(),
+        identity: CallerIdentity? = nil,
+        expiresInSeconds: Int = 3600,
+        duration: GrantDuration = .monotonicSeconds(3600),
+        remainingOperations: Int? = nil,
+    ) -> Grant {
+        Grant(
+            id: "grant-1",
+            capability: capability,
+            scope: scope,
+            duration: duration,
+            holder: (identity ?? peerIdentity()).code.binding,
+            issuedAt: now,
+            expiresAt: instant(offsetSeconds: expiresInSeconds),
+            origin: .prompt(decidedAt: now),
+            remainingOperations: remainingOperations ?? scope.operationLimit,
+            targetIsHighConsequence: false,
+        )
+    }
+
+    private func decide(
+        _ request: AuthorizationRequest,
+        identity: CallerIdentity? = nil,
+        grants: [Grant] = [],
+        envelopes: [PreAuthorizationEnvelope] = [],
+        posture: Posture = .balanced,
+        context: AuthorizationContext = .unixSocket(),
+    ) -> AuthorizationDecision {
+        AuthorizationPolicy.evaluate(
+            request: request,
+            identity: identity ?? peerIdentity(),
+            grants: grants,
+            envelopes: envelopes,
+            posture: posture,
+            context: context,
+            now: now,
+        )
+    }
+
+    private var consentCapabilities: [Capability] {
+        Capability.allCases.filter(\.requiresConsent)
+    }
+
+    // MARK: B1 — an envelope the admission check rejects must not be honoured
+
+    /// The admission check existed, was documented as "re-checked at evaluation", and was
+    /// never called from `evaluate`. A global-persistent envelope therefore authorised
+    /// requests, which is precisely what the type's own documentation says can never be
+    /// true.
+    func testAnInadmissibleEnvelopeIsNotHonouredAtEvaluation() {
+        let globalEnvelope = PreAuthorizationEnvelope(
+            id: "env-global",
+            grants: [grant(.clipboardRead, scope: AuthorizationScope())],
+            declaredDuration: .monotonicSeconds(3600),
+            expiresAt: instant(offsetSeconds: 3600),
+            holder: peerIdentity().code.binding,
+        )
+        XCTAssertTrue(globalEnvelope.isGlobalPersistent)
+        XCTAssertFalse(AuthorizationPolicy.envelopeIsAdmissible(globalEnvelope))
+        let decision = decide(
+            request(.clipboardRead, scope: AuthorizationScope()),
+            envelopes: [globalEnvelope],
+        )
+        XCTAssertEqual(
+            decision.basis,
+            .promptRequired,
+            "a global-persistent envelope authorised a request",
+        )
+        XCTAssertFalse(decision.isAllowed)
+    }
+
+    func testAnOverLongEnvelopeIsNotHonouredAtEvaluation() {
+        let tooLong = PreAuthorizationEnvelope(
+            id: "env-long",
+            grants: [grant(.clipboardRead, scope: AuthorizationScope(
+                application: .bundleIdentifier("com.apple.TextEdit"),
+            ))],
+            declaredDuration: .monotonicSeconds(9 * 60 * 60),
+            expiresAt: instant(offsetSeconds: 9 * 60 * 60),
+            holder: peerIdentity().code.binding,
+        )
+        XCTAssertFalse(AuthorizationPolicy.envelopeIsAdmissible(tooLong))
+        XCTAssertEqual(
+            decide(
+                request(
+                    .clipboardRead,
+                    scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+                ),
+                envelopes: [tooLong],
+            ).basis,
+            .promptRequired,
+        )
+    }
+
+    /// An envelope whose inner grant outlives the envelope keeps authorising after the
+    /// operator believes the batch has ended, and revoking the envelope leaves it alive.
+    func testAnEnvelopeWhoseGrantOutlivesItIsInadmissible() {
+        let leaky = PreAuthorizationEnvelope(
+            id: "env-leaky",
+            grants: [grant(
+                .clipboardRead,
+                scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+                expiresInSeconds: 7200,
+            )],
+            declaredDuration: .monotonicSeconds(3600),
+            expiresAt: instant(offsetSeconds: 3600),
+            holder: peerIdentity().code.binding,
+        )
+        XCTAssertFalse(AuthorizationPolicy.envelopeIsAdmissible(leaky))
+    }
+
+    // MARK: B2 — friction must actually scale with blast radius
+
+    /// Every risk class must be REACHABLE. The first version of the model pinned duration
+    /// at 0.2, which capped the radius at 0.09 against a 0.18 threshold, so `.elevated`
+    /// and `.high` could never occur and the whole escalation ladder was dead code. A
+    /// review enumerated 1,344 decisions and found 0 of each.
+    func testEveryRiskClassIsReachable() {
+        var seen: Set<RiskClass> = []
+        for capability in consentCapabilities {
+            for scope in [
+                AuthorizationScope(),
+                AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+                AuthorizationScope(application: .processIdentifier(4211)),
+            ] {
+                for duration in [
+                    GrantDuration.once,
+                    .monotonicSeconds(900),
+                    .monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds),
+                ] {
+                    for signature in [SignatureState.signedAndValid, .unsigned] {
+                        for high in [false, true] {
+                            seen.insert(
+                                AuthorizationPolicy.blastRadius(
+                                    capability: capability,
+                                    scope: scope,
+                                    duration: duration,
+                                    remainingCount: scope.operationLimit,
+                                    targetIsHighConsequence: high,
+                                    signatureQuality: signature.quality,
+                                ).riskClass,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(seen, [.routine, .elevated, .high], "a risk model that cannot reach its own top class is inert")
+    }
+
+    /// The design's own worked example, as an assertion: the same capability, once scoped
+    /// to one application and once across every application for two hours, must not get
+    /// the same friction.
+    func testBreadthAndDurationChangeTheAnswer() {
+        func radius(
+            _ capability: Capability,
+            _ scope: AuthorizationScope,
+            _ duration: GrantDuration,
+        ) -> Double {
+            AuthorizationPolicy.blastRadius(
+                capability: capability,
+                scope: scope,
+                duration: duration,
+                remainingCount: nil,
+                targetIsHighConsequence: false,
+                signatureQuality: SignatureState.signedAndValid.quality,
+            ).radius
+        }
+        let oneApp = AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit"))
+        let everywhere = AuthorizationScope()
+        let eightHours = GrantDuration.monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds)
+
+        func risk(
+            _ capability: Capability,
+            _ scope: AuthorizationScope,
+            _ duration: GrantDuration,
+        ) -> RiskClass {
+            AuthorizationPolicy.blastRadius(
+                capability: capability,
+                scope: scope,
+                duration: duration,
+                remainingCount: nil,
+                targetIsHighConsequence: false,
+                signatureQuality: SignatureState.signedAndValid.quality,
+            ).riskClass
+        }
+        let narrow = radius(.clipboardRead, oneApp, .once)
+        let broad = radius(.clipboardRead, everywhere, eightHours)
+        XCTAssertGreaterThan(
+            broad, narrow * 2,
+            "breadth and duration together must move the radius, not one of them",
+        )
+        // The risk CLASS has to separate too, or every escalation that depends on it
+        // stays dead. Two hours globally is still `routine` BY DESIGN — that case is
+        // carried by the breadth-and-persistence rule, not by the radius — so the
+        // crossing pair is the widest one the model can express.
+        XCTAssertEqual(risk(.clipboardRead, oneApp, .once), .routine)
+        XCTAssertEqual(risk(.clipboardRead, oneApp, eightHours), .routine)
+        XCTAssertEqual(risk(.clipboardRead, everywhere, eightHours), .elevated)
+        XCTAssertEqual(
+            risk(.screenObserve, everywhere, eightHours),
+            .high,
+            "reading the screen of every application for eight hours is a high-blast-radius grant",
+        )
+        // And an unsigned caller on a listed application moves a narrow grant up two
+        // classes, which is what makes signature quality and the operator's own list two
+        // of the six factors rather than two decorations.
+        XCTAssertEqual(
+            AuthorizationPolicy.blastRadius(
+                capability: .clipboardRead, scope: oneApp, duration: eightHours,
+                remainingCount: nil, targetIsHighConsequence: true,
+                signatureQuality: SignatureState.unsigned.quality,
+            ).riskClass,
+            .high,
+        )
+    }
+
+    /// Each option states the friction IT costs, so the prompt can show the numbers beside
+    /// the choice rather than asking the operator to guess which one needs a fingerprint.
+    func testEachOfferedOptionCarriesItsOwnRadiusAndCeremony() {
+        let decision = decide(
+            request(.clipboardRead, scope: AuthorizationScope()),
+        )
+        let options = decision.offeredDecisions
+        guard let once = options.first(where: { $0.kind == .allowOnce }),
+              let always = options.first(where: { $0.kind == .allowGlobalPersistent })
+        else {
+            return XCTFail("a global clipboard read must offer once and always")
+        }
+        XCTAssertGreaterThan(always.blastRadius.radius, once.blastRadius.radius)
+        XCTAssertEqual(once.biometric, .notRequired)
+        XCTAssertEqual(
+            always.biometric,
+            .required(reason: "a standing permission over every application until you revoke it"),
+        )
+    }
+
+    // MARK: B3 — one scope, one ceremony, whatever the option is called
+
+    /// The policy used to be keyed on the option's NAME, so `.allowSession` handed out a
+    /// grant with the same global scope and the same eight hours as
+    /// `.allowGlobalPersistent` and asked for no ceremony. Two labels for one scope is a
+    /// policy that can be defeated by choosing the other label.
+    func testTwoOptionsWithOneScopeCostTheSameCeremony() {
+        let options = AuthorizationPolicy.offeredDecisions(
+            for: request(.clipboardRead, scope: AuthorizationScope()),
+            posture: .balanced,
+            riskClass: .routine,
+        )
+        guard let session = options.first(where: { $0.kind == .allowSession }),
+              let always = options.first(where: { $0.kind == .allowGlobalPersistent })
+        else {
+            return XCTFail("expected both a session and a global option")
+        }
+        XCTAssertEqual(session.scope, always.scope, "the two differ only in name")
+        XCTAssertEqual(session.duration, always.duration)
+        XCTAssertEqual(session.biometric, always.biometric)
+    }
+
+    // MARK: B4 — an unresolved caller inherits nothing
+
+    /// `isFullyResolved` had no reader anywhere. An unresolved caller was allowed by a
+    /// standing grant, which is the opposite of failing closed. It is still not DENIED —
+    /// refusing every caller whose path could not be read would be verification-as-a-gate,
+    /// which this product rejects — so it escalates to a prompt instead.
+    func testAnUnresolvedCallerInheritsNoGrantAndEscalates() {
+        let unresolved = peerIdentity(isFullyResolved: false)
+        let granted = decide(
+            request(.clipboardRead),
+            identity: unresolved,
+            grants: [grant(.clipboardRead)],
+        )
+        XCTAssertEqual(
+            granted.basis,
+            .promptRequired,
+            "an unresolved caller was allowed by a standing grant",
+        )
+        guard case .required = granted.biometric else {
+            return XCTFail("an unresolved caller must not pass without friction")
+        }
+    }
+
+    // MARK: B5 — the biometric-availability test was vacuous
+
+    /// Every denial hardcoded `biometric: .notRequired`, so the original loop's
+    /// `if case .required` guard never matched and not one assertion in it ran. The
+    /// invariant held by construction; the suite was not checking it. This version
+    /// asserts the DENIAL REASON directly, which cannot be skipped.
+    func testAnUnavailableBiometricDeniesExactlyTheDecisionsThatNeedOne() {
+        let noBiometric = AuthorizationContext.unixSocket(
+            biometric: .unavailable(reason: "locked out"),
+        )
+        var ceremonyDenied = 0
+        var ceremonyNotDenied = 0
+        for capability in consentCapabilities {
+            for scope in [
+                AuthorizationScope(),
+                AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            ] {
+                let decision = decide(
+                    request(capability, scope: scope),
+                    context: noBiometric,
+                )
+                // Classified from the POLICY, not from the decision's own offers. A denial
+                // for a missing ceremony returns no offers at all — correctly, since there
+                // is then nothing for the operator to act on — so reading them back to
+                // decide which branch to take asserted nothing. Twice.
+                let needsCeremony = AuthorizationPolicy.offeredDecisions(
+                    for: request(capability, scope: scope),
+                    posture: .balanced,
+                    riskClass: .routine,
+                ).contains { $0.isDefault && $0.biometric.isRequired }
+                if needsCeremony {
+                    ceremonyDenied += 1
+                    XCTAssertEqual(
+                        decision.denialReason,
+                        .biometricUnavailable,
+                        "\(capability.rawValue) needed a ceremony that cannot run",
+                    )
+                    XCTAssertTrue(
+                        decision.biometric.isRequired,
+                        "a refusal for a missing ceremony must still REPORT that one was needed",
+                    )
+                } else {
+                    ceremonyNotDenied += 1
+                    XCTAssertEqual(
+                        decision.basis,
+                        .promptRequired,
+                        "\\(capability.rawValue) does not need a ceremony, so a broken sensor is irrelevant",
+                    )
+                }
+            }
+        }
+        XCTAssertGreaterThan(ceremonyDenied, 0, "no case in this table needs a ceremony, so the test is vacuous")
+        XCTAssertGreaterThan(ceremonyNotDenied, 0)
+    }
+
+    // MARK: B6 — saturating arithmetic that actually saturates
+
+    func testAdvancedBySaturatesInsteadOfTrapping() {
+        XCTAssertEqual(
+            MonotonicInstant(nanoseconds: 0).advanced(by: .seconds(Int64.max)).nanoseconds,
+            UInt64.max,
+        )
+        XCTAssertEqual(
+            MonotonicInstant(nanoseconds: UInt64.max).advanced(by: .seconds(86_400)).nanoseconds,
+            UInt64.max,
+        )
+        XCTAssertEqual(
+            MonotonicInstant(nanoseconds: 1_000).advanced(by: .seconds(2)).nanoseconds,
+            2_000_001_000,
+        )
+    }
+
+    // MARK: Follow-ups the review confirmed as real
+
+    /// A declared count below one is malformed, and it must not satisfy another malformed
+    /// count — `0 >= 0` used to be enough — nor be scored as five times safer than an
+    /// unbounded request.
+    func testAMalformedOperationCountIsNeitherSatisfiableNorSafe() {
+        let malformed = AuthorizationScope(operationLimit: 0)
+        XCTAssertFalse(malformed.isSatisfiableOperationCount)
+        XCTAssertFalse(
+            malformed.covers(AuthorizationScope(operationLimit: 0)),
+            "a zero-operation request satisfied a zero-operation grant",
+        )
+        XCTAssertGreaterThanOrEqual(
+            AuthorizationPolicy.remainingCountFactor(0),
+            AuthorizationPolicy.remainingCountFactor(nil),
+            "a malformed count must not look safer than an unbounded one",
+        )
+    }
+
+    /// A grant that names a bundle is only satisfied by the same bundle at the same path.
+    /// It used to fall back to the path alone whenever either side lacked a bundle.
+    func testABundleBindingIsNotSatisfiedByABareBinaryAtTheSamePath() {
+        let bound = CodeBinding(
+            executablePath: "/tmp/exactmac",
+            bundleIdentifier: "io.github.joeycumines.exactmac",
+            designatedRequirement: nil,
+        )
+        let bare = CodeIdentity(
+            executablePath: "/tmp/exactmac",
+            bundleIdentifier: nil,
+            designatedRequirement: nil,
+            signature: .unsigned,
+        )
+        XCTAssertFalse(bound.isSatisfied(by: bare))
+        XCTAssertTrue(bound.isSatisfied(by: CodeIdentity(
+            executablePath: "/tmp/exactmac",
+            bundleIdentifier: "io.github.joeycumines.exactmac",
+            designatedRequirement: nil,
+            signature: .unsigned,
+        )))
+    }
+
+    /// An empty designated requirement is not a requirement, and must not compare equal to
+    /// another empty one as though it were.
+    func testAnEmptyDesignatedRequirementIsTreatedAsNoRequirement() {
+        let identity = CodeIdentity(
+            executablePath: "/tmp/x",
+            bundleIdentifier: nil,
+            designatedRequirement: "",
+            signature: .signedAndValid,
+        )
+        XCTAssertNil(identity.binding.designatedRequirement)
+    }
+
+    /// An unexplained request is one the operator should decline, so a MISSING reason is a
+    /// different prompt rather than a shorter one — and it escalates rather than quietly
+    /// being treated as routine.
+    func testAMissingReasonEscalatesAndAnUnknownOriginEscalates() {
+        let explained = decide(request(.clipboardRead, scope: AuthorizationScope(
+            application: .bundleIdentifier("com.apple.TextEdit"),
+        )))
+        let unexplained = decide(request(
+            .clipboardRead,
+            scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            reason: nil,
+        ))
+        let blank = decide(request(
+            .clipboardRead,
+            scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            reason: "   ",
+        ))
+        let unattributed = decide(request(
+            .clipboardRead,
+            scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            origin: .unknown,
+        ))
+        XCTAssertEqual(explained.biometric, .notRequired)
+        for (label, decision) in [
+            ("no reason", unexplained), ("blank reason", blank), ("unknown origin", unattributed),
+        ] {
+            guard case .required = decision.biometric else {
+                XCTFail("\(label) did not escalate")
+                continue
+            }
+        }
+    }
+
+    /// The pre-authorization option is offered only when there is an application to scope
+    /// the batch to, because a batch over "every application" is exactly the global scope
+    /// `envelopeIsAdmissible` refuses.
+    func testTheEnvelopeOptionIsOnlyOfferedWhenItCanBeScoped() {
+        let targeted = AuthorizationPolicy.offeredDecisions(
+            for: request(
+                .clipboardRead,
+                scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            ),
+            posture: .balanced,
+            riskClass: .routine,
+        )
+        let global = AuthorizationPolicy.offeredDecisions(
+            for: request(.clipboardRead, scope: AuthorizationScope()),
+            posture: .balanced,
+            riskClass: .routine,
+        )
+        XCTAssertTrue(targeted.contains { $0.kind == .preAuthorizeEnvelope })
+        XCTAssertFalse(global.contains { $0.kind == .preAuthorizeEnvelope })
+        // And it is destructive, because it authorises unattended future capability.
+        XCTAssertTrue(
+            targeted.first { $0.kind == .preAuthorizeEnvelope }?.isDestructive ?? false,
+        )
     }
 }

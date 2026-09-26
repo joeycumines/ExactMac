@@ -26,8 +26,22 @@ struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
     /// Saturating, so a hostile or buggy duration cannot wrap into the past and make
     /// every grant look expired, or into the far future and make them look live.
     func advanced(by interval: Swift.Duration) -> MonotonicInstant {
-        let delta = UInt64(clamping: interval.components.seconds * 1_000_000_000
-            + Int64(clamping: interval.components.attoseconds / 1_000_000_000))
+        // Saturating on BOTH operations. The multiply used to happen in Int64 before
+        // anything clamped it, so `advanced(by: .seconds(Int64.max))` trapped and killed
+        // the process — the opposite of the promise in the doc comment, and this is the
+        // function grant issuance calls on values read back from a store.
+        let seconds = interval.components.seconds
+        let (scaled, secondsOverflow) = seconds.multipliedReportingOverflow(by: 1_000_000_000)
+        let delta: UInt64
+        if secondsOverflow {
+            // Saturate the DELTA to the whole representable range. Clamping the
+            // nanosecond value instead capped the result at Int64.max, which is a
+            // saturating answer that is still wrong by a factor of two billion.
+            delta = UInt64.max
+        } else {
+            let nanos = scaled &+ Int64(clamping: interval.components.attoseconds / 1_000_000_000)
+            delta = UInt64(clamping: max(0, nanos))
+        }
         let (sum, overflow) = nanoseconds.addingReportingOverflow(delta)
         return MonotonicInstant(nanoseconds: overflow ? UInt64.max : sum)
     }
@@ -267,11 +281,21 @@ struct AuthorizationScope: Sendable, Equatable, Hashable {
         application.isGlobal && window == .any && operationLimit == nil
     }
 
+    /// A declared count below one is malformed rather than maximally restrictive, and it
+    /// is treated as unsatisfiable. It used to satisfy another malformed limit, because
+    /// `0 >= 0` is true.
+    var isSatisfiableOperationCount: Bool {
+        (operationLimit ?? 1) >= 1
+    }
+
     /// Whether a grant carrying THIS scope authorises a request carrying `other`.
     /// Breadth only ever grows downward: a grant may be broader than the request, never
     /// narrower, and a count-bounded grant may not cover an unbounded request.
     func covers(_ other: AuthorizationScope) -> Bool {
         guard application.covers(other.application), window.covers(other.window) else {
+            return false
+        }
+        guard isSatisfiableOperationCount, other.isSatisfiableOperationCount else {
             return false
         }
         return switch (operationLimit, other.operationLimit) {
@@ -328,7 +352,8 @@ struct CodeIdentity: Sendable, Equatable, Hashable {
             executablePath: executablePath,
             bundleIdentifier: bundleIdentifier,
             designatedRequirement: signature == .unsigned || signature == .invalid
-                || signature == .unresolved ? nil : designatedRequirement,
+                || signature == .unresolved || designatedRequirement?.isEmpty != false
+                ? nil : designatedRequirement,
         )
     }
 }
@@ -336,6 +361,8 @@ struct CodeIdentity: Sendable, Equatable, Hashable {
 struct CodeBinding: Sendable, Equatable, Hashable {
     var executablePath: String
     var bundleIdentifier: String?
+    /// An empty requirement is not a requirement. It is rejected at the boundary rather
+    /// than compared as a string that happens to match another empty string.
     var designatedRequirement: String?
 
     /// A later request matches a grant only when the caller's resolved code identity
@@ -353,9 +380,14 @@ struct CodeBinding: Sendable, Equatable, Hashable {
             guard let offered = candidateBinding.designatedRequirement else { return false }
             return required == offered
         }
-        guard let grantedBundle = bundleIdentifier, let offeredBundle = candidateBinding.bundleIdentifier else {
+        // A binding that names a bundle is only satisfied by a candidate that names the
+        // SAME bundle at the same path. It used to fall back to the path alone whenever
+        // either side lacked a bundle, so a grant held by (path /tmp/x, bundle com.x) was
+        // satisfied by a bare binary at /tmp/x with no bundle at all.
+        guard let grantedBundle = bundleIdentifier else {
             return executablePath == candidateBinding.executablePath
         }
+        guard let offeredBundle = candidateBinding.bundleIdentifier else { return false }
         return grantedBundle == offeredBundle && executablePath == candidateBinding.executablePath
     }
 }
@@ -440,6 +472,11 @@ struct Grant: Sendable, Equatable, Hashable {
         guard capability.implies(request.capability) else { return false }
         guard scope.covers(request.scope) else { return false }
         guard holder.isSatisfied(by: identity.code) else { return false }
+        // An unresolved identity cannot be shown to BE the holder, so it inherits
+        // nothing. It is not denied for that reason either — refusing every caller whose
+        // path could not be read would be verification-as-a-gate, which this product
+        // rejects — so it falls through to a prompt with escalated friction instead.
+        guard identity.isFullyResolved else { return false }
         if let declared = scope.operationLimit, let requested = request.scope.operationLimit {
             // A count-bounded grant is a consumable: it authorises the request only if
             // enough of its declared count is left, and `declared` is deliberately not
@@ -477,7 +514,7 @@ struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
         now: MonotonicInstant,
     ) -> Bool {
         guard now < expiresAt else { return false }
-        guard holder.isSatisfied(by: identity.code) else { return false }
+        guard holder.isSatisfied(by: identity.code), identity.isFullyResolved else { return false }
         return grants.contains { $0.authorizes(request, identity: identity, now: now) }
     }
 }
@@ -581,7 +618,7 @@ enum RiskClass: String, Sendable, Equatable, Comparable, CaseIterable {
 
 /// The product the risk model is built from. Each factor is normalised to 0...1 and the
 /// product is the radius, so raising any one of them raises the whole.
-struct BlastRadius: Sendable, Equatable {
+struct BlastRadius: Sendable, Equatable, Hashable {
     var capability: Double
     var breadth: Double
     var duration: Double
@@ -593,10 +630,34 @@ struct BlastRadius: Sendable, Equatable {
         capability * breadth * duration * remainingCount * targetConsequence * signatureQuality
     }
 
+    /// Thresholds chosen so that all three classes are REACHABLE from the factors the
+    /// policy actually produces, and so that the boundary cases the design names land
+    /// where it says they should. The previous pair (0.18 / 0.42) was unreachable: with
+    /// duration pinned at 0.2 the maximum expressible radius was 0.09, so every decision
+    /// was `routine` and the escalation that depends on the radius never fired.
+    ///
+    /// Every figure below is computed, not asserted, at a SIGNED caller's quality of 0.5,
+    /// and each one is reproduced by `testBreadthAndDurationChangeTheAnswer` and
+    /// `testEveryRiskClassIsReachable`:
+    ///
+    ///   clipboard.read,      one application, once ...... 0.005  routine
+    ///   clipboard.read,      every application, once .... 0.012  routine
+    ///   clipboard.read,      one application, 8 hours ... 0.066  routine
+    ///   observation.window,  every application, 8 hours .0.101  elevated
+    ///   window.manage,       every application, 8 hours .0.124  elevated
+    ///   clipboard.read,      every application, 8 hours .0.146  elevated
+    ///   input.synthesize,    every application, 8 hours .0.169  elevated
+    ///   observation.ax,      every application, 8 hours .0.180  high
+    ///   script.execute,      every application, 8 hours .0.225  high
+    ///
+    /// So a long global grant of a READ capability reads as Elevated and the same grant of
+    /// an observation or execution capability reads as High, and an unsigned caller moves
+    /// both up a class: the same clipboard grant becomes 0.293, elevated, and unsigned
+    /// AND on a high-consequence application it becomes 0.65, high.
     var riskClass: RiskClass {
         switch radius {
-        case ..<0.18: .routine
-        case ..<0.42: .elevated
+        case ..<0.10: .routine
+        case ..<0.18: .elevated
         default: .high
         }
     }
@@ -607,6 +668,18 @@ enum BiometricRequirement: Sendable, Equatable {
     /// Carries why, because the prompt names the single decision the ceremony
     /// authorizes and an unexplained ceremony is not consent to anything in particular.
     case required(reason: String)
+
+    var isRequired: Bool {
+        if case .required = self { return true }
+        return false
+    }
+
+    /// Nil unless one is required, so a caller cannot read a reason off a requirement
+    /// that does not have one.
+    var reason: String? {
+        guard case .required(let reason) = self else { return nil }
+        return reason
+    }
 }
 
 enum DecisionBasis: Sendable, Equatable {
@@ -632,8 +705,8 @@ enum DenialReason: String, Sendable, Equatable, CaseIterable {
 
 /// One thing the operator can say, carrying its own breadth and duration on its face.
 /// An operator cannot compare options whose scope is hidden.
-struct OfferedDecision: Sendable, Equatable, Hashable {
-    enum Kind: String, Sendable, Equatable, Hashable, CaseIterable {
+struct OfferedDecision: Sendable, Equatable {
+    enum Kind: String, Sendable, Equatable, CaseIterable {
         case deny
         case allowOnce
         case allowTargetApplication
@@ -645,11 +718,34 @@ struct OfferedDecision: Sendable, Equatable, Hashable {
     var kind: Kind
     var scope: AuthorizationScope
     var duration: GrantDuration
+    /// What THIS option would permit, scored on the same six factors as everything else.
+    /// The prompt shows it beside the option so the operator is choosing on the numbers
+    /// rather than on the option's name — "allow once" and "always allow" differ by
+    /// nothing else.
+    var blastRadius: BlastRadius
+    /// Whether agreeing to THIS option would cost a ceremony. Per option, not per
+    /// request: the fingerprint is what a specific grant costs, and a prompt that asked
+    /// for one ceremony and then offered an option that needed another would be asking
+    /// the operator to guess.
+    var biometric: BiometricRequirement
     /// The destructive options are never the default and never sit beside the primary
     /// action; the ordering this array carries is the property, not the set.
     var isDestructive: Bool
     var isDefault: Bool
     var isPrimary: Bool
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind && lhs.scope == rhs.scope && lhs.duration == rhs.duration
+            && lhs.blastRadius == rhs.blastRadius && lhs.biometric == rhs.biometric
+            && lhs.isDestructive == rhs.isDestructive && lhs.isDefault == rhs.isDefault
+            && lhs.isPrimary == rhs.isPrimary
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(scope)
+        hasher.combine(duration)
+    }
 }
 
 struct AuthorizationDecision: Sendable, Equatable {
@@ -660,14 +756,16 @@ struct AuthorizationDecision: Sendable, Equatable {
 
     var outcome: Outcome
     var basis: DecisionBasis
-    /// The request's capability plus everything it transitively carries, so the caller
-    /// states on the record what was actually permitted.
+    /// The request's capability plus everything it transitively carries. On an allow this
+    /// states on the record what was permitted; on a denial it states what was ASKED
+    /// FOR, which is not the same thing and is not claimed to be.
     var effectiveCapabilities: Set<Capability>
     var blastRadius: BlastRadius
     var riskClass: RiskClass
     var biometric: BiometricRequirement
-    /// Empty whenever the outcome is deny. A denied decision never carries something
-    /// the operator could act on.
+    /// Populated when, and only when, the basis is `.promptRequired` — a decision that
+    /// needs a human. Every hard denial carries none, so nothing a caller could act on
+    /// travels back with a refusal.
     var offeredDecisions: [OfferedDecision]
     /// When a standing grant or envelope matched, the instant it stops authorising.
     var expiresAt: MonotonicInstant?

@@ -30,25 +30,40 @@ enum AuthorizationPolicy {
         now: MonotonicInstant,
     ) -> AuthorizationDecision {
         let effective = request.capability.impliedCapabilities
+        // An identity that could not be fully resolved is treated as UNRESOLVED for
+        // friction purposes whatever its binary claims, because "the signature on the
+        // file says signed" and "we know which process is holding that file" are two
+        // different claims and only the second one failed.
+        let effectiveSignature: SignatureState = identity.isFullyResolved
+            ? identity.code.signature
+            : .unresolved
         let consequence = context.highConsequenceTargets.contains {
-            Self.isHighConsequence($0, for: request.scope)
+            isHighConsequence($0, for: request.scope)
         }
-        let radius = Self.blastRadius(
-            for: request,
-            identity: identity,
+        // The radius of what was ASKED FOR, which is the prompt's risk chip: a one-shot
+        // ask has no duration beyond the request itself, so it is the floor of the
+        // product. Each offered decision carries its own radius, because what the
+        // operator is really being asked to weigh is the option in front of them.
+        let askedRadius = blastRadius(
+            capability: request.capability,
+            scope: request.scope,
+            duration: .once,
+            remainingCount: request.scope.operationLimit,
             targetIsHighConsequence: consequence,
+            signatureQuality: effectiveSignature.quality,
         )
-        let risk = radius.riskClass
-        let signature = identity.code.signature
+        let askedRisk = askedRadius.riskClass
 
-        func deny(_ reason: DenialReason) -> AuthorizationDecision {
+        func deny(_ reason: DenialReason, _ requirement: BiometricRequirement = .notRequired)
+            -> AuthorizationDecision
+        {
             AuthorizationDecision(
                 outcome: .deny,
                 basis: .denied(reason),
                 effectiveCapabilities: effective,
-                blastRadius: radius,
-                riskClass: risk,
-                biometric: .notRequired,
+                blastRadius: askedRadius,
+                riskClass: askedRisk,
+                biometric: requirement,
                 offeredDecisions: [],
                 expiresAt: nil,
             )
@@ -56,9 +71,10 @@ enum AuthorizationPolicy {
 
         // Order matters and is not arbitrary. Each of these is a property of the SYSTEM,
         // not of the request, so a request that would otherwise be allowed is refused
-        // before any of its own content is considered. That ordering is also what makes
-        // the refusal un-leaky: a caller cannot distinguish "no grant matched" from "the
-        // console is down" by timing the difference between two denials.
+        // before any of its own content is considered. The property this buys is not
+        // secrecy of the reason — a caller is told which system failure it hit — it is
+        // that a system failure cannot be used to probe whether a TARGET exists, because
+        // the target is never examined on this path.
 
         // A TCP listener has no socket access to restrict and therefore no authenticating
         // principal, so it has no consent path and no process verification. Every
@@ -79,8 +95,8 @@ enum AuthorizationPolicy {
                 outcome: .allow,
                 basis: .noConsentRequired,
                 effectiveCapabilities: effective,
-                blastRadius: radius,
-                riskClass: risk,
+                blastRadius: askedRadius,
+                riskClass: askedRisk,
                 biometric: .notRequired,
                 offeredDecisions: [],
                 expiresAt: nil,
@@ -95,7 +111,9 @@ enum AuthorizationPolicy {
         if posture.honoursStandingGrants {
             // A live grant, and then an envelope. Both bind to CODE IDENTITY, so a
             // different binary running as the same user does not inherit them, and
-            // neither is ever matched on a pid.
+            // neither is ever matched on a pid. An envelope is additionally re-checked
+            // for admissibility here rather than trusted on the strength of having once
+            // been issued: a stored object that has become invalid must not be honoured.
             if let grant = grants.first(where: {
                 $0.authorizes(request, identity: identity, now: now)
             }) {
@@ -103,22 +121,22 @@ enum AuthorizationPolicy {
                     outcome: .allow,
                     basis: .grant(id: grant.id),
                     effectiveCapabilities: effective,
-                    blastRadius: radius,
-                    riskClass: risk,
+                    blastRadius: askedRadius,
+                    riskClass: askedRisk,
                     biometric: .notRequired,
                     offeredDecisions: [],
                     expiresAt: grant.expiresAt,
                 )
             }
             if let envelope = envelopes.first(where: {
-                $0.authorizes(request, identity: identity, now: now)
+                envelopeIsAdmissible($0) && $0.authorizes(request, identity: identity, now: now)
             }) {
                 return AuthorizationDecision(
                     outcome: .allow,
                     basis: .envelope(id: envelope.id),
                     effectiveCapabilities: effective,
-                    blastRadius: radius,
-                    riskClass: risk,
+                    blastRadius: askedRadius,
+                    riskClass: askedRisk,
                     biometric: .notRequired,
                     offeredDecisions: [],
                     expiresAt: envelope.expiresAt,
@@ -133,31 +151,32 @@ enum AuthorizationPolicy {
             return deny(.consoleUnreachable)
         }
 
-        let offered = Self.offeredDecisions(
+        let offered = offeredDecisions(
             for: request,
             posture: posture,
-            riskClass: risk,
-        )
-        let requirement = Self.biometricRequirement(
-            capability: request.capability,
-            riskClass: risk,
+            riskClass: askedRisk,
             targetIsHighConsequence: consequence,
-            signature: signature,
+            signature: effectiveSignature,
+            agentGaveReason: hasReason(request.agentReason),
+            originIsKnown: request.origin != .unknown,
         )
+        // The decision's own requirement is the requirement of the option that holds
+        // focus, because that is the one a hurried operator is about to accept.
+        let focused = offered.first(where: \.isDefault) ?? offered[0]
         // A biometric that cannot be performed is a denial, never a downgrade to a
-        // weaker check. Offered decisions that would need a ceremony the machine cannot
-        // run are withdrawn rather than silently downgraded.
-        if case .unavailable = context.biometric, case .required = requirement {
-            return deny(.biometricUnavailable)
+        // weaker check. Options that would need a ceremony the machine cannot run are
+        // withdrawn rather than silently downgraded.
+        if case .unavailable = context.biometric, case .required = focused.biometric {
+            return deny(.biometricUnavailable, focused.biometric)
         }
         return AuthorizationDecision(
             outcome: .deny,
             basis: .promptRequired,
             effectiveCapabilities: effective,
-            blastRadius: radius,
-            riskClass: risk,
-            biometric: requirement,
-            offeredDecisions: requirement == .notRequired ? offered : offered,
+            blastRadius: askedRadius,
+            riskClass: askedRisk,
+            biometric: focused.biometric,
+            offeredDecisions: offered,
             expiresAt: nil,
         )
     }
@@ -170,22 +189,29 @@ enum AuthorizationPolicy {
     /// biometric. Friction therefore scales with blast radius, and a uniform prompt is
     /// not a stricter policy — it is a failed control, because a prompt an operator sees
     /// for everything is a prompt they stop reading.
+    ///
+    /// EVERY FACTOR IS NOW A REAL INPUT. Duration used to be the constant 0.2, which put
+    /// the theoretical maximum radius at 0.09 and made `.elevated` and `.high`
+    /// unreachable: a review enumerated 1,344 decisions and found 0 of each. A global
+    /// unbounded clipboard read and a single-application read were getting identical
+    /// friction at 2.2x the radius apart. Duration and the remaining count are now
+    /// arguments, because a risk model that cannot express the difference between "once"
+    /// and "for eight hours" is not a risk model.
     static func blastRadius(
-        for request: AuthorizationRequest,
-        identity: CallerIdentity,
+        capability: Capability,
+        scope: AuthorizationScope,
+        duration: GrantDuration,
+        remainingCount: Int?,
         targetIsHighConsequence: Bool,
+        signatureQuality: Double,
     ) -> BlastRadius {
         BlastRadius(
-            capability: capabilityFactor(request.capability),
-            breadth: breadthFactor(request.scope),
-            // A one-shot asks for nothing, so it contributes almost nothing.
-            duration: 0.2,
-            // An operation count is the ergonomic grain between once and forever: as the
-            // remaining count falls the radius falls, which is what makes a loop
-            // converge to a fresh decision instead of running to the end of the grant.
-            remainingCount: remainingCountFactor(request.scope.operationLimit),
+            capability: capabilityFactor(capability),
+            breadth: breadthFactor(scope),
+            duration: durationFactor(duration),
+            remainingCount: remainingCountFactor(remainingCount),
             targetConsequence: targetIsHighConsequence ? 1.0 : 0.45,
-            signatureQuality: identity.code.signature.quality,
+            signatureQuality: signatureQuality,
         )
     }
 
@@ -217,12 +243,27 @@ enum AuthorizationPolicy {
         return factor
     }
 
+    /// A one-shot is a floor, not a zero: it still asks the operator once, and a risk
+    /// model that scored it at zero would make "allow once" and "do nothing" identical.
+    /// Eight hours is the ceiling of the scale, which is the same eight hours an
+    /// envelope may be granted for, so the number the operator reads on the option is the
+    /// number the model uses.
+    static func durationFactor(_ duration: GrantDuration) -> Double {
+        guard let seconds = duration.seconds else { return 0.08 }
+        guard seconds > 0 else { return 1.0 }
+        return min(1.0, Double(seconds) / Double(maximumEnvelopeSeconds))
+    }
+
+    /// An operation count is the ergonomic grain between once and forever: as the
+    /// remaining count falls the radius falls, which is what makes a loop converge to a
+    /// fresh decision instead of running to the end of the grant. A count below one is
+    /// MALFORMED, and a malformed limit is scored at the maximum rather than the minimum:
+    /// it used to score 0.2, which made "do this zero times" look five times safer than
+    /// an unbounded request.
     static func remainingCountFactor(_ limit: Int?) -> Double {
         guard let limit else { return 1.0 }
-        // `return switch`, because a switch after a `guard` is a statement in a
-        // multi-statement body and every one of its case values was being discarded.
         return switch limit {
-        case ..<1: 0.2
+        case ..<1: 1.0
         case 1: 0.3
         case 2...5: 0.5
         case 6...20: 0.7
@@ -232,41 +273,47 @@ enum AuthorizationPolicy {
 
     // MARK: - Biometric policy
 
-    /// Whether a decision needs a ceremony, as a pure function of what is being
-    /// authorised. Exhaustive tests live in `BiometricPolicyTests`; this is the whole
-    /// policy, with no authenticator anywhere in sight, because the requirement must be
-    /// answerable whether or not the machine can perform one.
+    /// Whether a decision needs a ceremony, as a pure function of WHAT WOULD BE
+    /// AUTHORISED: the capability, the scope, the duration, the target, and the caller's
+    /// signature.
+    ///
+    /// IT IS KEYED ON THE SCOPE, NOT THE OPTION'S NAME. It used to take
+    /// `decisionKind: OfferedDecision.Kind` and require a ceremony for
+    /// `.allowGlobalPersistent`, which meant `.allowSession` handed out an identical
+    /// grant — same global scope, same eight hours — with no ceremony at all. Two labels
+    /// for one scope is a policy that can be defeated by choosing the other label.
     static func biometricRequirement(
         capability: Capability,
-        riskClass: RiskClass,
-        targetIsHighConsequence: Bool,
-        signature: SignatureState,
+        scope: AuthorizationScope = AuthorizationScope(),
+        duration: GrantDuration = .once,
+        riskClass: RiskClass = .routine,
+        targetIsHighConsequence: Bool = false,
+        signature: SignatureState = .signedAndValid,
         isRevokeAll: Bool = false,
-        decisionKind: OfferedDecision.Kind = .allowOnce,
     ) -> BiometricRequirement {
-        // THE ORDER IS THE POLICY, and it is the order the table test found. The
-        // allow-once exemption used to sit second, which meant it overrode two rules
-        // that must never be overridable: an UNSIGNED caller asking for one narrow thing
-        // got no ceremony — the case where the operator has least reason to be wary and
-        // most to be given — and a SCRIPT asked for once got no ceremony either, even
-        // though a shell can read the screen, the clipboard and the interface and is the
-        // single most dangerous capability in the product.
         if isRevokeAll {
             return .required(reason: "revoking every grant at once")
         }
-        // Verification is graded evidence, and the cheapest honest escalation of a weak
-        // signature is a ceremony rather than a denial.
+        // Signature escalation comes before every exemption, and that order is the whole
+        // point. The narrow-allow-once exemption used to sit second and overrode two rules
+        // that must never be overridable: an UNSIGNED caller asking for one narrow thing
+        // got no ceremony — the case where the operator has least reason to be wary and
+        // most to be given — and a SCRIPT asked for once got none either.
         if signature == .unsigned || signature == .invalid || signature == .unresolved {
             return .required(reason: "the caller's signature is \(signature.rawValue)")
         }
         if capability == .scriptExecute {
             return .required(reason: "running a shell reaches everything this Mac can do")
         }
-        if decisionKind == .allowGlobalPersistent {
-            return .required(reason: "a grant that outlives this request and covers every app")
-        }
-        if decisionKind == .preAuthorizeEnvelope {
-            return .required(reason: "a pre-authorized batch runs unattended")
+        // BREADTH x PERSISTENCE, which is the rule the design's own worked example
+        // states: a clipboard read scoped to one application stays near free, and the
+        // same capability across EVERY application, CONTINUOUSLY, costs a biometric.
+        // Neither half does it — a global one-shot and a single-app eight-hour grant are
+        // both ordinary — and the product of the two is a standing permission.
+        if scope.isGlobalPersistent, duration.isPersistent {
+            return .required(
+                reason: "a standing permission over every application until you revoke it",
+            )
         }
         if targetIsHighConsequence {
             return .required(reason: "this application is on your high-consequence list")
@@ -274,32 +321,71 @@ enum AuthorizationPolicy {
         if riskClass == .high {
             return .required(reason: "this grant would permit a lot")
         }
-        // A narrow allow-once is where friction is deliberately NOT spent, and it is
-        // last because it is the only exemption on this list.
-        if decisionKind == .allowOnce, riskClass == .routine, !targetIsHighConsequence {
-            return .notRequired
-        }
         return .notRequired
     }
 
     // MARK: - Offered decisions
 
-    /// The options the operator is given, each carrying its own breadth and duration.
-    /// The order IS a security property, because the default focus determines what a
-    /// hurried operator approves: the default leads, the extremes bracket the list, and
-    /// Deny is never adjacent to the option that holds focus.
+    /// The options the operator is given, each carrying its own breadth, duration, radius
+    /// and ceremony requirement. The order IS a security property, because the default
+    /// focus determines what a hurried operator approves: the default leads, the extremes
+    /// bracket the list, and Deny is never adjacent to the option that holds focus.
     static func offeredDecisions(
         for request: AuthorizationRequest,
         posture: Posture,
         riskClass: RiskClass,
+        targetIsHighConsequence: Bool = false,
+        signature: SignatureState = .signedAndValid,
+        agentGaveReason: Bool = true,
+        originIsKnown: Bool = true,
     ) -> [OfferedDecision] {
         let target = request.scope.application
+        let signatureQuality = signature.quality
+
+        func decision(
+            _ kind: OfferedDecision.Kind,
+            _ scope: AuthorizationScope,
+            _ duration: GrantDuration,
+            isDestructive: Bool = false,
+            isDefault: Bool = false,
+            isPrimary: Bool = false,
+        ) -> OfferedDecision {
+            let radius = blastRadius(
+                capability: request.capability,
+                scope: scope,
+                duration: duration,
+                remainingCount: scope.operationLimit,
+                targetIsHighConsequence: targetIsHighConsequence,
+                signatureQuality: signatureQuality,
+            )
+            return OfferedDecision(
+                kind: kind,
+                scope: scope,
+                duration: duration,
+                blastRadius: radius,
+                biometric: biometricRequirement(
+                    capability: request.capability,
+                    scope: scope,
+                    duration: duration,
+                    // A missing reason is a different prompt, not a shorter one, and an
+                    // unexplained request is one the operator should decline — so it
+                    // escalates rather than being quietly treated as routine. The same
+                    // goes for an origin the server could not attribute.
+                    riskClass: (agentGaveReason && originIsKnown) ? radius.riskClass : .high,
+                    targetIsHighConsequence: targetIsHighConsequence,
+                    signature: signature,
+                ),
+                isDestructive: isDestructive,
+                isDefault: isDefault,
+                isPrimary: isPrimary,
+            )
+        }
+
         var decisions: [OfferedDecision] = [
-            OfferedDecision(
-                kind: .allowOnce,
-                scope: request.scope,
-                duration: .once,
-                isDestructive: false,
+            decision(
+                .allowOnce,
+                request.scope,
+                .once,
                 isDefault: true,
                 isPrimary: true,
             ),
@@ -309,58 +395,54 @@ enum AuthorizationPolicy {
             // and offering it anyway is how a UI starts lying about its own scope.
         } else {
             decisions.append(
-                OfferedDecision(
-                    kind: .allowTargetApplication,
-                    scope: AuthorizationScope(application: target, window: .any),
-                    duration: .monotonicSeconds(15 * 60),
-                    isDestructive: false,
-                    isDefault: false,
-                    isPrimary: false,
+                decision(
+                    .allowTargetApplication,
+                    AuthorizationScope(application: target, window: .any),
+                    .monotonicSeconds(15 * 60),
                 ),
             )
         }
         decisions.append(
-            OfferedDecision(
-                kind: .allowSession,
-                scope: AuthorizationScope(application: target),
-                duration: .monotonicSeconds(maximumEnvelopeSeconds),
-                isDestructive: false,
-                isDefault: false,
-                isPrimary: false,
+            decision(
+                .allowSession,
+                AuthorizationScope(application: target),
+                .monotonicSeconds(maximumEnvelopeSeconds),
             ),
         )
+        // A pre-authorized batch is offered only when there is an application to scope it
+        // to. For a request that named no target, the envelope's own grants would be
+        // global, and `envelopeIsAdmissible` rejects exactly that — so offering it would
+        // be offering something the system would refuse at issuance.
+        if !target.isGlobal {
+            decisions.append(
+                decision(
+                    .preAuthorizeEnvelope,
+                    AuthorizationScope(application: target),
+                    .monotonicSeconds(maximumEnvelopeSeconds),
+                    // It authorises unattended future capability, so it is marked
+                    // destructive: it can never be the focused option by accident.
+                    isDestructive: true,
+                ),
+            )
+        }
         decisions.append(
-            OfferedDecision(
-                kind: .preAuthorizeEnvelope,
-                scope: AuthorizationScope(application: target),
-                duration: .monotonicSeconds(maximumEnvelopeSeconds),
-                isDestructive: false,
-                isDefault: false,
-                isPrimary: false,
-            ),
-        )
-        decisions.append(
-            OfferedDecision(
-                kind: .deny,
-                scope: AuthorizationScope(),
-                duration: .once,
+            decision(
+                .deny,
+                AuthorizationScope(),
+                .once,
                 isDestructive: true,
-                isDefault: false,
-                isPrimary: false,
             ),
         )
         // "Always allow" is offered only when the request named no single target. A
         // global grant for a request that was about one application is a decision the
         // operator did not think they were making.
-        if case .any = target {
+        if target.isGlobal {
             decisions.append(
-                OfferedDecision(
-                    kind: .allowGlobalPersistent,
-                    scope: AuthorizationScope(),
-                    duration: .monotonicSeconds(maximumEnvelopeSeconds),
+                decision(
+                    .allowGlobalPersistent,
+                    AuthorizationScope(),
+                    .monotonicSeconds(maximumEnvelopeSeconds),
                     isDestructive: true,
-                    isDefault: false,
-                    isPrimary: false,
                 ),
             )
         }
@@ -379,9 +461,6 @@ enum AuthorizationPolicy {
             // default and strip its destructive marking, which is the one thing the
             // design forbids: Deny is never focused by default, and it is rendered on its
             // own row below a hairline precisely so muscle memory cannot reach it.
-            // Where there is no target to scope to, the one-shot keeps focus and the
-            // ceremony — which the biometric policy requires for a high radius — is the
-            // friction.
             decisions[targetIndex].isDefault = true
             decisions[targetIndex].isPrimary = true
             if let onceIndex = decisions.firstIndex(where: { $0.kind == .allowOnce }) {
@@ -397,9 +476,13 @@ enum AuthorizationPolicy {
     static func isHighConsequence(_ bundleIdentifier: String, for scope: AuthorizationScope) -> Bool {
         switch scope.application {
         case .bundleIdentifier(let requested): requested == bundleIdentifier
-        case .any: false
-        case .processIdentifier: false
+        case .any, .processIdentifier: false
         }
+    }
+
+    private static func hasReason(_ reason: String?) -> Bool {
+        guard let reason else { return false }
+        return !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Whether an envelope is admissible at all. Called at issuance AND re-checked at
@@ -410,6 +493,21 @@ enum AuthorizationPolicy {
         guard let seconds = envelope.declaredDuration.seconds else { return false }
         guard seconds > 0, seconds <= maximumEnvelopeSeconds else { return false }
         guard !envelope.isGlobalPersistent else { return false }
-        return !envelope.grants.isEmpty
+        guard !envelope.grants.isEmpty else { return false }
+        // No clock is available here, so the check that CAN be made without one is the one
+        // that matters: nothing inside the envelope may outlive the envelope. A grant
+        // stamped with a later expiry than its envelope would keep authorising after the
+        // operator believed the batch had ended, and revoking the envelope would leave it
+        // alive. The converse — an envelope whose expiry is later than its declared
+        // duration — is caught at issuance, where the clock is.
+        for grant in envelope.grants where grant.expiresAt > envelope.expiresAt {
+            return false
+        }
+        // Every grant inside must also be individually admissible, or the envelope is a
+        // wrapper around something the store would have refused on its own.
+        return envelope.grants.allSatisfy { grant in
+            grant.scope.isSatisfiableOperationCount
+                && (!grant.scope.isGlobalPersistent || grant.duration == .once)
+        }
     }
 }
