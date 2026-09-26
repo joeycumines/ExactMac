@@ -1,0 +1,1551 @@
+{
+  "$schema": "https://github.com/OWASP/www-project-threat-model-library/blob/v1.0.2/threat-model.schema.json",
+  "version": "1.0",
+  "repo_link": "https://github.com/joeycumines/ExactMac",
+  "reviewed_at": "2026-09-26",
+  "frozen": false,
+  "scope": {
+    "title": "ExactMac gRPC automation server and its consent plane",
+    "description": "ExactMac is a macOS automation server. It exposes 68 gRPC methods on exactmac.v1.ExactMac and, by design, performs work that ordinary applications are not permitted to perform: it executes arbitrary AppleScript, JavaScript for Automation, and shell commands; it reads the accessibility tree of every running application; it captures the screen; it reads and writes the system clipboard and keeps a clipboard history; and it synthesizes mouse and keyboard input, acting as the user. The server runs as a launchd-activated daemon, holds the Accessibility TCC grant, and therefore holds the ambient authority of the logged-in user. The product's purpose is to let AI agents drive a Mac, so the requesting party is normally an untrusted-by-default automated process rather than a human operator. This model covers the server, the authorization and consent plane being built around it, and the exact trust story of its two deployment variants. It does not cover the Go MCP proxy except as a calling peer, nor the macOS kernel, nor physical access to the machine.",
+    "business_criticality": "maximal",
+    "data_sensitivity": [
+      "pii",
+      "cred",
+      "fin",
+      "biz",
+      "ip"
+    ],
+    "exposure": "external",
+    "tier": "mission_critical"
+  },
+  "description": "WHY EXPOSURE IS EXTERNAL. ServerConfig.fromEnvironment reads GRPC_LISTEN_ADDRESS, which defaults to 127.0.0.1 but is not constrained to it, and the transport is constructed as HTTP2ServerTransport.Posix with transportSecurity .plaintext in BOTH the Unix-socket and the TCP branch of main.swift. A supported configuration therefore produces a network-reachable, unencrypted, unauthenticated endpoint on a process that can execute shell commands. That single fact is why this is modelled as external exposure rather than a purely local service.\n\nWHY BUSINESS CRITICALITY IS MAXIMAL. The server's authority is the user's authority. Shell execution is a documented feature, not a bug. Screen capture and accessibility reads will routinely encounter passwords, one-time codes, private correspondence, banking interfaces, and source code. Compromise of this process is equivalent to full compromise of the user's desktop session, with no additional privilege required to act.\n\nTHE CENTRAL SECURITY FACT, WHICH THE REST OF THIS MODEL ORGANIZES AROUND. There is no authentication in the server today. Grepping the server sources for authorization, consent, grant, approval, or principal returns nothing; the only permission handling is macOS TCC messaging. The Unix socket pathname is 0600 and launchd-activated, so reaching it requires running as the owning user. That is a real boundary against other accounts and against the network, and it is the intended authentication for the production variant. It is NOT a boundary against the dominant threat, because the legitimate consumer of this product is an AI agent, and an AI agent runs as the same user as everything else the user runs. Any malware that has achieved execution as the user can reach the socket. The honest consequence is that this system cannot cryptographically distinguish the user's own agent from malware running as the user, and must instead make the human a well-informed, low-friction judge. Every control below is chosen in service of that.",
+  "diagrams": [
+    {
+      "title": "Trust boundaries by deployment variant",
+      "type": "mermaid",
+      "description": "The two supported deployment variants have materially different trust stories, and conflating them is the central modelling error this model avoids.",
+      "source": "flowchart TB\n  subgraph variant_socket[Unix socket variant - supported production mode]\n    AG[agent-process-zone<br/>AI agent, MCP client,<br/>any process as the owning user]\n    OS[os-platform-zone<br/>launchd, TCC, Security.framework]\n    SRV[exactmac-server-zone<br/>gRPC listener, authorization plane,<br/>script executor, capture, input, clipboard]\n    CON[consent-console-zone<br/>ExactMacConsole, LocalAuthentication]\n    DESK[user-desktop-zone<br/>user applications and their data]\n    AG -->|AF_UNIX, pathname 0600, no TLS,<br/>socket access IS the authentication| SRV\n    SRV -->|AF_UNIX + shared token + peer uid,<br/>mutually authenticated| CON\n    CON -->|LAContext biometrics| OS\n    CON -->|prompts the human| DESK\n    SRV -->|AX / CG / pasteboard under TCC grant| DESK\n    SRV -->|launchd socket activation| OS\n  end\n  subgraph variant_tcp[TCP variant - retained for compatibility, not a production mode]\n    NET[network-zone<br/>any remote host]\n    SRV2[exactmac-server-zone<br/>same server, reduced posture]\n    NET -->|plaintext HTTP/2, NO authentication,<br/>NO consent path, NO process verification| SRV2\n  end"
+    },
+    {
+      "title": "Sensitive data flows",
+      "type": "mermaid",
+      "description": "Where content leaves the user's trust boundary. Every flow below is plaintext and every flow below crosses into a process that is, by default, an unauthenticated caller.",
+      "source": "flowchart LR\n  DESK[user-desktop-zone] -->|AX tree: all on-screen text| SRV[exactmac-server-zone]\n  DESK -->|pixels: screenshots| SRV\n  DESK -->|NSPasteboard: copied secrets| SRV\n  SRV -->|content returned to caller| AG[agent-process-zone]\n  SRV -->|request detail for the human| CON[consent-console-zone]\n  CON -->|decision| SRV\n  SRV -->|synthesized clicks and keys,<br/>irreversible once acted upon| DESK\n  SRV -->|osascript child process:<br/>arbitrary code| OS[os-platform-zone]\n  SRV -->|append-only decision log| AUD[(decision-audit-log-file)]"
+    }
+  ],
+  "trust_zones": [
+    {
+      "symbolic_name": "agent-process-zone",
+      "title": "Agent and caller process zone",
+      "description": "Every process that talks to the server: the intended AI agent and its host application, the Go MCP proxy, and equally any unrelated process that happens to run as the same user. This zone is inside the socket's 0600 boundary, so membership is not a privilege. It is treated as hostile by default, because the product's normal consumer is an automated process acting on instructions it did not author."
+    },
+    {
+      "symbolic_name": "exactmac-server-zone",
+      "title": "ExactMac server zone",
+      "description": "The ExactMacServer process and everything it owns: the plaintext gRPC listener, the protobuf wire validator, the authorization interceptor and policy engine, the caller identity resolver, the grant store, the consent broker, the decision audit log, the script executor, the capture pipeline, the clipboard manager, the accessibility traversal engine, the input synthesis pipeline, the observation manager, and the macro executor. The whole zone holds the user's ambient authority via the Accessibility TCC grant."
+    },
+    {
+      "symbolic_name": "consent-console-zone",
+      "title": "Consent console zone",
+      "description": "The ExactMacConsole menu-bar application, which presents requests to the human, collects decisions, and invokes LocalAuthentication. It is a planned component: it does not exist yet, and it is modelled here because this document is the requirements source for building it. It holds no authority of its own; it can only answer, never grant."
+    },
+    {
+      "symbolic_name": "user-desktop-zone",
+      "title": "User desktop zone",
+      "description": "The logged-in user's applications, windows, documents, clipboard, mail, banking sessions, password manager, and everything else the user can see or touch. The target of every capability the server exposes."
+    },
+    {
+      "symbolic_name": "os-platform-zone",
+      "title": "macOS platform zone",
+      "description": "launchd socket activation, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, and the kernel. Treated as a trusted platform under the explicit assumption that the host is not already compromised."
+    },
+    {
+      "symbolic_name": "network-zone",
+      "title": "Network zone",
+      "description": "Remote hosts, relevant only to the TCP variant. Present because the configuration permits it, which is precisely why the TCP variant is modelled as unsupported for the consent-bearing capability set."
+    }
+  ],
+  "trust_boundaries": [
+    {
+      "trust_zone_a": "agent-process-zone",
+      "trust_zone_b": "exactmac-server-zone",
+      "access_control_methods": [
+        "dac"
+      ],
+      "authentication_methods": [],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    },
+    {
+      "trust_zone_a": "exactmac-server-zone",
+      "trust_zone_b": "consent-console-zone",
+      "access_control_methods": [
+        "acl",
+        "dac"
+      ],
+      "authentication_methods": [
+        "token"
+      ],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    },
+    {
+      "trust_zone_a": "consent-console-zone",
+      "trust_zone_b": "os-platform-zone",
+      "access_control_methods": [
+        "mac"
+      ],
+      "authentication_methods": [
+        "biometrics"
+      ],
+      "access_token_expires": false,
+      "can_user_logout": true,
+      "can_system_logout": true
+    },
+    {
+      "trust_zone_a": "exactmac-server-zone",
+      "trust_zone_b": "user-desktop-zone",
+      "access_control_methods": [
+        "mac"
+      ],
+      "authentication_methods": [],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    },
+    {
+      "trust_zone_a": "network-zone",
+      "trust_zone_b": "exactmac-server-zone",
+      "access_control_methods": [],
+      "authentication_methods": [],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    }
+  ],
+  "actors": [
+    {
+      "symbolic_name": "developer-operator",
+      "title": "Developer operator",
+      "description": "The human who installed ExactMac, granted it Accessibility access, and runs agents against their own Mac. They are the only party the system is genuinely trying to protect, and also the party whose judgement the consent plane depends on.",
+      "type": "power_user",
+      "permissions": "Full control of their own account. Can grant and revoke TCC permissions, edit the grant store, and shut down the server. Cannot read another user's desktop without escalating.",
+      "trust_zone": "user-desktop-zone"
+    },
+    {
+      "symbolic_name": "ai-agent",
+      "title": "AI agent",
+      "description": "The intended consumer. Requests windows, elements, capture, clipboard, input synthesis, observation, macros, and script execution over gRPC, typically in long loops. Runs as the same user as the operator, so it is inside the socket boundary without having earned anything.",
+      "type": "third_party",
+      "permissions": "Whatever the server grants, and today that is everything, with no per-request decision recorded.",
+      "trust_zone": "agent-process-zone"
+    },
+    {
+      "symbolic_name": "agent-host-application",
+      "title": "Agent host application",
+      "description": "The IDE, terminal, or desktop application that hosts the agent and sits between the user and the agent. A compromise or a vulnerability here becomes agent compromise, because the agent inherits the host's authority.",
+      "type": "third_party",
+      "permissions": "Inherits the user's authority, and mediates which instructions reach the agent.",
+      "trust_zone": "agent-process-zone"
+    },
+    {
+      "symbolic_name": "unauthorized-local-process",
+      "title": "Unauthorized local process",
+      "description": "Any process running as the same user that is not a legitimate agent: malware, a malicious dependency in a build or test run, a rogue npm postinstall, or a compromised helper. It reaches the socket because the socket is same-UID, and it is the dominant threat in the production variant.",
+      "type": "third_party",
+      "permissions": "Full access to every capability, because the server performs no authorization.",
+      "trust_zone": "agent-process-zone"
+    },
+    {
+      "symbolic_name": "second-local-user",
+      "title": "Second local user",
+      "description": "Another human account on a shared or family Mac. Excluded by the 0600 socket pathname and by launchd ownership, and modelled so that the exclusion is an explicit, tested property rather than an accident.",
+      "type": "user",
+      "permissions": "None over this server, provided the socket mode and ownership checks hold.",
+      "trust_zone": "user-desktop-zone"
+    },
+    {
+      "symbolic_name": "remote-network-attacker",
+      "title": "Remote network attacker",
+      "description": "A host on the network, relevant only when GRPC_LISTEN_ADDRESS is set to a non-loopback value. There is no authentication, no authorization, and no TLS on that path, so the capability is immediate remote code execution as the user.",
+      "type": "third_party",
+      "permissions": "Full access to every capability, remotely, with no consent and no audit.",
+      "trust_zone": "network-zone"
+    }
+  ],
+  "components": [
+    {
+      "symbolic_name": "grpc-plaintext-listener",
+      "title": "gRPC plaintext listener",
+      "description": "The HTTP/2 server transport, constructed in main.swift as HTTP2ServerTransport.Posix with transportSecurity .plaintext for both the pre-bound Unix descriptor and the TCP branch. No configuration enables TLS, and no request is authenticated on arrival.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "public-request-validator",
+      "title": "Public request wire validator",
+      "description": "PublicRequestValidationInterceptor, which rejects unknown fields, output-only fields, missing required fields, missing required oneofs, and non-finite or negative numerics, driven by the protobuf descriptor set. An existing, active control. It constrains request shape and is not an authorization control.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "authorization-interceptor",
+      "title": "Authorization interceptor",
+      "description": "Planned. A ServerInterceptor registered in productionServerInterceptors alongside the wire validator, positioned after wire validation and before every handler, so that no method can allocate state, start work, or touch the physical desktop without a recorded decision. Re-derives capability and scope from the request bytes rather than trusting anything the consent plane reports.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "capability-classifier",
+      "title": "RPC capability classifier",
+      "description": "Planned. Maps each of the 68 methods to exactly one capability and derives the request's scope and redacted argument summary, enumerating methods from the descriptor set so the mapping cannot silently drift from the proto. Also classifies the two streaming methods, which are authorized once at subscribe and held for the stream's lifetime.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "caller-identity-resolver",
+      "title": "Caller identity resolver",
+      "description": "Planned, Unix-socket variant only. Obtains peer pid and uid from the connected socket, resolves the executable path and bundle identifier, walks the parent process chain, and reads code-signature validity and designated requirement through the Security framework. Produces graded evidence for the human's judgement, never an authentication verdict: an unsigned caller is escalated in risk and friction rather than silently rejected, because rejecting same-UID callers would be both unusable and a false claim of security.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "authorization-policy-engine",
+      "title": "Authorization policy engine",
+      "description": "Planned. A pure function from request, identity, active grants, and user posture to a decision and a decision basis. Computes implication closure over capabilities, because script execution subsumes screen reading, clipboard reading, and input synthesis, and computes blast radius as the product of capability, scope breadth, duration, remaining count, target consequence, and signature quality, so that friction scales with what a grant actually permits rather than with a static capability label.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "grant-store",
+      "title": "Grant store",
+      "description": "Planned. Owner-private persistent store for grants and pre-authorization envelopes, bound to a caller's code identity rather than to a pid, with monotonic expiry and immediate revocation. Pre-authorization envelopes are time-bounded and can never confer a global persistent scope.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "consent-broker",
+      "title": "Consent broker",
+      "description": "Planned. Forwards a pending request to the console with the full detail the prompt displays and awaits a single-use decision bound to the exact request bytes, under a bounded timeout. Fails closed: an unreachable console, a timeout, or an unauthenticated peer yields denial.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "decision-audit-log",
+      "title": "Decision audit log",
+      "description": "Planned. Server-side, authoritative, append-only, owner-private, recording the decision basis and not merely the decision, with a hash chain so truncation or in-place editing by a same-uid process is detectable. Distinct from the Go layer's metadata-only MCP_AUDIT_LOG_FILE, which sits on the wrong side of the privilege boundary.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "biometric-gate",
+      "title": "Biometric gate",
+      "description": "Planned. LocalAuthentication evaluation bound to a per-decision nonce, required when blast radius warrants it: script execution, global persistent grants, high-breadth observation, and revoke-all. It is not required for a narrow allow-once, which is where friction is deliberately spent. Every failure path denies.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "consent-console",
+      "title": "ExactMac console",
+      "description": "Planned. The menu-bar application that presents the approval and pre-authorization surfaces, the grant manager, the activity timeline, and settings. It can only answer; it holds no authority, and the server re-derives everything it is told.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "launchd-socket-owner",
+      "title": "launchd socket owner",
+      "description": "Existing. UnixSocketPathOwner activates the launchd-owned Unix socket and validates that the pathname is a socket with 0600 permissions, so the descriptor rather than a later pathname lookup is the ownership boundary. Direct pathname binding is disabled because Darwin offers no persistent pathname-to-descriptor identity for a mutable AF_UNIX path.",
+      "trust_zone": "os-platform-zone"
+    },
+    {
+      "symbolic_name": "tcc-accessibility-gate",
+      "title": "TCC Accessibility gate",
+      "description": "Existing, platform-provided. The server cannot read the accessibility tree, synthesize input, or capture the screen without the user's Accessibility grant. This is the one genuine authentication boundary in the current system, and it is coarse: it is all-or-nothing per application, and it does not distinguish one agent from another.",
+      "trust_zone": "os-platform-zone"
+    },
+    {
+      "symbolic_name": "script-executor",
+      "title": "Script executor",
+      "description": "Existing. Compiles and runs AppleScript and JXA through a single osascript child process, and runs shell commands through /bin/bash, with timeout and cancellation. This is unrestricted remote code execution as a designed feature and is the highest-value target in the entire system.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "ax-traversal-engine",
+      "title": "Accessibility traversal engine",
+      "description": "Existing. Walks the accessibility tree of any application, including field values, and answers find, list, get, and region queries. Reading content through the accessibility APIs is highly sensitive: it recovers document text, messages, and the contents of form fields.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "capture-pipeline",
+      "title": "Screen capture pipeline",
+      "description": "Existing. Captures full-screen, per-window, per-element, and per-region screenshots as PNG, JPEG, or TIFF. Captures whatever is visible, which routinely includes passwords, one-time codes, and private correspondence.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "clipboard-manager",
+      "title": "Clipboard manager",
+      "description": "Existing. Reads and writes the system pasteboard and keeps a clipboard history including source application. Password managers and authenticator apps both place secrets on the pasteboard, so history retention turns a momentary exposure into a durable one.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "input-synthesis-pipeline",
+      "title": "Input synthesis pipeline",
+      "description": "Existing. Synthesizes clicks, drags, scrolls, and key presses through CoreGraphics, and types text, all serialized by PhysicalDesktopMutationGate. Acts as the user, so a granted click is indistinguishable from the user clicking, including on an irreversible control such as Send, Transfer, or Delete.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "observation-manager",
+      "title": "Observation manager",
+      "description": "Existing. Maintains long-lived watchers over accessibility and window state and streams changes. Observation converts a momentary read into continuous surveillance, which is why duration is treated as a first-class input to blast radius rather than as metadata.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "macro-executor",
+      "title": "Macro executor",
+      "description": "Existing. Runs persisted multi-step macros under a deadline. A macro is a stored, replayable script, so authorizing one is an authorization to re-perform every step it contains, which is why macro execution inherits the capability set of its constituent steps rather than being treated as a lesser operation.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "mcp-proxy",
+      "title": "Go MCP proxy",
+      "description": "Existing. Exposes the server to agents over the Model Context Protocol. Carries an optional MCP_API_KEY, required only for a non-loopback HTTP address, and an MCP_SHELL_COMMANDS_ENABLED flag that gates the shell script type only, leaving AppleScript and JXA ungated. It is a calling peer, not a security boundary: the gRPC server beneath it is directly reachable by anything that can open the socket.",
+      "trust_zone": "agent-process-zone"
+    },
+    {
+      "symbolic_name": "desktop-applications",
+      "title": "User desktop applications",
+      "description": "The collective of the operator's applications and their data: documents, mail, browsers, banking sessions, the password manager, and their windows. Modeled as a component so that flows to and from the desktop have a typed endpoint, since the schema's data-flow source and destination must be a component or an actor rather than a trust zone.",
+      "trust_zone": "user-desktop-zone"
+    },
+    {
+      "symbolic_name": "os-platform-services",
+      "title": "macOS platform services",
+      "description": "The platform facilities the server depends on and also attacks through: launchd socket activation, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, the pasteboard, and CoreGraphics event injection.",
+      "trust_zone": "os-platform-zone"
+    }
+  ],
+  "data_stores": [
+    {
+      "symbolic_name": "grant-store-file",
+      "title": "Grant store file",
+      "description": "Owner-private persistent store of active grants and pre-authorization envelopes. Planned.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac grant store",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "decision-audit-log-file",
+      "title": "Decision audit log file",
+      "description": "Owner-private append-only log of authorization decisions and their bases, hash-chained for tamper evidence. Planned.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac decision audit log",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "macro-registry-file",
+      "title": "Macro registry file",
+      "description": "Owner-private persistent store of macros created through CreateMacro and friends, hydrated at startup so macros survive a restart.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac macro registry",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "clipboard-history-file",
+      "title": "Clipboard history file",
+      "description": "Owner-private in-process history of clipboard entries with source application, retained across requests within a server lifetime.",
+      "type": "key_value",
+      "vendor": "local process memory",
+      "product": "ExactMac clipboard history manager",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "console-ipc-token-file",
+      "title": "Console IPC token file",
+      "description": "Owner-private file holding the shared secret that mutually authenticates the server and the console over their private channel. Read from a file rather than the environment so that it is not trivially readable from another process's environment.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac consent channel token",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "system-pasteboard",
+      "title": "System pasteboard",
+      "description": "The macOS NSPasteboard, shared with every application on the desktop and outside the server's control.",
+      "type": "key_value",
+      "vendor": "Apple",
+      "product": "NSPasteboard",
+      "trust_zone": "os-platform-zone"
+    }
+  ],
+  "data_sets": [
+    {
+      "symbolic_name": "active-grants",
+      "title": "Active grants",
+      "description": "Every capability, scope, expiry, and holder currently authorized, including whether it originated from an interactive prompt, a session grant, or a pre-authorization envelope. This is the dataset whose confidentiality decides whether a later compromise inherits standing permission.",
+      "placements": [
+        {
+          "data_store": "grant-store-file",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "cred"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    },
+    {
+      "symbolic_name": "decision-audit-records",
+      "title": "Decision audit records",
+      "description": "The append-only record of who asked, for what, on what basis it was allowed or denied, and whether a biometric was required and obtained. Tamper evidence for this dataset comes from the hash chain, not from file permissions, because the threat actor shares the uid.",
+      "placements": [
+        {
+          "data_store": "decision-audit-log-file",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "biz",
+        "ip"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    },
+    {
+      "symbolic_name": "captured-screen-content",
+      "title": "Captured screen content",
+      "description": "Screenshots returned to callers. Contains whatever was visible, which on a real desktop includes passwords, one-time authentication codes, banking detail, private messages, and source code.",
+      "placements": [],
+      "data_sensitivity": [
+        "pii",
+        "cred",
+        "fin",
+        "biz",
+        "ip"
+      ],
+      "access_control_methods": []
+    },
+    {
+      "symbolic_name": "accessibility-element-content",
+      "title": "Accessibility element content",
+      "description": "Text and field values recovered from the accessibility tree of every running application, including document bodies, message threads, and the contents of form fields.",
+      "placements": [],
+      "data_sensitivity": [
+        "pii",
+        "cred",
+        "fin",
+        "biz",
+        "ip"
+      ],
+      "access_control_methods": []
+    },
+    {
+      "symbolic_name": "clipboard-content",
+      "title": "Clipboard content",
+      "description": "Current pasteboard contents and the retained history. Password managers and authenticator applications both place secrets here, so a single read is a credential disclosure and the history turns it into a harvestable archive.",
+      "placements": [
+        {
+          "data_store": "system-pasteboard",
+          "encrypted": false
+        },
+        {
+          "data_store": "clipboard-history-file",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "pii",
+        "cred",
+        "fin",
+        "ip"
+      ],
+      "access_control_methods": [
+        "mac"
+      ]
+    },
+    {
+      "symbolic_name": "persisted-macros",
+      "title": "Persisted macros",
+      "description": "Stored multi-step procedures that can be replayed without further prompting. Integrity matters as much as confidentiality: a macro altered on disk becomes a payload that runs with whatever grants the replayer holds.",
+      "placements": [
+        {
+          "data_store": "macro-registry-file",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "biz"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    },
+    {
+      "symbolic_name": "console-shared-token",
+      "title": "Console shared token",
+      "description": "The secret that mutually authenticates the server and the consent console. Its confidentiality is what stops a process that merely located the channel from auto-approving requests.",
+      "placements": [
+        {
+          "data_store": "console-ipc-token-file",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "cred"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    }
+  ],
+  "data_flows": [
+    {
+      "symbolic_name": "agent-to-server-request",
+      "title": "Agent request over the gRPC listener",
+      "description": "Capability request and arguments, arriving from any same-uid process. Sensitive because the arguments themselves frequently contain the content to be read or the command to be run, and it crosses a trust boundary that currently has no authentication at all.",
+      "source": {
+        "type": "actor",
+        "object": "ai-agent"
+      },
+      "destination": {
+        "type": "component",
+        "object": "authorization-interceptor"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "server-to-console-pending-request",
+      "title": "Server to console pending request",
+      "description": "The full detail a prompt must show: resolved caller identity and process tree, capability and its plain-language consequence, the resolved target, and the complete argument payload. The channel is mutually authenticated; its confidentiality is bounded by same-uid processes that can read the operator's private files.",
+      "source": {
+        "type": "component",
+        "object": "consent-broker"
+      },
+      "destination": {
+        "type": "component",
+        "object": "consent-console"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-server-decision",
+      "title": "Console to server decision",
+      "description": "The human's answer, bound to a single-use request id derived from the exact request bytes so it cannot be replayed onto a different request. The server re-derives capability and scope itself and treats the console's answer only as a human verdict, never as an authorization input.",
+      "source": {
+        "type": "component",
+        "object": "consent-console"
+      },
+      "destination": {
+        "type": "component",
+        "object": "authorization-interceptor"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "server-to-desktop-input",
+      "title": "Synthesized input to the desktop",
+      "description": "Clicks, drags, scrolls, and key presses delivered as the user. Once a click lands on an irreversible control the effect is durable, so this is the flow where a wrong or malicious target does the most damage per unit of granted capability.",
+      "source": {
+        "type": "component",
+        "object": "input-synthesis-pipeline"
+      },
+      "destination": {
+        "type": "component",
+        "object": "desktop-applications"
+      },
+      "has_sensitive_data": false,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "server-to-os-script-child",
+      "title": "Script execution child process",
+      "description": "The osascript and /bin/bash children. This flow is unrestricted code execution, it inherits the server's TCC-granted authority, and no downstream control can meaningfully constrain what the child does once started. It is the reason script execution dominates every risk ranking in this model.",
+      "source": {
+        "type": "component",
+        "object": "script-executor"
+      },
+      "destination": {
+        "type": "component",
+        "object": "os-platform-services"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "desktop-to-server-ax-read",
+      "title": "Accessibility read from the desktop",
+      "description": "Text and field values pulled from every running application's accessibility tree. Crosses out of the user's trust boundary into a process that any same-uid caller can currently command.",
+      "source": {
+        "type": "component",
+        "object": "desktop-applications"
+      },
+      "destination": {
+        "type": "component",
+        "object": "ax-traversal-engine"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "desktop-to-server-capture",
+      "title": "Screen capture from the desktop",
+      "description": "Pixels returned by full-screen, window, element, and region capture. Carries the same sensitivity class as the accessibility read, with the added property that it captures whatever is on screen regardless of whether that content is exposed to accessibility.",
+      "source": {
+        "type": "component",
+        "object": "desktop-applications"
+      },
+      "destination": {
+        "type": "component",
+        "object": "capture-pipeline"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "desktop-to-server-clipboard",
+      "title": "Clipboard read from the desktop",
+      "description": "Pasteboard contents and history retrieved through the clipboard manager. The single highest-yield credential disclosure available to a local caller, because secrets are routinely placed on the pasteboard by design.",
+      "source": {
+        "type": "component",
+        "object": "desktop-applications"
+      },
+      "destination": {
+        "type": "component",
+        "object": "clipboard-manager"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "server-to-agent-content",
+      "title": "Sensitive content returned to the caller",
+      "description": "Accessibility text, screenshots, and clipboard contents travelling back to the requesting process. This is the flow over which stolen data actually leaves, and it is the flow that scope-narrowed grants are designed to constrain.",
+      "source": {
+        "type": "component",
+        "object": "grpc-plaintext-listener"
+      },
+      "destination": {
+        "type": "actor",
+        "object": "unauthorized-local-process"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-os-biometric",
+      "title": "Biometric evaluation",
+      "description": "A LocalAuthentication evaluation bound to a per-decision nonce, used to gate high-blast-radius approvals so that a success cannot be replayed onto a different decision.",
+      "source": {
+        "type": "component",
+        "object": "consent-console"
+      },
+      "destination": {
+        "type": "component",
+        "object": "os-platform-services"
+      },
+      "has_sensitive_data": false,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "server-to-audit-append",
+      "title": "Decision audit append",
+      "description": "Each decision and its basis appended to the hash-chained owner-private log, so that a same-uid attacker who can write the file still cannot remove evidence of what was allowed without breaking the chain.",
+      "source": {
+        "type": "component",
+        "object": "authorization-interceptor"
+      },
+      "destination": {
+        "type": "component",
+        "object": "decision-audit-log"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "network-to-server-tcp",
+      "title": "Remote request over the TCP listener",
+      "description": "Present only in the TCP variant. Plaintext, unauthenticated, and unconsented. Modelled to make the consequence of the configuration explicit rather than to endorse it: this flow is immediate remote code execution as the user.",
+      "source": {
+        "type": "actor",
+        "object": "remote-network-attacker"
+      },
+      "destination": {
+        "type": "component",
+        "object": "grpc-plaintext-listener"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    }
+  ],
+  "assumptions": [
+    {
+      "description": "The host is not already compromised at the kernel level. A kernel-level attacker can read the grant store, the audit log, and the console token, and can forge biometrics. No control in this model defends against that.",
+      "topics": [
+        "os-platform-zone",
+        "decision-audit-log"
+      ],
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "The user has granted the server Accessibility access through TCC. Without it the server cannot read the accessibility tree, synthesize input, or capture the screen, so the product is non-functional. This is a deliberate availability trade, not a security control: the grant is all-or-nothing and does not distinguish one agent from another.",
+      "topics": [
+        "tcc-accessibility-gate"
+      ],
+      "validity": "confirmed"
+    },
+    {
+      "description": "The Unix socket pathname is 0600 and is created and owned by launchd, so only processes running as the owning user can reach it. Verified against UnixSocketPathOwner.activateLaunchdSocket, which validates the permissions of the activated pathname.",
+      "topics": [
+        "launchd-socket-owner",
+        "agent-process-zone"
+      ],
+      "validity": "confirmed"
+    },
+    {
+      "description": "The intended consumer, the AI agent, runs as the same user as the developer operator. Therefore socket ownership cannot separate a legitimate agent from unauthorized local code, and no amount of pid or uid checking will do so either. This is the single assumption that shapes the entire model.",
+      "topics": [
+        "agent-process-zone",
+        "unauthorized-local-process"
+      ],
+      "validity": "confirmed"
+    },
+    {
+      "description": "Physical access to the machine is out of scope. An attacker with physical access and the user's password can bypass TCC and this model entirely, and defending against that is a platform problem rather than an application one.",
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "The server is never run as root and never holds an elevated or hardened entitlement. Running it as root would make the 0600 socket meaningless and would remove the last boundary between the server and the machine.",
+      "topics": [
+        "exactmac-server-zone"
+      ],
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "Same-uid malware that can read the operator's private files is out of scope for the console channel token. The token defends against a process that merely located the channel; it does not defend against malware already running as the user, and this is recorded as accepted residual risk rather than presented as a solved problem.",
+      "topics": [
+        "console-shared-token",
+        "unauthorized-local-process"
+      ],
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "A second local user account on a shared machine obtains no access, by virtue of the socket mode and launchd ownership rather than by any check this application performs.",
+      "topics": [
+        "second-local-user",
+        "launchd-socket-owner"
+      ],
+      "validity": "unconfirmed"
+    }
+  ],
+  "threat_personas": [
+    {
+      "symbolic_name": "unauthorized-local-process-persona",
+      "title": "Unauthorized local process",
+      "description": "Malware, a malicious build or test dependency, a rogue postinstall script, or any other code already running as the developer operator. It is inside the socket boundary and needs no privilege escalation. The dominant threat in the production variant.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "high"
+    },
+    {
+      "symbolic_name": "prompt-injected-agent-persona",
+      "title": "Prompt-injected legitimate agent",
+      "description": "A correctly built, correctly signed, entirely legitimate agent that has been induced by attacker-controlled content to perform a harmful action. Nothing about the process is anomalous, which is exactly what makes it hard to catch and the strongest argument for a consent plane that shows the concrete action and its target rather than asking the user to judge a process.",
+      "is_person": false,
+      "skill_level": "expert_engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "high"
+    },
+    {
+      "symbolic_name": "compromised-agent-host-persona",
+      "title": "Compromised agent host",
+      "description": "An attacker who has gained code execution inside the IDE, terminal, or application hosting the agent. They inherit the agent's identity and its grants, so the consent plane must bind grants to code identity rather than to pid, or a compromised host inherits standing permission for free.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "moderate"
+    },
+    {
+      "symbolic_name": "network-attacker-persona",
+      "title": "Remote network attacker",
+      "description": "A host that can reach the server because GRPC_LISTEN_ADDRESS was set to a non-loopback value. Relevant only in the TCP variant, where the outcome is unauthenticated remote code execution.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "anonymous",
+      "malicious_intent": true,
+      "applicability_to_org": "low"
+    },
+    {
+      "symbolic_name": "careless-operator-persona",
+      "title": "Careful but hurried operator",
+      "description": "The developer operator, not malicious, under time pressure, repeatedly clicking the highlighted button. This is the threat source human_error rather than adversary, and it is the reason friction must scale with blast radius: a uniform prompt is ignored, so a narrow read is kept cheap and a broad grant is made expensive.",
+      "is_person": true,
+      "skill_level": "insider",
+      "access_level": "user",
+      "malicious_intent": false,
+      "applicability_to_org": "high"
+    }
+  ],
+  "threats": [
+    {
+      "symbolic_name": "unauthenticated-local-code-execution",
+      "title": "Any same-uid process achieves unrestricted code execution",
+      "description": "The server performs no authentication and no authorization. Any process running as the owning user opens the Unix socket and calls ExecuteShellCommand, ExecuteAppleScript, or ExecuteJavaScript, obtaining arbitrary code execution under the user's full TCC-granted authority. The Go layer's MCP_SHELL_COMMANDS_ENABLED flag is irrelevant here because the gRPC server is directly reachable, and that flag gates only the shell type, leaving AppleScript and JXA ungated even through the proxy.",
+      "components_affected": [
+        "grpc-plaintext-listener",
+        "script-executor",
+        "authorization-interceptor"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "Malware running as the user opens the ExactMac Unix socket and executes a shell command.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 88,
+          "capec_title": "OS Command Injection"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 306,
+          "cwe_title": "Missing Authentication for Critical Function"
+        },
+        {
+          "cwe_id": 78,
+          "cwe_title": "Improper Neutralization of Special Elements used in an OS Command"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unauthenticated-screen-capture-exfiltration",
+      "title": "Screen contents captured and exfiltrated without consent",
+      "description": "CaptureScreenshot, CaptureWindowScreenshot, CaptureElementScreenshot, and CaptureRegionScreenshot return the screen to any same-uid caller with no decision recorded. Screenshots reliably contain passwords, one-time authentication codes, banking detail, and private correspondence, including content that is not exposed to the accessibility API.",
+      "components_affected": [
+        "capture-pipeline",
+        "grpc-plaintext-listener"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process captures the full screen and transmits the image off the machine.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 118,
+          "capec_title": "Data Leakage"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unauthenticated-clipboard-harvest",
+      "title": "Clipboard and clipboard history harvested for credentials",
+      "description": "GetClipboard and GetClipboardHistory return pasteboard contents, and the retained history includes the source application. Password managers and authenticator applications both place secrets on the pasteboard by design, so this is the highest-yield credential disclosure available to a local caller, and history retention converts a momentary opportunity into a durable archive.",
+      "components_affected": [
+        "clipboard-manager",
+        "grpc-plaintext-listener"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process reads the clipboard and its history, then retains the harvested secrets.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 118,
+          "capec_title": "Data Leakage"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 522,
+          "cwe_title": "Insufficiently Protected Credentials"
+        },
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unauthenticated-accessibility-harvest",
+      "title": "All on-screen text read through the accessibility API",
+      "description": "TraverseAccessibility, ListElements, GetElement, FindElements, and FindRegionElements return the accessibility tree of any application, including document bodies, message threads, and the values of form fields. A caller can read everything the user can currently see on their desktop, across every application, in one pass.",
+      "components_affected": [
+        "ax-traversal-engine",
+        "grpc-plaintext-listener"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process traverses the accessibility tree of every running application and extracts their text.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 118,
+          "capec_title": "Data Leakage"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unauthorized-input-driven-action",
+      "title": "User actions performed without consent, including irreversible ones",
+      "description": "CreateInput, ClickElement, WriteElementValue, PerformElementAction, AutomateOpenFileDialog, and AutomateSaveFileDialog act as the user. Because the server holds TCC Accessibility, its clicks are indistinguishable from the user's own, so a granted click can send a message, confirm a transfer, or delete a file, and the user sees only their own action. The MCP layer's input overlay is a debugging aid for the developer, not a consent control.",
+      "components_affected": [
+        "input-synthesis-pipeline",
+        "grpc-plaintext-listener",
+        "macro-executor"
+      ],
+      "threat_persona": "prompt-injected-agent-persona",
+      "event": "An agent induced by hostile content to read synthesizes a click on a Send or Transfer control.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 12,
+          "capec_title": "Blind Injection"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 749,
+          "cwe_title": "Exposed Dangerous Method or Function"
+        },
+        {
+          "cwe_id": 862,
+          "cwe_title": "Missing Authorization"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "remote-code-execution-on-exposed-tcp",
+      "title": "Network-reachable unauthenticated code execution on the TCP listener",
+      "description": "GRPC_LISTEN_ADDRESS is not constrained to loopback and the transport is .plaintext in every configuration, so setting it to a non-loopback address produces an endpoint that any host can reach to execute code as the user, with no authentication, no authorization, no consent, and no audit. The Go layer refuses a non-loopback MCP_HTTP_ADDRESS without TLS, an API key, and rate limiting, but the gRPC server has no equivalent guard.",
+      "components_affected": [
+        "grpc-plaintext-listener",
+        "script-executor"
+      ],
+      "threat_persona": "network-attacker-persona",
+      "event": "The server is configured with a non-loopback listen address and a remote host connects and executes a shell command.",
+      "sources": [
+        "adversary",
+        "failure"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 88,
+          "capec_title": "OS Command Injection"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 306,
+          "cwe_title": "Missing Authentication for Critical Function"
+        },
+        {
+          "cwe_id": 319,
+          "cwe_title": "Cleartext Transmission of Sensitive Information"
+        },
+        {
+          "cwe_id": 668,
+          "cwe_title": "Exposure of Resource to Wrong Sphere"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "prompt-injection-driven-capability-abuse",
+      "title": "Hostile document content drives the agent to a harmful action",
+      "description": "The agent reads attacker-controlled content such as a web page, a repository file, or an issue comment, and that content instructs the agent to act. The process performing the action is entirely legitimate and correctly signed, so signature and reputation controls do not help, and the operator sees only their own agent asking. This is the threat that most directly motivates showing the concrete action, the concrete target, and the concrete payload in every prompt.",
+      "components_affected": [
+        "authorization-interceptor",
+        "consent-console"
+      ],
+      "threat_persona": "prompt-injected-agent-persona",
+      "event": "A web page instructs the running agent to read the clipboard and post its contents to a remote host.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 242,
+          "capec_title": "Code Injection"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 77,
+          "cwe_title": "Improper Neutralization of Special Elements used in a Command"
+        },
+        {
+          "cwe_id": 20,
+          "cwe_title": "Improper Input Validation"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "grant-reuse-as-confused-deputy",
+      "title": "A grant issued for one request is reused for a different one",
+      "description": "A grant is remembered without being bound to the specific capability, target, and duration the user actually judged, or is bound to a pid that a later process inherits. The user then approves a narrow read in a text editor and the approval silently becomes standing permission to read everything, everywhere, indefinitely, including from a different binary.",
+      "components_affected": [
+        "grant-store",
+        "authorization-policy-engine",
+        "consent-console"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "An unsigned binary dropped in a temporary directory benefits from a grant the user issued to a signed, known application.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 863,
+          "cwe_title": "Incorrect Authorization"
+        },
+        {
+          "cwe_id": 269,
+          "cwe_title": "Improper Privilege Management"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "consent-channel-impersonation",
+      "title": "A same-uid process impersonates the console and auto-approves",
+      "description": "If the consent channel is not mutually authenticated, a process that merely locates the socket path can post decisions and approve every request, which nullifies the entire control without ever touching the server's logic. A one-way authenticated channel is exactly this failure. The residual is stated honestly: a shared token read from an owner-private file defends against a careless or unrelated process, not against same-uid malware that can read the operator's private files.",
+      "components_affected": [
+        "consent-broker"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process connects to the consent channel and posts an allow decision for every pending request.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 151,
+          "capec_title": "Identity Spoofing"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 290,
+          "cwe_title": "Authentication Bypass by Spoofing"
+        },
+        {
+          "cwe_id": 306,
+          "cwe_title": "Missing Authentication for Critical Function"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "decision-audit-tampering",
+      "title": "The record of what was allowed is edited or truncated",
+      "description": "The threat actor shares the uid, so 0600 permissions do not defend the decision log against it. Without tamper evidence, an attacker who obtained a broad grant can erase the evidence that they used it, which makes detection and after-the-fact investigation impossible.",
+      "components_affected": [
+        "decision-audit-log"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process truncates the decision log after using a broad grant.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 117,
+          "cwe_title": "Improper Output Neutralization for Logs"
+        },
+        {
+          "cwe_id": 778,
+          "cwe_title": "Insufficient Logging"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unbounded-observation-surveillance",
+      "title": "A narrow-looking grant becomes continuous surveillance",
+      "description": "Observation and capture capabilities under a broad scope and a long duration reconstruct the user's entire activity, even when no single request looks alarming. Without duration and breadth entering the risk calculation, each individual request is unremarkable and the aggregate is a complete record of the user's day.",
+      "components_affected": [
+        "observation-manager",
+        "capture-pipeline",
+        "authorization-policy-engine"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "An agent holding a broad, long-lived observation grant records the screen continuously.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        },
+        {
+          "cwe_id": 269,
+          "cwe_title": "Improper Privilege Management"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "clipboard-write-content-injection",
+      "title": "Clipboard is overwritten with attacker-chosen content",
+      "description": "WriteClipboard and ClearClipboard let any same-uid caller replace the user's clipboard, which is a low-privilege path to a high-impact outcome: place a phishing URL or a malicious command where the user will paste it, and the user performs the attack themselves.",
+      "components_affected": [
+        "clipboard-manager",
+        "grpc-plaintext-listener"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process writes a phishing URL to the clipboard immediately before the user pastes.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 20,
+          "cwe_title": "Improper Input Validation"
+        },
+        {
+          "cwe_id": 862,
+          "cwe_title": "Missing Authorization"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "macro-persistence-as-lateral-movement",
+      "title": "Persisted macros become a stored, replayable payload",
+      "description": "CreateMacro writes a multi-step procedure to an owner-private file that ExecuteMacro will replay later. Because macros are hydrated at startup, a macro that was tampered with on disk executes with whatever grants the replayer holds, which makes macro storage a persistence mechanism for an attacker rather than a convenience feature.",
+      "components_affected": [
+        "macro-executor"
+      ],
+      "threat_persona": "unauthorized-local-process-persona",
+      "event": "A same-uid process writes a malicious macro that a later legitimate session replays.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 732,
+          "cwe_title": "Incorrect Permission Assignment for Critical Resource"
+        },
+        {
+          "cwe_id": 269,
+          "cwe_title": "Improper Privilege Management"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "operator-consent-fatigue",
+      "title": "A uniform prompt is approved without being read",
+      "description": "If every request is presented identically, a user under time pressure learns to click the highlighted button, and the control provides no protection at all while creating a strong illusion that it does. This is human_error, not adversary, and it is the reason friction must be proportional to blast radius rather than constant.",
+      "components_affected": [
+        "consent-console",
+        "authorization-policy-engine",
+        "biometric-gate"
+      ],
+      "threat_persona": "careless-operator-persona",
+      "event": "The operator approves a broad grant without reading it, having approved a dozen narrow ones moments earlier.",
+      "sources": [
+        "human_error"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 863,
+          "cwe_title": "Incorrect Authorization"
+        }
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "symbolic_name": "launchd-socket-mode",
+      "title": "Owner-only launchd-activated Unix socket",
+      "description": "The socket pathname is created and owned by launchd and validated as 0600, so only processes running as the owning user can reach the server. This is the intended authentication for the production variant and a real boundary against other accounts and against the network. It is explicitly NOT a boundary against same-uid malware, and no part of this design treats it as one.",
+      "threats": [
+        "remote-code-execution-on-exposed-tcp"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "agent-process-zone",
+        "trust_zone_b": "exactmac-server-zone"
+      },
+      "status": "active",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "public-request-wire-validation",
+      "title": "Protobuf wire validation before any handler",
+      "description": "PublicRequestValidationInterceptor rejects unknown fields, output-only fields, missing required fields, missing required oneofs, and non-finite or negative numerics, driven by the descriptor set. An existing control that constrains request shape and reduces the attack surface reachable by a malformed request. It is not an authorization control and is not counted as one.",
+      "threats": [
+        "unauthenticated-local-code-execution"
+      ],
+      "status": "active",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "authorization-interceptor-enforcement",
+      "title": "Server-side authorization interceptor on every method",
+      "description": "A ServerInterceptor positioned after wire validation and ahead of every handler, so that no one of the 68 methods can allocate state, start work, or touch the physical desktop without a recorded decision. Capability and scope are re-derived from the request bytes at enforcement time; nothing the consent plane displays or returns is trusted as the authorization input, which is the control that answers time-of-check-to-time-of-use between what the prompt showed and what the server enforced.",
+      "threats": [
+        "unauthenticated-local-code-execution",
+        "unauthenticated-screen-capture-exfiltration",
+        "unauthenticated-clipboard-harvest",
+        "unauthenticated-accessibility-harvest",
+        "unauthorized-input-driven-action",
+        "clipboard-write-content-injection",
+        "macro-persistence-as-lateral-movement"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "agent-process-zone",
+        "trust_zone_b": "exactmac-server-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "capability-implication-closure",
+      "title": "Capabilities form an implication lattice, not a flat list",
+      "description": "Script execution subsumes screen reading, clipboard reading, and input synthesis, because a shell can perform all of them. Grants are therefore closed over implication before being matched, and a prompt states what a grant silently includes, because information the user is entitled to before agreeing cannot be buried in a disclosure they did not read.",
+      "threats": [
+        "grant-reuse-as-confused-deputy",
+        "unauthorized-input-driven-action"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "blast-radius-scaled-friction",
+      "title": "Friction scales with blast radius, not with capability",
+      "description": "Risk is computed as the product of capability, scope breadth, duration, remaining count, the target's user-defined consequence level, and the resolved identity's signature quality, and that value determines whether to prompt, which decisions to offer, and whether a biometric is required. A clipboard read scoped to one application stays close to free; the same capability across every application, continuously, for two hours, costs a biometric. A uniform prompt would be ignored, so a constant-friction design is treated as a failed control.",
+      "threats": [
+        "operator-consent-fatigue",
+        "unbounded-observation-surveillance",
+        "grant-reuse-as-confused-deputy"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "code-identity-grant-binding",
+      "title": "Grants bind to code identity, never to pid",
+      "description": "Each grant records executable path, bundle identifier, and code-signing designated requirement, and matches a later request only when the caller's resolved code identity satisfies that binding. A pid changes on every run, so a pid-bound grant is either useless or inherited by whatever process later receives it. A caller with no signature degrades to canonical-path identity rather than becoming unbound.",
+      "threats": [
+        "grant-reuse-as-confused-deputy"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "graded-caller-identity-evidence",
+      "title": "Caller identity is surfaced as graded evidence, not used as a gate",
+      "description": "Peer pid and uid, executable path, bundle identifier, parent process chain, and code-signature validity and designated requirement are resolved and shown to the operator, with the signature state as a prominent badge. An unsigned or ad-hoc-signed caller is escalated in risk and friction rather than silently rejected, because same-uid malware is cryptographically indistinguishable from the user's own agent and a control that claimed otherwise would be providing false assurance. Available only in the Unix-socket variant.",
+      "threats": [
+        "prompt-injection-driven-capability-abuse",
+        "grant-reuse-as-confused-deputy"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "pre-authorization-envelope-bounding",
+      "title": "Bounded pre-authorization envelopes for long agentic sessions",
+      "description": "An agent declares the capabilities, scopes, and duration it will need ahead of time and the operator approves that envelope once, after which requests inside it do not prompt. The envelope is bounded by a configured maximum duration, may not confer a global persistent scope, expires as a unit on a monotonic clock, and is revocable immediately. This is what makes long agentic sessions usable without making them unbounded.",
+      "threats": [
+        "operator-consent-fatigue",
+        "unbounded-observation-surveillance"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "fail-closed-consent",
+      "title": "Every consent failure mode denies",
+      "description": "An unreachable console, a consent timeout, a cancelled or failed biometric, biometry lockout, a corrupt or unreadable grant store, and an unauthenticated channel peer all produce denial. There is no path in which any of these produces allow, and the failing-closed state is presented to the operator as protective rather than as a fault.",
+      "threats": [
+        "consent-channel-impersonation",
+        "unauthenticated-local-code-execution"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "biometric-gate-for-high-blast-radius",
+      "title": "Biometric confirmation gated on blast radius",
+      "description": "LocalAuthentication evaluation bound to a per-decision nonce, required for script execution, global persistent grants, high-breadth observation, and revoke-all, and deliberately not required for a narrow allow-once. The nonce means a success authorizes exactly one decision and cannot be replayed onto another, which is the property that makes it usable as a commitment device rather than a speed bump.",
+      "threats": [
+        "operator-consent-fatigue",
+        "unauthorized-input-driven-action"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "consent-console-zone",
+        "trust_zone_b": "os-platform-zone"
+      },
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "mutually-authenticated-consent-channel",
+      "title": "Mutually authenticated server-to-console channel",
+      "description": "A second owner-only Unix socket, launchd-activated like the listener, with both peers verifying the other's uid and a shared secret read from an owner-private file rather than the environment, and every decision bound to a single-use request id derived from the request bytes. The residual is documented rather than hidden: the secret defends against a process that merely located the channel, not against same-uid malware that can read the operator's private files.",
+      "threats": [
+        "consent-channel-impersonation"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "exactmac-server-zone",
+        "trust_zone_b": "consent-console-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "hash-chained-decision-audit",
+      "title": "Hash-chained decision audit with recorded basis",
+      "description": "Append-only owner-private log where each entry carries a monotonic sequence number, a hash chain over its predecessors, and the decision basis rather than only the decision. File permissions cannot defend this against a same-uid attacker, so tamper evidence comes from the chain; the recorded basis is what lets the operator answer not merely what was allowed but under whose authority and by which grant.",
+      "threats": [
+        "decision-audit-tampering",
+        "grant-reuse-as-confused-deputy"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "tcp-reduced-posture",
+      "title": "TCP listeners run a reduced, unconsented posture",
+      "description": "A server configured with a TCP listener offers no approvals and no process verification, and denies every consent-requiring capability, because a TCP listener has no socket access to restrict and therefore no authenticating principal. The posture is a distinct, named, tested state rather than an emergent consequence of a missing dependency, is reported through the health service, and is logged at startup so the operator cannot believe they are protected when they are not.",
+      "threats": [
+        "remote-code-execution-on-exposed-tcp"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "network-zone",
+        "trust_zone_b": "exactmac-server-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "tcc-accessibility-authority",
+      "title": "macOS TCC Accessibility grant",
+      "description": "The platform-provided authority boundary. Without it the server cannot read the accessibility tree, synthesize input, or capture the screen. Recorded as assumed and platform-granted, with the explicit caveat that it is all-or-nothing per application and cannot distinguish one agent from another, so it must not be relied on as the consent control.",
+      "threats": [
+        "unauthenticated-accessibility-harvest",
+        "unauthorized-input-driven-action"
+      ],
+      "status": "assumed",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "owner-private-persistence",
+      "title": "Owner-private persistence discipline",
+      "description": "Persisted state is owner-private: ServerProcessPolicy sets umask 0077, and every store follows the pattern already proven in internal/server/audit.go, opening with O_NOFOLLOW and O_CLOEXEC, requiring a regular file, requiring exactly one hard link, and requiring the owner to be the effective uid. Applies to the grant store, the decision log, the console token, and the existing macro registry.",
+      "threats": [
+        "decision-audit-tampering",
+        "macro-persistence-as-lateral-movement"
+      ],
+      "status": "active",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "operator-defined-consequence-targets",
+      "title": "Operator-defined high-consequence targets",
+      "description": "Because high consequence is a fact about the operator's life rather than a property of any generic taxonomy, the operator names the applications that matter to them and the system escalates unconditionally there. This personalises the risk model: strictly more accurate than a fixed taxonomy and less annoying, because it escalates only where escalation is actually wanted.",
+      "threats": [
+        "unauthorized-input-driven-action",
+        "operator-consent-fatigue"
+      ],
+      "status": "scheduled",
+      "priority": "medium"
+    }
+  ],
+  "risks": [
+    {
+      "symbolic_name": "risk-unauthenticated-code-execution",
+      "title": "Unauthenticated arbitrary code execution as the user",
+      "description": "Any same-uid process can execute shell, AppleScript, or JXA through the server with no decision, no prompt, and no record. Compromise of the server is not required; the server is the intended tool.",
+      "threats": [
+        "unauthenticated-local-code-execution",
+        "remote-code-execution-on-exposed-tcp"
+      ],
+      "likelihood": "certain",
+      "impact": "severe",
+      "impact_description": "Full compromise of the user's session with the user's own authority: credentials, source code, financial access, and private correspondence, with durable effects and no meaningful recovery path.",
+      "score": 25,
+      "level": "critical"
+    },
+    {
+      "symbolic_name": "risk-silent-content-exfiltration",
+      "title": "Silent exfiltration of screen, accessibility, and clipboard content",
+      "description": "The read-side capabilities disclose everything the user can see or has copied, including password-manager and authenticator secrets, to any same-uid caller, with no record that it happened.",
+      "threats": [
+        "unauthenticated-screen-capture-exfiltration",
+        "unauthenticated-clipboard-harvest",
+        "unauthenticated-accessibility-harvest"
+      ],
+      "likelihood": "certain",
+      "impact": "severe",
+      "impact_description": "Credential theft leading to account takeover across every service the user touches, combined with private correspondence and source code exposure, and with no audit trail to detect or scope it.",
+      "score": 25,
+      "level": "critical"
+    },
+    {
+      "symbolic_name": "risk-unconsented-irreversible-action",
+      "title": "Irreversible user actions taken without informed consent",
+      "description": "Synthesized input is indistinguishable from the user's own, so an agent or malware can send messages, move money, or delete data, and the operator's own hands appear to have done it.",
+      "threats": [
+        "unauthorized-input-driven-action",
+        "prompt-injection-driven-capability-abuse"
+      ],
+      "likelihood": "likely",
+      "impact": "severe",
+      "impact_description": "Irreversible financial, interpersonal, and data-loss consequences attributed by the operator to themselves, with the consent plane the only place the true actor could have been made visible.",
+      "score": 20,
+      "level": "very_high"
+    },
+    {
+      "symbolic_name": "risk-operator-consent-fatigue",
+      "title": "A control the operator habitually ignores",
+      "description": "If every request looks the same, the operator approves without reading and the system provides no protection while appearing to provide it. This risk is created by a bad design, not by a bad operator.",
+      "threats": [
+        "operator-consent-fatigue",
+        "grant-reuse-as-confused-deputy"
+      ],
+      "likelihood": "likely",
+      "impact": "major",
+      "impact_description": "Every other control in this model is rendered ineffective at once, because the single human decision on which they all depend is made reflexively. The blast-radius-scaled design exists specifically to make this risk manageable.",
+      "score": 16,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-grant-broadening",
+      "title": "Narrow approval becomes standing broad permission",
+      "description": "Grants that are not bound to code identity, target, and expiry let a single narrow approval turn into indefinite ambient authority that later transfers to code the operator never assessed.",
+      "threats": [
+        "grant-reuse-as-confused-deputy",
+        "unbounded-observation-surveillance"
+      ],
+      "likelihood": "likely",
+      "impact": "major",
+      "impact_description": "Persistent, invisible over-permission that outlives the session that created it and attaches to whatever runs next, which is the failure mode that makes a consent system worse than none if built carelessly.",
+      "score": 16,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-consent-channel-impersonation",
+      "title": "Consent plane nullified by channel impersonation",
+      "description": "A process that can post allow decisions to the consent channel defeats every control without touching server logic, which is why mutual authentication is mandatory rather than hardening.",
+      "threats": [
+        "consent-channel-impersonation"
+      ],
+      "likelihood": "possible",
+      "impact": "severe",
+      "impact_description": "Total, silent, and permanent bypass of the entire authorization model, with the operator seeing an apparently normal consent flow throughout.",
+      "score": 15,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-audit-tampering",
+      "title": "No trustworthy record of what was permitted",
+      "description": "The threat actor shares the uid, so permissions do not protect the decision log, and without tamper evidence an attacker can erase the record of using a broad grant.",
+      "threats": [
+        "decision-audit-tampering"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "Loss of forensic capability precisely when it is needed, allowing persistent unauthorized access to continue undetected because the evidence of its acquisition can be removed.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-exposed-tcp-listener",
+      "title": "Network-reachable code execution by misconfiguration",
+      "description": "A supported, documented environment variable turns a local-only service into an internet-reachable one, with no TLS and no authentication, and nothing warns the operator.",
+      "threats": [
+        "remote-code-execution-on-exposed-tcp"
+      ],
+      "likelihood": "unlikely",
+      "impact": "severe",
+      "impact_description": "Remote code execution as the user by any host that can route to the port, with no authentication, no consent, and no record, and with the operator believing the service is local-only.",
+      "score": 10,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-prompt-injection-abuse",
+      "title": "Legitimate agent weaponised by hostile content",
+      "description": "Hostile content instructs a correctly signed, entirely legitimate agent into a harmful action, so signature and reputation controls provide no signal and only an informed prompt can.",
+      "threats": [
+        "prompt-injection-driven-capability-abuse"
+      ],
+      "likelihood": "likely",
+      "impact": "major",
+      "impact_description": "Data exfiltration or unwanted actions driven by third-party content, at a rate and variety that will make it routine rather than exceptional for any agent that reads untrusted input.",
+      "score": 16,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-clipboard-content-injection",
+      "title": "Clipboard used to attack the operator's own next action",
+      "description": "Overwriting the clipboard places attacker-chosen content exactly where the operator is about to paste it, converting a low-privilege capability into a user-executed attack.",
+      "threats": [
+        "clipboard-write-content-injection"
+      ],
+      "likelihood": "possible",
+      "impact": "moderate",
+      "impact_description": "Phishing, credential capture, or command execution performed by the operator themselves, which is both damaging and unusually difficult to attribute back to the real cause.",
+      "score": 9,
+      "level": "low"
+    },
+    {
+      "symbolic_name": "risk-macro-persistence",
+      "title": "Stored macros used as a persistence mechanism",
+      "description": "Macros are persisted, hydrated at startup, and replayed, so they give an attacker durable code that executes later under a legitimate session's grants.",
+      "threats": [
+        "macro-persistence-as-lateral-movement"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "Deferred, repeatable execution under a trusted identity, surviving server restarts and surviving the removal of the process that planted it, which is a genuine foothold rather than a one-time action.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-same-uid-malware-residual",
+      "title": "Same-uid malware retains access within granted bounds",
+      "description": "Accepted residual. Because the agent and the operator share a uid, malware running as the user is inside the authentication boundary and can exercise any grant the operator has issued. Code-identity binding limits which grants transfer, and the audit chain makes use detectable after the fact, but neither prevents it.",
+      "threats": [
+        "unauthenticated-local-code-execution",
+        "unbounded-observation-surveillance"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "Persistent access bounded by whatever the operator has granted, which is a materially smaller blast radius than today's unconditional access but not zero. Stated plainly so that the residual is understood rather than discovered.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-shared-token-residual",
+      "title": "Consent channel secret readable by same-uid malware",
+      "description": "Accepted residual. The shared token lives in an owner-private file, which stops a process that merely located the channel but not malware already running as the user. Eliminating this would require an out-of-band channel the user must carry, which is a worse trade than the residual.",
+      "threats": [
+        "consent-channel-impersonation"
+      ],
+      "likelihood": "unlikely",
+      "impact": "severe",
+      "impact_description": "If realised, silent auto-approval of every request. Accepted only because the precondition, existing same-uid malware, is itself the residual of the previous risk and is separately monitored through the audit chain.",
+      "score": 10,
+      "level": "medium"
+    }
+  ]
+}

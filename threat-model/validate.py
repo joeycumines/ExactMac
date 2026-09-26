@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate ExactMac threat models against the OWASP Threat Model Library schema.
 
-Two independent checks run over every ``*.threat-model.json`` file found under the
+Three independent checks run over every ``*.threat-model.json`` file found under the
 threat-model directory:
 
 1. **Schema conformance** against the vendored OWASP schema
@@ -19,7 +19,7 @@ Usage::
 
     python3 threat-model/validate.py [--quiet]
 
-Exits 0 only when every discovered model passes both checks.
+Exits 0 only when every discovered model passes all three checks.
 """
 
 from __future__ import annotations
@@ -44,6 +44,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 THREAT_MODEL_DIR = REPO_ROOT / "threat-model"
 SCHEMA_PATH = THREAT_MODEL_DIR / "schema" / "threat-model.schema.json"
 MODEL_GLOB = "*.threat-model.json"
+
+# The OWASP risk score is the product of likelihood and impact, each on a five-point
+# scale. The schema constrains the two enums and the 0-25 score range independently
+# and states no formula, so both the scale and the banding are defined here.
+LIKELIHOOD_VALUES = {"rare": 1, "unlikely": 2, "possible": 3, "likely": 4, "certain": 5}
+IMPACT_VALUES = {
+    "negligible": 1,
+    "minor": 2,
+    "moderate": 3,
+    "major": 4,
+    "severe": 5,
+}
 
 # Maps a ``typed-symbolic-name`` type reference to the top-level collection that
 # defines that kind of symbol. The schema types ``type`` as a bare, UNCONSTRAINED
@@ -446,6 +458,65 @@ def validate_schema(model: dict[str, Any], validator: Draft202012Validator) -> l
     return errors
 
 
+def risk_level_band(score: int) -> str:
+    """The OWASP risk level band for a 0-25 risk score.
+
+    The schema constrains the enums and the score range but states no formula, so the
+    banding is stated here explicitly and applied to every risk. Encoding it means a
+    score can no longer be quietly lowered to reach a more comfortable band.
+    """
+    if score <= 4:
+        return "very_low"
+    if score <= 9:
+        return "low"
+    if score <= 14:
+        return "medium"
+    if score <= 19:
+        return "high"
+    if score <= 24:
+        return "very_high"
+    return "critical"
+
+
+def validate_risk_matrix(model: dict[str, Any]) -> list[tuple[str, str]]:
+    """Check each risk's score against the OWASP likelihood x impact matrix.
+
+    The schema permits any 0-25 score and any level band independently, so a model
+    can claim a severe impact while reporting a comfortable score. This closes that.
+    """
+    if not isinstance(model, dict):
+        return []
+    errors: list[tuple[str, str]] = []
+    risks = model.get("risks")
+    if not isinstance(risks, list):
+        return errors
+    for index, risk in enumerate(risks):
+        if not isinstance(risk, dict):
+            continue
+        prefix = f"risks[{index}]"
+        likelihood = LIKELIHOOD_VALUES.get(risk.get("likelihood"))
+        impact = IMPACT_VALUES.get(risk.get("impact"))
+        score = risk.get("score")
+        level = risk.get("level")
+        if likelihood is None or impact is None or not isinstance(score, int):
+            continue  # The schema reports the malformed enum or type itself.
+        expected = likelihood * impact
+        if score != expected:
+            errors.append(
+                (
+                    prefix,
+                    f"score {score} is inconsistent with likelihood "
+                    f"{risk['likelihood']} x impact {risk['impact']}, which is {expected}",
+                )
+            )
+        expected_band = risk_level_band(score)
+        if level != expected_band:
+            errors.append(
+                (prefix, f"level {level!r} is inconsistent with score {score}, which is {expected_band}")
+            )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quiet", action="store_true", help="only print failures and the summary")
@@ -479,7 +550,7 @@ def main() -> int:
 
         try:
             schema_errors = validate_schema(model, validator)
-            integrity_errors = IntegrityChecker(model).run()
+            integrity_errors = IntegrityChecker(model).run() + validate_risk_matrix(model)
         except Exception as error:  # noqa: BLE001 - a validator must not abort the run
             failed += 1
             print(f"FAIL {relative}")
