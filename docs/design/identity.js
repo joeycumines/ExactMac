@@ -62,7 +62,18 @@ function buildIdentity() {
     identityRow({ scheme: L, process: { name: "unknown", path: "— could not resolve —", role: "unresolved", signature: SIGNATURE_STATES[5] } }),
   ];
   flow(idRow, idItems, { direction: "VERTICAL", gap: 10, hugW: false, fixedW: 520 });
-  y += idRow.height + 40;
+  y += idRow.height + 12;
+
+  // Real instances of the three rows above, so every family in B4 has instances and
+  // not only SignatureBadge.
+  const idGal = makeFrame(root, { name: "cmp/identityrow-instances", x: M, y, w: 520, h: 56, fill: C.surface[L], clips: false });
+  const idInst = idItems.map((it) => {
+    const inst = it.node.createInstance();
+    inst.name = "instance-" + it.node.name;
+    return { node: inst, w: it.w, h: it.h };
+  });
+  flow(idGal, idInst, { direction: "VERTICAL", gap: 10, hugW: false, fixedW: 520 });
+  y += idGal.height + 40;
 
   // ---- ProcessTree: deep and degenerate
   heading("ProcessTree");
@@ -73,7 +84,16 @@ function buildIdentity() {
     processTree({ scheme: L, deep: false, processes: DIRECT_TREE, w: 500, caption: "Direct request — no intermediary process." }),
   ];
   flow(treeCol, treeItems, { direction: "HORIZONTAL", gap: 32, hugW: false, fixedW: W - M * 2 });
-  y += treeCol.height + 40;
+  y += treeCol.height + 12;
+
+  const treeGal = makeFrame(root, { name: "cmp/trees-instances", x: M, y, w: W - M * 2, h: 140, fill: C.surface[L], clips: false });
+  const treeInst = treeItems.map((it) => {
+    const inst = it.node.createInstance();
+    inst.name = "instance-" + it.node.name;
+    return { node: inst, w: it.w, h: it.h };
+  });
+  flow(treeGal, treeInst, { direction: "HORIZONTAL", gap: 32, hugW: false, fixedW: W - M * 2 });
+  y += treeGal.height + 40;
 
   // ---- UntrustedField beside SystemField: the pair that proves the distinction
   heading("UntrustedField");
@@ -84,7 +104,16 @@ function buildIdentity() {
     systemField({ scheme: L, w: 400, caption: "TARGET — RESOLVED BY THE SYSTEM", value: "/Users/joeyc/dev/secret-project" }),
   ];
   flow(pair, pairItems, { direction: "HORIZONTAL", gap: 24, hugW: false, fixedW: W - M * 2 });
-  y += pair.height + 40;
+  y += pair.height + 12;
+
+  const pairGal = makeFrame(root, { name: "cmp/field-pair-instances", x: M, y, w: W - M * 2, h: 60, fill: C.surface[L], clips: false });
+  const pairInst = pairItems.map((it) => {
+    const inst = it.node.createInstance();
+    inst.name = "instance-" + it.node.name;
+    return { node: inst, w: it.w, h: it.h };
+  });
+  flow(pairGal, pairInst, { direction: "HORIZONTAL", gap: 24, hugW: false, fixedW: W - M * 2 });
+  y += pairGal.height + 40;
 
   root.resize(W, y);
   page.resize(W + 240, y + 240);

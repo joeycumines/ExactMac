@@ -375,12 +375,15 @@ function optionRow(o) {
     name: "title", chars: opt.title, size: 13, style: "Semi Bold",
     color: cw(scheme, opt.destructive ? "danger" : "text-primary"),
   });
+  // The stack width is declared FIRST because the scope text wraps to it. It used
+  // to wrap to w-60 while the stack was w-96 on the default row, so the scope box
+  // overhung its own parent by 36pt — latent until the overflow gate caught it.
+  const stackW = isDef ? w - 96 : w - 46;   // leave room for the default badge
   const scope = makeText(null, {
     name: "scope",
     chars: opt.breadth + "  ·  " + opt.duration,
-    size: 11, color: cw(scheme, "text-secondary"), wrap: w - 60,
+    size: 11, color: cw(scheme, "text-secondary"), wrap: stackW,
   });
-  const stackW = isDef ? w - 96 : w - 46;   // leave room for the default badge
   const stack = makeFrame(null, {
     name: "stack", w: stackW, h: 34,
     fill: isDef ? cw(scheme, "surface-raised") : cw(scheme, "surface"),

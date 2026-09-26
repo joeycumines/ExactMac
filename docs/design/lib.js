@@ -11,9 +11,6 @@
 //      resize() and yields NaN geometry that is dropped with no error, so
 //      entries() filters $-prefixed keys and sizes are clamped.
 //
-// The sandbox has no text metrics, so width is estimated from character count.
-// CHAR_W is calibrated against a rendered Inter specimen: 0.56 clipped glyphs.
-
 function hexToRgb(hex) {
   const h = hex.replace("#", "");
   return {
@@ -32,21 +29,35 @@ function entries(obj) {
     .map((k) => [k, obj[k]]);
 }
 
-// The sandbox has no text metrics, so width is estimated from character count.
-// MEASURED Inter advance is ~0.458, from a rendered specimen. 0.58 keeps a real
-// safety margin over that: under-allocating CLIPS INK, a silent and serious
-// failure, while over-allocating only inflates a wrap-derived height. The previous
-// 0.68 over-allocated ~48% and its comment claimed a different value entirely.
-const CHAR_W = 0.58;
-const LINE_H = 1.45;
-// SemiBold and Bold are wider than Regular at the same point size. Measuring them
-// at the Regular advance under-allocates just enough to wrap a four-letter word
-// ("Deny" rendered as "Den" / "y"), which is invisible in code review and obvious
-// in a render.
+// The sandbox has no text metrics. A SINGLE average advance is not safe: lowercase
+// runs containing w/m/M/W are far wider than average, and an average sized to them
+// over-allocates everything else. Under-allocating CLIPS INK — a silent, serious
+// failure — so this estimates per character class, in em, for Inter, and then adds a
+// margin. Verified against rendered specimens: "unknown" (four narrow letters and a
+// w) clipped at a flat 0.58 and fits here.
+const EM = (() => {
+  const narrow = "iljtfrIJ.,;:!|'`()[]{}/\\-";
+  const wide = "mwMW@%";
+  const upper = "ABCDEFGHKLNOPQRSTUVXYZ";
+  // Calibrated so that a string which was observed clipping at a flat 0.58 now
+  // measures WIDER than it needs: "unknown" is six ordinary lowercase letters plus
+  // a w, and Inter's lowercase advance is close to 0.55 em, not 0.42.
+  return (ch) => {
+    if (ch === " ") return 0.28;
+    if (narrow.includes(ch)) return 0.31;
+    if (wide.includes(ch)) return 0.88;
+    if (upper.includes(ch)) return 0.68;
+    if (ch >= "0" && ch <= "9") return 0.60;
+    return 0.55;
+  };
+})();
 const WEIGHT_W = { Regular: 1, Medium: 1.04, "Semi Bold": 1.09, Bold: 1.13 };
+const MEASURE_MARGIN = 1.06;   // absorbs the estimate's residual error
+const LINE_H = 1.45;
 function measure(chars, size, style) {
-  const f = WEIGHT_W[style] || 1;
-  return Math.max(24, Math.ceil(chars.length * size * CHAR_W * f));
+  let em = 0;
+  for (const ch of chars) em += EM(ch);
+  return Math.max(24, Math.ceil(em * size * (WEIGHT_W[style] || 1) * MEASURE_MARGIN));
 }
 
 function makeText(parent, o) {

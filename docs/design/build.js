@@ -131,6 +131,50 @@ if (failures.length) {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Overflow gate. Clipped text is THIS TOOLCHAIN'S SIGNATURE SILENT FAILURE: the
+// node count looks right, the linter is clean, and a word simply loses its last
+// glyph. It was caught by eye six times in this file, so it is now checked
+// mechanically after every render. A TEXT node whose box extends past its parent's
+// content edge is a defect. Nodes inside a clipping scroll region are exempt on the
+// long axis, because that is what a scroll view is for; the check is horizontal
+// only for that reason.
+const OVERFLOW_SCRIPT = `
+const bad = [];
+(function walk(node, insideClip) {
+  for (const child of (node.children || [])) {
+    const clips = child.clipsContent === true;
+    if (child.type === "TEXT") {
+      const pad = 1.5;
+      const right = child.x + child.width;
+      const limit = node.width;
+      if (right > limit + pad) {
+        bad.push(node.name + " > " + child.name + ": right " + Math.round(right) +
+                 " > parent " + Math.round(limit) + "  " + JSON.stringify((child.characters || "").slice(0, 40)));
+      }
+    }
+    walk(child, insideClip || clips);
+  }
+})(figma.root, false);
+console.log("__OVERFLOW__" + JSON.stringify(bad));
+`;
+function overflowReport() {
+  const out = execFileSync("openpencil", ["eval", FIG, "--stdin"], {
+    input: OVERFLOW_SCRIPT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+  });
+  const m = out.match(/__OVERFLOW__(\[.*\])/s);
+  return m ? JSON.parse(m[1]) : [];
+}
+
 const wanted = process.argv.slice(2);
 const targets = wanted.length ? wanted : Object.keys(PAGES);
 for (const t of targets) render(t);
+
+const overflow = overflowReport();
+if (overflow.length) {
+  console.error(`OVERFLOW GATE FAILED — ${overflow.length} text node(s) extend past their parent:`);
+  for (const o of overflow.slice(0, 20)) console.error("  " + o);
+  process.exit(1);
+}
+console.log(`overflow gate: no text extends past its parent (${targets.length} page(s) checked)`);
