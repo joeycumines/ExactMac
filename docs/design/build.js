@@ -22,14 +22,17 @@ const TOKENS = readFileSync(join(HERE, "tokens.json"), "utf8");
 
 const PAGES = {
   foundations: { file: "foundations.js", label: "Foundations" },
+  components: { file: "components.js", label: "Components" },
 };
 
 function render(name) {
   const page = PAGES[name];
   if (!page) throw new Error(`unknown page: ${name}`);
+  // lib.js first: it holds the primitives and the sandbox guards, and depends on
+  // TOKENS, which is injected ahead of both.
+  const lib = readFileSync(join(HERE, "lib.js"), "utf8");
   const draw = readFileSync(join(HERE, page.file), "utf8");
-  // TOKENS is injected as a global; the drawing module never reads the filesystem.
-  const script = `const TOKENS = ${TOKENS};\n${draw}`;
+  const script = `const TOKENS = ${TOKENS};\n${lib}\n${draw}`;
   const out = execFileSync(
     "openpencil",
     ["eval", FIG, "--stdin", "-w"],

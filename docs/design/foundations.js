@@ -1,130 +1,10 @@
-// Pure drawing code for the Foundations page. Runs inside the openpencil eval
-// sandbox, where only `figma` and `console` exist — no Node APIs. TOKENS is
-// prepended by build.js from docs/design/tokens.json, the single source of truth.
-// Ids are never hardcoded: pages are resolved by name.
-//
-// Two hard-won constraints of this sandbox, both verified by probe rather than assumed:
-//   1. A text node with no explicit size renders NOTHING. textAutoResize is not
-//      implemented, so every text node is resized explicitly. The default 100x100 box
-//      silently produced an empty canvas.
-//   2. Token objects carry "$comment" keys for documentation. Iterating them feeds a
-//      string into resize() and yields NaN geometry that is dropped without error, so
-//      entries() filters out $-prefixed keys.
-//
-// Idempotent: clears the page before drawing, so re-running after a token change
-// never accumulates duplicates.
-
-function hexToRgb(hex) {
-  const h = hex.replace("#", "");
-  return {
-    r: parseInt(h.slice(0, 2), 16) / 255,
-    g: parseInt(h.slice(2, 4), 16) / 255,
-    b: parseInt(h.slice(4, 6), 16) / 255,
-  };
-}
-
-const solid = (hex) => [{ type: "SOLID", color: hexToRgb(hex), opacity: 1 }];
-
-// Documentation keys are not tokens.
-function entries(obj) {
-  return Object.keys(obj)
-    .filter((k) => k.charAt(0) !== "$")
-    .map((k) => [k, obj[k]]);
-}
-
-// The sandbox has no text metrics, so width is estimated from the character count.
-// 0.68 was calibrated against a rendered Inter specimen: 0.56 clipped real glyphs
-// ("Space" rendered as "Spac"). Generous rather than tight, since text is
-// left-aligned and a wide box is invisible.
-const CHAR_W = 0.68;
-function measure(chars, size) {
-  return Math.max(24, Math.ceil(chars.length * size * CHAR_W));
-}
-
-function makeText(parent, o) {
-  const t = figma.createText();
-  t.name = o.name;
-  // Figma requires fontName before characters.
-  t.fontName = {
-    family: o.mono ? TOKENS.type.designMono : TOKENS.type.designSans,
-    style: o.style || "Regular",
-  };
-  t.characters = o.chars;
-  t.fontSize = o.size;
-  t.fills = solid(o.color);
-
-  // Wrap to an explicit width when given; otherwise hug the estimated text width.
-  const lineH = o.size * 1.45;
-  let w, h;
-  if (o.wrap) {
-    w = o.wrap;
-    h = Math.max(1, Math.ceil(measure(o.chars, o.size) / w)) * lineH;
-  } else {
-    w = measure(o.chars, o.size);
-    h = lineH;
-  }
-  t.resize(w, h);
-
-  parent.appendChild(t);
-  t.x = o.x;
-  t.y = o.y;
-  return t;
-}
-
-function makeRect(parent, o) {
-  const r = figma.createRectangle();
-  r.name = o.name;
-  r.resize(Math.max(1, o.w), Math.max(1, o.h));   // guard: NaN would vanish silently
-  r.fills = solid(o.fill);
-  if (o.stroke) {
-    r.strokes = solid(o.stroke);
-    r.strokeWeight = o.strokeWeight || 1;
-  }
-  if (o.radius) r.cornerRadius = o.radius;
-  parent.appendChild(r);
-  r.x = o.x;
-  r.y = o.y;
-  return r;
-}
-
-function makeFrame(parent, o) {
-  const f = figma.createFrame();
-  f.name = o.name;
-  f.resize(Math.max(1, o.w), Math.max(1, o.h));
-  f.fills = solid(o.fill);
-  if (o.radius) f.cornerRadius = o.radius;
-  if (o.stroke) {
-    f.strokes = solid(o.stroke);
-    f.strokeWeight = o.strokeWeight || 1;
-  }
-  f.clipsContent = true;
-  parent.appendChild(f);
-  f.x = o.x;
-  f.y = o.y;
-  return f;
-}
+// Foundations page: the token specimen sheet. Primitives come from lib.js.
 
 const ORDER = [
   "surface", "surface-raised", "surface-sunken", "separator", "control-border",
   "text-primary", "text-secondary", "text-tertiary",
   "accent", "danger", "caution", "success",
 ];
-
-// WCAG 2.1 relative luminance and contrast ratio, computed here so the specimen
-// sheet carries its own accessibility evidence instead of asserting compliance.
-function luminance(hex) {
-  const x = hex.replace("#", "");
-  const ch = (i) => {
-    const c = parseInt(x.slice(i, i + 2), 16) / 255;
-    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
-}
-function contrast(a, b) {
-  const l1 = luminance(a), l2 = luminance(b);
-  const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
-  return (hi + 0.05) / (lo + 0.05);
-}
 
 // Colors that carry meaning as text or as a button fill, and so must clear AA.
 const TEXTUAL = [
@@ -146,7 +26,7 @@ function buildFoundations() {
 
   // Drawn on an explicit grid rather than an auto-layout stack: this is a
   // documentation artefact that must stay legible and diffable, not a component.
-  // Screens and components use auto-layout, which is where the rule matters.
+  // Components and screens use auto-layout, which is where the rule matters.
   const root = makeFrame(page, { name: "foundations", x: 0, y: 0, w: W, h: 400, fill: C.surface.light });
   let y = M;
 
@@ -170,8 +50,7 @@ function buildFoundations() {
       name: "fnd/color-" + scheme + "-label",
       chars: isDark ? "Dark" : "Light",
       size: 15, style: "Semibold",
-      color: C["text-primary"].light,
-      x: M, y,
+      color: C["text-primary"].light, x: M, y,
     });
     y += 26;
 
