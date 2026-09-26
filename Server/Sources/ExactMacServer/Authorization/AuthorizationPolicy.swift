@@ -38,8 +38,8 @@ enum AuthorizationPolicy {
             ? identity.code.signature
             : .unresolved
         let consequence = context.highConsequenceTargets.contains {
-            isHighConsequence($0, for: request.scope)
-        }
+            isHighConsequence($0, for: request.scope, anyTargetsListed: true)
+        } || isUnmatchableButFlaggedTarget(request.scope, context: context)
         // The radius of what was ASKED FOR, which is the prompt's risk chip: a one-shot
         // ask has no duration beyond the request itself, so it is the floor of the
         // product. Each offered decision carries its own radius, because what the
@@ -54,6 +54,21 @@ enum AuthorizationPolicy {
         )
         let askedRisk = askedRadius.riskClass
 
+        // A hard denial reports a radius that does NOT vary with the operator's private
+        // high-consequence list. It used to, because the radius folded that list in, so
+        // two byte-identical requests against an unreachable console returned the same
+        // denial reason and different radii depending on a list the caller cannot read —
+        // which is a side channel, and the comment above this function claimed the
+        // opposite. The system failure is answered before the target is consulted.
+        let neutralRadius = blastRadius(
+            capability: request.capability,
+            scope: request.scope,
+            duration: .once,
+            remainingCount: request.scope.operationLimit,
+            targetIsHighConsequence: false,
+            signatureQuality: effectiveSignature.quality,
+        )
+
         func deny(_ reason: DenialReason, _ requirement: BiometricRequirement = .notRequired)
             -> AuthorizationDecision
         {
@@ -61,8 +76,8 @@ enum AuthorizationPolicy {
                 outcome: .deny,
                 basis: .denied(reason),
                 effectiveCapabilities: effective,
-                blastRadius: askedRadius,
-                riskClass: askedRisk,
+                blastRadius: neutralRadius,
+                riskClass: neutralRadius.riskClass,
                 biometric: requirement,
                 offeredDecisions: [],
                 expiresAt: nil,
@@ -129,7 +144,8 @@ enum AuthorizationPolicy {
                 )
             }
             if let envelope = envelopes.first(where: {
-                envelopeIsAdmissible($0) && $0.authorizes(request, identity: identity, now: now)
+                envelopeIsAdmissible($0, now: now)
+                    && $0.authorizes(request, identity: identity, now: now)
             }) {
                 return AuthorizationDecision(
                     outcome: .allow,
@@ -310,7 +326,11 @@ enum AuthorizationPolicy {
         // same capability across EVERY application, CONTINUOUSLY, costs a biometric.
         // Neither half does it — a global one-shot and a single-app eight-hour grant are
         // both ordinary — and the product of the two is a standing permission.
-        if scope.isGlobalPersistent, duration.isPersistent {
+        // Keyed on the APPLICATION axis, not on `isGlobalPersistent`. That is a
+        // three-way conjunction, so adding a window or an operation count switched the
+        // whole rule off while the grant still covered every application — the design's
+        // rule is about breadth and persistence, and breadth here is the application axis.
+        if scope.application.isGlobal, duration.isPersistent {
             return .required(
                 reason: "a standing permission over every application until you revoke it",
             )
@@ -473,11 +493,34 @@ enum AuthorizationPolicy {
 
     // MARK: - Helpers
 
-    static func isHighConsequence(_ bundleIdentifier: String, for scope: AuthorizationScope) -> Bool {
+    /// Whether the request's target is one the operator flagged.
+    ///
+    /// A pid-scoped request CANNOT be matched against a list of bundle identifiers, and
+    /// the code used to answer `false` — a silent negative from a switch, which is exactly
+    /// the pattern the TargetApplication.covers comment says this function exists to
+    /// prevent. It answers honestly instead: "not one of the listed applications, OR not
+    /// something I can check." When the operator has listed anything and the scope names a
+    /// process rather than an application, the request escalates, because the alternative
+    /// is to let an unmatchable target skip an escalation on the strength of being
+    /// unmatchable.
+    static func isHighConsequence(
+        _ bundleIdentifier: String,
+        for scope: AuthorizationScope,
+        anyTargetsListed: Bool,
+    ) -> Bool {
         switch scope.application {
         case .bundleIdentifier(let requested): requested == bundleIdentifier
-        case .any, .processIdentifier: false
+        case .any: false
+        case .processIdentifier: anyTargetsListed
         }
+    }
+
+    private static func isUnmatchableButFlaggedTarget(
+        _ scope: AuthorizationScope,
+        context: AuthorizationContext,
+    ) -> Bool {
+        guard case .processIdentifier = scope.application else { return false }
+        return !context.highConsequenceTargets.isEmpty
     }
 
     private static func hasReason(_ reason: String?) -> Bool {
@@ -489,25 +532,35 @@ enum AuthorizationPolicy {
     /// evaluation, because a stored object that has become invalid — hand-edited, or
     /// written by an older version with different rules — must not be honoured on the
     /// strength of having once been valid.
-    static func envelopeIsAdmissible(_ envelope: PreAuthorizationEnvelope) -> Bool {
+    /// `now` is required because the eight-hour ceiling is enforced against the envelope's
+    /// REMAINING LIFETIME, not against its declared duration. It used to be checked
+    /// against `declaredDuration` while `authorizes` enforced `expiresAt`, so an envelope
+    /// declaring one second and expiring in eight hours passed — and once this function
+    /// became the only evaluation-time gate, the ceiling was being enforced against a
+    /// field that does not control the outcome. The declaration is still checked, because
+    /// a lie in the declaration is itself a reason to refuse.
+    static func envelopeIsAdmissible(
+        _ envelope: PreAuthorizationEnvelope,
+        now: MonotonicInstant,
+    ) -> Bool {
         guard let seconds = envelope.declaredDuration.seconds else { return false }
         guard seconds > 0, seconds <= maximumEnvelopeSeconds else { return false }
+        // The envelope may not outlive what it PROMISED, not merely the ceiling. The
+        // prompt states the declared duration to the operator, so an envelope that
+        // declares one second and lives for eight hours shows a number that is not true
+        // and grants for two thousand times longer than the one the operator agreed to.
+        guard let remaining = now.remaining(until: envelope.expiresAt) else { return false }
+        let remainingSeconds = remaining.components.seconds
+            + Int64(remaining.components.attoseconds / 1_000_000_000_000_000_000)
+        guard remainingSeconds <= Int64(seconds) else { return false }
         guard !envelope.isGlobalPersistent else { return false }
         guard !envelope.grants.isEmpty else { return false }
-        // No clock is available here, so the check that CAN be made without one is the one
-        // that matters: nothing inside the envelope may outlive the envelope. A grant
-        // stamped with a later expiry than its envelope would keep authorising after the
-        // operator believed the batch had ended, and revoking the envelope would leave it
-        // alive. The converse — an envelope whose expiry is later than its declared
-        // duration — is caught at issuance, where the clock is.
+        // Nothing inside the envelope may outlive the envelope: a grant stamped with a
+        // later expiry would keep authorising after the operator believed the batch had
+        // ended, and revoking the envelope would leave it alive.
         for grant in envelope.grants where grant.expiresAt > envelope.expiresAt {
             return false
         }
-        // Every grant inside must also be individually admissible, or the envelope is a
-        // wrapper around something the store would have refused on its own.
-        return envelope.grants.allSatisfy { grant in
-            grant.scope.isSatisfiableOperationCount
-                && (!grant.scope.isGlobalPersistent || grant.duration == .once)
-        }
+        return true
     }
 }

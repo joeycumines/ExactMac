@@ -30,7 +30,12 @@ struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
         // anything clamped it, so `advanced(by: .seconds(Int64.max))` trapped and killed
         // the process — the opposite of the promise in the doc comment, and this is the
         // function grant issuance calls on values read back from a store.
-        let seconds = interval.components.seconds
+        // NEGATIVE intervals are zero, not a saturating maximum. Reporting overflow on a
+        // negative product set the delta to UInt64.max, so a duration of about -292 years
+        // or worse produced an instant at the end of time — a grant that never expires,
+        // which is the fail-OPEN direction and the exact opposite of what the comment
+        // promises. A store that is readable is not a store that is untampered.
+        let seconds = max(0, interval.components.seconds)
         let (scaled, secondsOverflow) = seconds.multipliedReportingOverflow(by: 1_000_000_000)
         let delta: UInt64
         if secondsOverflow {
@@ -39,7 +44,7 @@ struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
             // saturating answer that is still wrong by a factor of two billion.
             delta = UInt64.max
         } else {
-            let nanos = scaled &+ Int64(clamping: interval.components.attoseconds / 1_000_000_000)
+            let nanos = scaled &+ Int64(clamping: max(0, interval.components.attoseconds) / 1_000_000_000)
             delta = UInt64(clamping: max(0, nanos))
         }
         let (sum, overflow) = nanoseconds.addingReportingOverflow(delta)
@@ -454,6 +459,12 @@ struct Grant: Sendable, Equatable, Hashable {
     var origin: GrantOrigin
     /// A count-bounded grant: the ergonomic grain between allow-once and
     /// allow-forever, and the one that matches how agents actually work, in loops.
+    ///
+    /// NOT CONSUMED HERE, and deliberately: `evaluate` takes grants by value, so
+    /// decrementing here could not be persisted and consumption is the STORE's job (C5).
+    /// What this type guarantees is the ceiling — a grant never authorises more than its
+    /// declared count — and the store guarantees the decrement. A count here is therefore
+    /// a bound to check, not a counter to advance.
     var remainingOperations: Int?
     /// Whether the target was on the operator's own high-consequence list at issue time.
     var targetIsHighConsequence: Bool
@@ -650,10 +661,11 @@ struct BlastRadius: Sendable, Equatable, Hashable {
     ///   observation.ax,      every application, 8 hours .0.180  high
     ///   script.execute,      every application, 8 hours .0.225  high
     ///
-    /// So a long global grant of a READ capability reads as Elevated and the same grant of
-    /// an observation or execution capability reads as High, and an unsigned caller moves
-    /// both up a class: the same clipboard grant becomes 0.293, elevated, and unsigned
-    /// AND on a high-consequence application it becomes 0.65, high.
+    /// So a long global grant of a READ capability reads as Elevated while the same grant
+    /// of an observation or execution capability reads as High. Widening any single
+    /// factor never lowers the class, which is the property the model has to have: an
+    /// unsigned caller takes the 0.146 clipboard grant to 0.293, which is HIGH, and
+    /// unsigned AND on a high-consequence application to 0.65, also high.
     var riskClass: RiskClass {
         switch radius {
         case ..<0.10: .routine
@@ -663,7 +675,7 @@ struct BlastRadius: Sendable, Equatable, Hashable {
     }
 }
 
-enum BiometricRequirement: Sendable, Equatable {
+enum BiometricRequirement: Sendable, Hashable {
     case notRequired
     /// Carries why, because the prompt names the single decision the ceremony
     /// authorizes and an unexplained ceremony is not consent to anything in particular.
@@ -705,7 +717,7 @@ enum DenialReason: String, Sendable, Equatable, CaseIterable {
 
 /// One thing the operator can say, carrying its own breadth and duration on its face.
 /// An operator cannot compare options whose scope is hidden.
-struct OfferedDecision: Sendable, Equatable {
+struct OfferedDecision: Sendable, Hashable {
     enum Kind: String, Sendable, Equatable, CaseIterable {
         case deny
         case allowOnce
@@ -733,19 +745,6 @@ struct OfferedDecision: Sendable, Equatable {
     var isDestructive: Bool
     var isDefault: Bool
     var isPrimary: Bool
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.kind == rhs.kind && lhs.scope == rhs.scope && lhs.duration == rhs.duration
-            && lhs.blastRadius == rhs.blastRadius && lhs.biometric == rhs.biometric
-            && lhs.isDestructive == rhs.isDestructive && lhs.isDefault == rhs.isDefault
-            && lhs.isPrimary == rhs.isPrimary
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(kind)
-        hasher.combine(scope)
-        hasher.combine(duration)
-    }
 }
 
 struct AuthorizationDecision: Sendable, Equatable {
