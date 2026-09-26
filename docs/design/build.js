@@ -1,70 +1,80 @@
 #!/usr/bin/env node
-// Driver that renders docs/design/*.js into docs/design.fig.
+// Renders docs/design.fig from the committed sources in this directory.
 //
-// The drawing code runs inside the openpencil eval sandbox, which has no Node
-// APIs, so this script reads the committed token source and the pure drawing
-// module, concatenates them, and pipes the result to `openpencil eval -w`. The
-// .fig is therefore generated from files in git rather than hand-placed, which
-// makes it reviewable in a diff and reproducible after a token change.
+// The .fig is generated rather than hand-placed because the only working write path
+// is a script anyway, and a generated design is reviewable in a diff and
+// reproducible. Precisely: the CONTENT is stable (per-page node counts, node ids, and
+// every node's path/type/x/y/w/h/text are identical across rebuilds), but the writer
+// embeds an mtime, so the BYTES differ on every run and a no-op rebuild always
+// dirties the file.
 //
-//   node docs/design/build.js            # rebuild every page
-//   node docs/design/build.js foundations
+// Layout: lib.js first (primitives, text measurement, flow(), and the guards for
+// known sandbox traps), then widgets.js (the component factories), then the page
+// modules, which draw one page each.
 //
-// Writing goes only to docs/design.fig, and only through the server.
+// Two gates run on every build, both proven by negative controls. Both were born
+// from a FAILING quality-check.
+//
+//   TOKEN GATE — every text token must clear WCAG AA (4.5:1) on every surface a
+//   component can place it on, not just `surface`, plus the ink-on-fill pairs. It
+//   runs BEFORE rendering and hard-exits, so a failing token can never reach the
+//   design of record. This class of bug bit three times; the actual defect was
+//   claiming compliance without a check.
+//
+//   OVERFLOW GATE — after building, no node may extend past its container, on either
+//   axis. Clipped text is this toolchain's signature SILENT failure: the node count
+//   looks right, the linter is clean, and a word quietly loses its last glyph. It
+//   covers every node type, because what got sliced was a COMPONENT, and a text-only
+//   check cannot see that. Vertical overflow inside a clipping parent is the one
+//   legitimate case: that is the scroll view.
+//
+// The build runs in TWO passes. Pass one renders WITHOUT -w, so the file on disk is
+// untouched, and runs the overflow check in the same sandbox. Only if every page is
+// clean does pass two write.
 
 const { execFileSync } = require("node:child_process");
 const { readFileSync, existsSync } = require("node:fs");
 const { join, dirname } = require("node:path");
 
-const HERE = __dirname;                                   // docs/design/
-const FIG = join(HERE, "..", "design.fig");               // docs/design.fig
+const HERE = dirname(require.resolve("./build.js"));
+const FIG = join(HERE, "..", "design.fig");
 const TOKENS = readFileSync(join(HERE, "tokens.json"), "utf8");
 const COLOR = JSON.parse(TOKENS).color;
 
-// A page may be composed of several modules; they are concatenated in order
-// against one page so a design system's parts can live apart from the screens
-// that use them.
+// A page may be composed of several modules; they are concatenated in order against
+// one page so a design system's parts can live apart from the screens that use them.
 const PAGES = {
-  foundations: { files: ["foundations.js"], label: "Foundations" },
-  components: { files: ["identity.js", "controls.js"], label: "Components" },
-  screens: { files: ["prompt.js"], label: "Screens" },
-  flows: { files: ["flows.js"], label: "Flows" },
+  foundations: { files: ["foundations.js"] },
+  components: { files: ["identity.js", "controls.js"] },
+  screens: { files: ["prompt.js"] },
+  flows: { files: ["flows.js"] },
+};
+// The page each module set clears and redraws, which is not always the key.
+const PAGE_NAMES = {
+  foundations: "Foundations",
+  components: "Components",
+  screens: "Screens",
+  flows: "Flows",
 };
 
-function render(name) {
-  const page = PAGES[name];
-  if (!page) throw new Error(`unknown page: ${name}`);
-  // Skip a page whose modules are not written yet rather than requiring stubs;
-  // `node docs/design/build.js` therefore always builds what exists.
-  const present = page.files.filter((f) => existsSync(join(HERE, f)));
-  const missing = page.files.filter((f) => !existsSync(join(HERE, f)));
-  if (present.length === 0) {
-    console.log(`${name}: skipped (${page.files.join(", ")} not written yet)`);
-    return;
-  }
-  // lib.js first: it holds the primitives and the sandbox guards, and depends on
-  // TOKENS, which is injected ahead of both.
-  const lib = readFileSync(join(HERE, "lib.js"), "utf8");
-  const widgets = readFileSync(join(HERE, "widgets.js"), "utf8");
-  const draw = present.map((f) => readFileSync(join(HERE, f), "utf8")).join("\n");
-  const script = `const TOKENS = ${TOKENS};\nconst TEXT_TOKENS = ${JSON.stringify(TEXT_TOKENS)};\nconst SURFACES = ${JSON.stringify(SURFACES)};\n${lib}\n${widgets}\n${draw}`;
-  const out = execFileSync(
-    "openpencil",
-    ["eval", FIG, "--stdin", "-w"],
-    { input: script, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
-  );
-  const m = out.match(/__RESULT__(\{.*\})/);
-  const suffix = missing.length ? ` (pending: ${missing.join(", ")})` : "";
-  console.log(`${name}: ${m ? m[1] : out.trim().split("\n").pop()}${suffix}`);
-}
-
 // ---------------------------------------------------------------------------
-// Token gate. A text token must clear WCAG AA (4.5:1) on EVERY surface a component
-// can place it on, not just `surface`. Two bugs of the same shape came from
-// checking only one: Apple's stock tertiary measures 3.62:1 on white, and the
-// replacement then measured 4.27:1 on surface-sunken. openpencil lint only
-// catches a combination that happens to appear on a page, so a token can be wrong
-// and the lint stay green until something uses it. This runs on every build.
+// The gated text tokens, declared ONCE and injected into the eval script so the
+// Foundations contrast table and this gate cannot disagree. When the page declared
+// its own list it reported "AA" for a token the build rejected, which is worse than
+// no table at all.
+const TEXT_TOKENS = [
+  "text-primary", "text-secondary", "text-tertiary",
+  "danger", "caution", "success", "accent-text",
+];
+const SURFACES = ["surface", "surface-raised", "surface-sunken"];
+
+// Ink on a saturated FILL is text too, and is a different check: the primary
+// button's label and the envelope band. Ungated, both were unverified.
+const FILL_PAIRS = [
+  { ink: "on-accent", fill: "accent", what: "primary button label" },
+  { ink: "surface", fill: "caution", what: "envelope band label" },
+];
+
 const lum = (hex) => {
   const x = hex.replace("#", "");
   const ch = (i) => {
@@ -78,37 +88,17 @@ const ratio = (a, b) => {
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 };
 
-// The gated text tokens, declared ONCE and injected into the eval script so the
-// Foundations contrast table and this gate cannot disagree. When the page declared
-// its own list it reported "AA" for a token the build rejected, which is worse than
-// no table at all.
-const TEXT_TOKENS = [
-  "text-primary", "text-secondary", "text-tertiary",
-  "danger", "caution", "success", "accent-text",
-];
-const SURFACES = ["surface", "surface-raised", "surface-sunken"];
-
-// Ink sitting on a saturated FILL is text too, and is a different check: it is the
-// primary button's label and the envelope band. Ungated, both were unverified.
-const FILL_PAIRS = [
-  { ink: "on-accent", fill: "accent",   what: "primary button label" },
-  { ink: "surface",   fill: "caution",  what: "envelope band label" },
-];
 const failures = [];
 for (const scheme of ["light", "dark"]) {
   for (const token of TEXT_TOKENS) {
     for (const surface of SURFACES) {
       const r = ratio(COLOR[token][scheme], COLOR[surface][scheme]);
       if (r < 4.5) {
-        failures.push(
-          `${scheme}/${token} on ${surface}: ${r.toFixed(2)}:1 (needs 4.5)`,
-        );
+        failures.push(`${scheme}/${token} on ${surface}: ${r.toFixed(2)}:1 (needs 4.5)`);
       }
     }
   }
-}
-for (const pair of FILL_PAIRS) {
-  for (const scheme of ["light", "dark"]) {
+  for (const pair of FILL_PAIRS) {
     const r = ratio(COLOR[pair.ink][scheme], COLOR[pair.fill][scheme]);
     if (r < 4.5) {
       failures.push(
@@ -117,64 +107,107 @@ for (const pair of FILL_PAIRS) {
     }
   }
 }
-
 if (failures.length) {
   console.error("TOKEN GATE FAILED — text below WCAG AA:");
   for (const f of failures) console.error("  " + f);
-  // Hard exit, NOT process.exitCode: setting the code lets the render loop run and
-  // the poisoned token still reaches the design of record. The gate is only real if
-  // the artifact cannot be written when it fails.
+  // Hard exit, NOT process.exitCode: setting the code lets the render run and the
+  // poisoned token still reaches the design of record.
   process.exit(1);
-} else {
-  console.log(
-    `token gate: ${TEXT_TOKENS.length} text tokens x ${SURFACES.length} surfaces x 2 schemes all >= 4.5:1`,
-  );
 }
+console.log(
+  `token gate: ${TEXT_TOKENS.length} text tokens x ${SURFACES.length} surfaces x 2 schemes, ` +
+  `plus ${FILL_PAIRS.length} ink-on-fill pairs, all >= 4.5:1`,
+);
 
-
-// ---------------------------------------------------------------------------
-// Overflow gate. Clipped text is THIS TOOLCHAIN'S SIGNATURE SILENT FAILURE: the
-// node count looks right, the linter is clean, and a word simply loses its last
-// glyph. It was caught by eye six times in this file, so it is now checked
-// mechanically after every render. A TEXT node whose box extends past its parent's
-// content edge is a defect. Nodes inside a clipping scroll region are exempt on the
-// long axis, because that is what a scroll view is for; the check is horizontal
-// only for that reason.
-const OVERFLOW_SCRIPT = `
-const bad = [];
-(function walk(node, insideClip) {
+// Appended to the dry-run script. Reports every node that escapes its container.
+const CHECK_TAIL = `
+const __bad = [];
+function walk(node, clipAncestor) {
+  const checkable = node.type !== "PAGE" && node.width > 0;
+  // Vertical overflow is exempt in exactly ONE container, named explicitly. It
+  // cannot be inferred from clipsContent, because every frame in this layout
+  // clips by default and inferring it silently exempted the whole document — the
+  // gate reported clean on a footer overflowing by 182pt.
+  const isScrollRegion = node.name.indexOf("body-scroll") === 0;
   for (const child of (node.children || [])) {
     const clips = child.clipsContent === true;
-    if (child.type === "TEXT") {
-      const pad = 1.5;
-      const right = child.x + child.width;
-      const limit = node.width;
-      if (right > limit + pad) {
-        bad.push(node.name + " > " + child.name + ": right " + Math.round(right) +
-                 " > parent " + Math.round(limit) + "  " + JSON.stringify((child.characters || "").slice(0, 40)));
+    // Recurse FIRST and unconditionally. A page-level guard placed before the
+    // recursion with a continue stopped the walk at the document root, so the
+    // checker reported a clean document no matter what was inside it.
+    walk(child, clips ? child : clipAncestor);
+    if (!checkable) continue;
+    const pad = 1.5;
+    const r = child.x + child.width;
+    const bo = child.y + child.height;
+    const where = node.name + " > " + child.name + " [" + child.type + "]";
+    const label = child.type === "TEXT" ? JSON.stringify((child.characters || "").slice(0, 36)) : "";
+    if (r > node.width + pad) {
+      __bad.push(where + " overflows horizontally: right " + Math.round(r) + " > " + Math.round(node.width) + "  " + label);
+    }
+    if (bo > node.height + pad && !isScrollRegion) {
+      __bad.push(where + " overflows vertically: bottom " + Math.round(bo) + " > " + Math.round(node.height) + "  " + label);
+    }
+    if (clipAncestor && r > clipAncestor.width + pad) {
+      __bad.push(where + " escapes clipping ancestor " + clipAncestor.name +
+                 ": right " + Math.round(r) + " > " + Math.round(clipAncestor.width) + "  " + label);
+    }
+  }
+}
+// Walk ONLY the page this pass just rebuilt. Walking the whole document made a
+// stale page left on disk by an earlier failing build fail an unrelated page's
+// pass, which is how a Foundations build reported footers it had never drawn.
+const __target = figma.root.children.find((p) => p.name === __PAGE) || figma.root;
+walk(__target, null);
+console.log("__OVERFLOW__" + JSON.stringify(__bad));
+`;
+
+function buildPass(write, targets) {
+  for (const t of targets) {
+    const page = PAGES[t];
+    if (!page) throw new Error(`unknown page: ${t}`);
+    // Skip a page whose modules are not written yet rather than requiring stubs.
+    const present = page.files.filter((f) => existsSync(join(HERE, f)));
+    if (present.length === 0) {
+      if (write) console.log(`${t}: skipped (${page.files.join(", ")} not written yet)`);
+      continue;
+    }
+    const lib = readFileSync(join(HERE, "lib.js"), "utf8");
+    const widgets = readFileSync(join(HERE, "widgets.js"), "utf8");
+    const draw = present.map((f) => readFileSync(join(HERE, f), "utf8")).join("\n");
+    const preamble =
+      `const __PAGE = ${JSON.stringify(PAGE_NAMES[t] || t)};\n` +
+      `const TOKENS = ${TOKENS};\n` +
+      `const TEXT_TOKENS = ${JSON.stringify(TEXT_TOKENS)};\n` +
+      `const SURFACES = ${JSON.stringify(SURFACES)};\n` +
+      `${lib}\n${widgets}\n${draw}\n`;
+    const args = ["eval", FIG, "--stdin"];
+    if (write) args.push("-w");
+    const out = execFileSync("openpencil", args, {
+      input: preamble + (write ? "" : CHECK_TAIL),
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    if (write) {
+      const m = out.match(/__RESULT__(\{.*\})/);
+      console.log(`${t}: ${m ? m[1] : out.trim().split("\n").pop()}`);
+    } else {
+      const m = out.match(/__OVERFLOW__(\[.*\])/s);
+      if (!m) throw new Error(`overflow check produced no result for page ${t}`);
+      const bad = JSON.parse(m[1]);
+      if (bad.length) {
+        console.error(`OVERFLOW GATE FAILED on ${t} — ${bad.length} node(s) escape a container:`);
+        for (const b of bad.slice(0, 20)) console.error("  " + b);
+        process.exit(1);
       }
     }
-    walk(child, insideClip || clips);
   }
-})(figma.root, false);
-console.log("__OVERFLOW__" + JSON.stringify(bad));
-`;
-function overflowReport() {
-  const out = execFileSync("openpencil", ["eval", FIG, "--stdin"], {
-    input: OVERFLOW_SCRIPT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
-  });
-  const m = out.match(/__OVERFLOW__(\[.*\])/s);
-  return m ? JSON.parse(m[1]) : [];
 }
 
 const wanted = process.argv.slice(2);
 const targets = wanted.length ? wanted : Object.keys(PAGES);
-for (const t of targets) render(t);
 
-const overflow = overflowReport();
-if (overflow.length) {
-  console.error(`OVERFLOW GATE FAILED — ${overflow.length} text node(s) extend past their parent:`);
-  for (const o of overflow.slice(0, 20)) console.error("  " + o);
-  process.exit(1);
-}
-console.log(`overflow gate: no text extends past its parent (${targets.length} page(s) checked)`);
+buildPass(false, targets);   // dry run: the .fig on disk is untouched
+buildPass(true, targets);    // only now does the design of record change
+console.log(
+  `overflow gate: no node escapes its container on either axis, across ${targets.length} page(s)`,
+);

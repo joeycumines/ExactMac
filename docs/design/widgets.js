@@ -47,8 +47,9 @@ function signatureBadge(o) {
     direction: "HORIZONTAL", gap: 6, padLeft: 9, padRight: 9, padTop: 3, padBottom: 3,
     align: "CENTER", hugW: false, fixedW: bw,
   });
-  c.resize(bw, 20);
-  return { node: c, w: bw, h: 20 };
+  // Height follows the content: the 11pt Semi Bold label is ~16pt, so a 20pt pill
+  // clipped it by 2pt. The overflow gate found it.
+  return { node: c, w: bw, h: c.height };
 }
 
 // ------------------------------------------------------------------ IdentityRow
@@ -100,12 +101,13 @@ function identityRow(o) {
     const b = signatureBadge({ state: p.signature, scheme });
     items.push(b);
   }
+  // Height is NOT pinned: a path that wraps to two lines needs ~62pt, and pinning
+  // the row to 52 clipped it. The overflow gate found this, not the eye.
   flow(row, items, {
     direction: "HORIZONTAL", gap: 10, padLeft: 10, padRight: 10, padTop: 10, padBottom: 10,
     align: "CENTER", hugW: false, fixedW: o.w || 400,
   });
-  row.resize(o.w || 400, 52);
-  return { node: row, w: o.w || 400, h: 52 };
+  return { node: row, w: o.w || 400, h: row.height };
 }
 
 // ----------------------------------------------------------------- ProcessTree
@@ -469,28 +471,42 @@ function payloadBlock(o) {
     fill: cw(scheme, "surface-sunken"), radius: CR["radius-sm"],
     stroke: cw(scheme, "separator"),
   });
-  const cap = makeText(null, {
-    name: "caption", chars: "EXACT REQUEST — NOTHING IS TRUNCATED", size: 10,
-    style: "Semi Bold", color: cw(scheme, "text-secondary"), wrap: w - 24 - 190,
-  });
   const body = makeText(null, {
     name: "body", chars: o.body, size: 11, mono: true, wrap: w - 24,
     color: cw(scheme, "text-primary"),
   });
-  // The Copy affordance right-aligns INSIDE a box spanning the slack rather than
-  // being pushed there by mainAlign SPACE_BETWEEN. Space-between is written as a
-  // layout property but the child's stored x does not reliably survive the round
-  // trip, so anything whose position is visually load-bearing is aligned by the
-  // text itself.
+  // The caption and a full-sentence warning cannot share one line at 372pt: the
+  // caption measures ~221pt and "Copy ... shared clipboard" ~166pt against 348pt
+  // of room. Sharing the line made the caption wrap inside a 16pt head and lose its
+  // second line, so the head STACKS: caption on its own full-width line, then the
+  // affordance with its pasteboard warning right-aligned beneath it. The warning
+  // stays on the affordance, which is what B5 asks for.
+  const cap = makeText(null, {
+    name: "caption", chars: "EXACT REQUEST — NOTHING IS TRUNCATED", size: 10,
+    style: "Semi Bold", color: cw(scheme, "text-secondary"), wrap: w - 24,
+  });
   const copy = makeText(null, {
-    name: "copy", chars: "Copy to shared clipboard", size: 11, style: "Semi Bold",
-    color: cw(scheme, "accent-text"), align: "RIGHT", wrap: w - 24 - cap.width - 8,
+    name: "copy", chars: "Copy", size: 11, style: "Semi Bold",
+    color: cw(scheme, "accent-text"), align: "RIGHT", wrap: w - 24,
   });
+  const warn = makeText(null, {
+    name: "warn", chars: "lands on the shared clipboard", size: 9,
+    color: cw(scheme, "text-tertiary"), align: "RIGHT", wrap: w - 24,
+  });
+  const copyRow = makeFrame(null, {
+    name: "copy-row", w: w - 24, h: 16, fill: cw(scheme, "surface-sunken"),
+  });
+  flow(copyRow, [
+    { node: copy, w: w - 24, h: copy.height },
+    { node: warn, w: w - 24, h: warn.height },
+  ], { direction: "VERTICAL", gap: 1, hugW: false, fixedW: w - 24 });
+
   const head = makeFrame(null, { name: "head", w: w - 24, h: 16, fill: cw(scheme, "surface-sunken") });
-  flow(head, [{ node: cap }, { node: copy }], {
-    direction: "HORIZONTAL", gap: 8, hugW: false, fixedW: w - 24,
-  });
-  head.resize(w - 24, 16);
+  flow(head, [
+    { node: cap, w: w - 24, h: cap.height },
+    { node: copyRow, w: w - 24, h: copyRow.height },
+  ], { direction: "VERTICAL", gap: 4, hugW: false, fixedW: w - 24 });
+
   const items = [{ node: head, w: head.width, h: head.height }, { node: body }];
   flow(f, items, {
     direction: "VERTICAL", gap: 6, padLeft: 12, padRight: 12, padTop: 8, padBottom: 8,

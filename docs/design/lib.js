@@ -57,7 +57,10 @@ const LINE_H = 1.45;
 function measure(chars, size, style) {
   let em = 0;
   for (const ch of chars) em += EM(ch);
-  return Math.max(24, Math.ceil(em * size * (WEIGHT_W[style] || 1) * MEASURE_MARGIN));
+  // The floor is small on purpose: a 24pt floor made every 1-2 character string
+  // (a step number, a digit in a circle) measure 24pt, compute two lines in an 18pt
+  // box, and sit high in its own badge.
+  return Math.max(8, Math.ceil(em * size * (WEIGHT_W[style] || 1) * MEASURE_MARGIN));
 }
 
 function makeText(parent, o) {

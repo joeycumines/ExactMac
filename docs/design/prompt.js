@@ -204,29 +204,36 @@ function promptBody(scheme, o) {
 
   const payload = payloadBlock({
     scheme, w: INNER,
-    body: o.payload || "pbcopy -Prefer txt < /Users/joeyc/dev/secret-project/notes.txt",
+    body: o.payload || "AXUIElementCopyAttributeValue(AXFocusedApplication, kAXFocusedWindowAttribute), walking children to depth 12 and returning role, title, value and enabled for every node whose role is in {AXTextField, AXTextArea, AXStaticText}",
   });
   items.push({ node: payload.node, w: INNER, h: payload.h });
 
   flow(inner, items, { direction: "VERTICAL", gap: 10, hugW: false, fixedW: INNER });
   // The scrollbar is a COLUMN placed by the flow, not an absolutely positioned
   // child: a stored child offset is not reliably round-tripped, which previously
-  // put the thumb 189pt below its own clipping frame, i.e. invisible.
-  const track = makeFrame(null, {
-    name: "scrollbar", w: 4, h: BODY_H - 24, fill: sk(scheme, "separator"),
-  });
-  const thumb = makeFrame(null, {
-    name: "thumb-box", w: 4, h: Math.round((BODY_H - 24) * 0.45), fill: sk(scheme, "control-border"),
-  });
-  flow(track, [{ node: thumb, w: 4, h: thumb.height }], {
-    direction: "VERTICAL", gap: 0, padLeft: 0, padRight: 0, padTop: 0, padBottom: 0,
-    hugW: false, hugH: false, fixedW: 4, fixedH: BODY_H - 24,
-  });
+  // put the thumb 189pt below its own clipping frame, i.e. invisible. It is drawn
+  // ONLY when the disclosure genuinely exceeds the region — a permanent scrollbar on
+  // a 173pt disclosure inside a 236pt region is a false alarm, and a consent surface
+  // must not cry wolf about its own content.
+  const avail = BODY_H - 24;
+  const overflowing = inner.height > avail;
+  const rowItems = [{ node: inner, w: INNER, h: inner.height }];
+  if (overflowing) {
+    const track = makeFrame(null, {
+      name: "scrollbar", w: 4, h: avail, fill: sk(scheme, "separator"),
+    });
+    const thumb = makeFrame(null, {
+      name: "thumb-box", w: 4, h: Math.max(24, Math.round(avail * (avail / inner.height))),
+      fill: sk(scheme, "control-border"),
+    });
+    flow(track, [{ node: thumb, w: 4, h: thumb.height }], {
+      direction: "VERTICAL", gap: 0, padLeft: 0, padRight: 0, padTop: 0, padBottom: 0,
+      hugW: false, hugH: false, fixedW: 4, fixedH: avail,
+    });
+    rowItems.push({ node: track, w: 4, h: avail });
+  }
 
-  flow(wrap, [
-    { node: inner, w: INNER, h: inner.height },
-    { node: track, w: 4, h: BODY_H - 24 },
-  ], {
+  flow(wrap, rowItems, {
     direction: "HORIZONTAL", gap: 8, padLeft: PAD, padRight: 4, padTop: 12, padBottom: 12,
     align: "MIN", hugW: false, hugH: false, fixedW: PW, fixedH: BODY_H,
   });
@@ -277,11 +284,12 @@ function promptFooter(scheme, o) {
     items.push(rule(scheme, "rule-before-deny", INNER));
     const deny = button({ variant: "deny", scheme, label: "Deny" });
     // Widths: deny 96 + gap 8 + more 284 = 388. Inside `more`, 12 + label 200 +
-    // gap 8 + hint 48 + 12 = 280 <= 284, and the row is 36 tall because the label
-    // wraps to two lines.
+    // gap 8 + hint 48 + 12 = 280 <= 284. The label wraps to two lines, so the box
+    // is ~44 tall; NOTHING here is pinned to a guessed height, because pinning it
+    // to 36 cut the bottom off the Deny button.
     const moreW = INNER - deny.w - 8;
     const more = makeFrame(null, {
-      name: "more-options", w: moreW, h: 36,
+      name: "more-options", w: moreW, h: 30,
       fill: sk(scheme, "surface-sunken"), radius: SR["radius-sm"],
     });
     const mLabel = makeText(null, {
@@ -296,14 +304,14 @@ function promptFooter(scheme, o) {
       direction: "HORIZONTAL", gap: 8, padLeft: 12, padRight: 12, padTop: 6, padBottom: 6,
       align: "CENTER", hugW: false, fixedW: moreW,
     });
-    const tail = makeFrame(null, { name: "deny-row", w: INNER, h: 36, fill: sk(scheme, "surface") });
+    const tail = makeFrame(null, { name: "deny-row", w: INNER, h: 30, fill: sk(scheme, "surface") });
     flow(tail, [
       { node: deny.node, w: deny.w, h: deny.h },
-      { node: more, w: moreW, h: 36 },
+      { node: more, w: moreW, h: more.height },
     ], {
       direction: "HORIZONTAL", gap: 8, align: "CENTER", hugW: false, fixedW: INNER,
     });
-    items.push({ node: tail, w: INNER, h: 36 });
+    items.push({ node: tail, w: INNER, h: tail.height });
   }
 
   flow(f, items, {
@@ -506,6 +514,7 @@ function envelopeReview(scheme, o) {
   flow(denyRow, [{ node: deny.node, w: deny.w, h: deny.h }], {
     direction: "HORIZONTAL", gap: 8, align: "MIN", hugW: false, fixedW: INNER,
   });
+  denyRow.resize(INNER, deny.h);
   const note = noteField({ scheme, w: INNER, caption: "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION" });
   const bioNote = makeText(null, {
     name: "never-global", chars: "An envelope can never become global or outlive its duration.", size: 10,
@@ -522,7 +531,7 @@ function envelopeReview(scheme, o) {
     { node: actWrap, w: INNER, h: 34 },
     { node: note.node, w: INNER, h: note.h },
     rule(scheme, "rule-before-deny", INNER),
-    { node: denyRow, w: INNER, h: 34 },
+    { node: denyRow, w: INNER, h: denyRow.height },
     { node: bioNote, w: INNER, h: bioNote.height },
   ], {
     direction: "VERTICAL", gap: 10, padLeft: PAD, padRight: PAD, padTop: 12, padBottom: PAD,

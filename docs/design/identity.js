@@ -97,7 +97,7 @@ function buildIdentity() {
 
   // ---- UntrustedField beside SystemField: the pair that proves the distinction
   heading("UntrustedField");
-  note("Same value, two treatments. The caller's text is mono on a sunken surface behind a caution rule under an explicit label; a system-derived fact of identical content is plain on the surface. If these ever look alike, in-dialog label spoofing works.");
+  note("Same value, two treatments. The caller's text is set on a sunken surface behind a caution rule under an explicit label; a system-derived fact of identical content is plain on the surface. If these ever look alike, in-dialog label spoofing works.");
   const pair = makeFrame(root, { name: "cmp/field-pair", x: M, y, w: W - M * 2, h: 80, fill: C.surface[L] });
   const pairItems = [
     untrustedField({ scheme: L, w: 400, caption: "FROM THE CALLER — NOT VERIFIED", value: "Refactor the tests in ~/dev/secret-project" }),
