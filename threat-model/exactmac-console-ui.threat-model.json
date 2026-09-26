@@ -1,0 +1,1358 @@
+{
+  "$schema": "https://github.com/OWASP/www-project-threat-model-library/blob/v1.0.2/threat-model.schema.json",
+  "version": "1.0",
+  "repo_link": "https://github.com/joeycumines/ExactMac",
+  "reviewed_at": "2026-09-26",
+  "frozen": false,
+  "scope": {
+    "title": "ExactMac consent console and the human decision it captures",
+    "description": "The ExactMacConsole menu-bar application, the prompts, disclosures, affordances, and management surfaces it presents, and the LocalAuthentication evaluations it performs. This model exists because the console is the component that converts human intent into machine privilege: every control in the server threat model ultimately rests on a person reading something and answering it. A server-side authorization decision that no human meaningfully understands is not a control, it is a rubber stamp with extra steps. So the console is treated here as a security-critical interface and is modelled on its own terms, not as a view over the server. In scope: what the operator is shown, what the operator can be misled into believing, what the operator cannot see, and how the console fails when the server, the channel, the biometric hardware, or the operator is unavailable. Out of scope: the server's own authorization logic, modelled separately, and the macOS window server, treated as trusted.",
+    "business_criticality": "maximal",
+    "data_sensitivity": [
+      "pii",
+      "cred",
+      "biz",
+      "ip"
+    ],
+    "exposure": "internal",
+    "tier": "mission_critical"
+  },
+  "description": "WHY THIS MODEL IS SEPARATE AND WHY IT IS NOT A SUBSET. The server model treats the consent plane as a control. This model treats it as an attack surface, because a control that can be spoofed, truncated, replayed, flooded, or misread is not a control. The two models reference each other's controls but answer different questions: the server model asks what the system decides, and this one asks whether the human in the loop is actually in the loop.\n\nTHE ASYMMETRY THAT SHAPES EVERYTHING HERE. The operator's decision is the only thing standing between an AI agent and unrestricted execution of code, and that decision is made by reading a small amount of text on a screen while an agent waits. This is structurally weak in a way the rest of the system is not, and it has four distinct failure modes that the design must each address separately. The prompt can be impersonated, so the operator may answer a dialog that is not ours. The payload can be truncated, so the operator may approve a prefix of what will run. The decision can be replayed or raced, so the operator may approve one request and authorize another. And the volume can be flooded, so the operator's judgement can be degraded until approval is reflexive. A control that addresses only one of these four is worse than none, because it creates confidence.\n\nTHE DISCLOSURE PROBLEM IS THE HARD PART, NOT THE AUTHORIZATION PROBLEM. Authorization is a decision the server can make correctly by comparison. Disclosure is not: a prompt that is correct but unreadable, or readable but misleading, or complete but illegible at the size the operator is actually looking at, produces the same outcome as a wrong prompt. This is why the design treats a process tree, a code-signature badge, an untrusted-field marker, and a never-truncated payload as security controls rather than as polish, and why a hostile co-resident application is a first-class threat persona here in a way it is not in the server model.\n\nWHY EXPOSURE IS INTERNAL. The console exists only in the Unix-socket variant and listens on nothing. It is reachable only as a process on the operator's own machine, so there is no network threat. That does not make it safe: the console's own input is a peer process inside the same trust boundary as everything else, and the co-resident application threat is precisely a local one.",
+  "diagrams": [
+    {
+      "title": "How a decision travels from request to authority",
+      "type": "mermaid",
+      "description": "The path a single request takes through the console, annotated with where an attacker can influence what the operator believes they are approving. Every node on the right-hand side is content the operator reads and is therefore an injection target unless it is marked as untrusted.",
+      "source": "sequenceDiagram\n  participant A as agent-process-zone\n  participant S as exactmac-server-zone<br/>consent-broker\n  participant C as consent-console-zone<br/>disclosure surfaces\n  participant O as operator\n  participant OS as os-platform-zone<br/>LocalAuthentication\n  A->>S: capability request + arguments\n  Note over S: server derives capability,<br/>scope and target from<br/>the request bytes itself\n  S->>C: pending request, single-use id<br/>bound to request bytes\n  Note over C: UNTRUSTED: target app label,<br/>element label, selector text<br/>all originate from the caller\n  C->>O: prompt: identity tree, signature badge,<br/>capability + consequence, full payload\n  O->>C: allow / deny / scope / envelope\n  opt blast radius warrants it\n    C->>OS: evaluatePolicy, nonce bound<br/>to this one decision\n    OS-->>C: success for that nonce only\n  end\n  C->>S: decision + request id\n  Note over S: server re-derives and does<br/>not trust the console's view"
+    },
+    {
+      "title": "Console trust boundaries",
+      "type": "mermaid",
+      "description": "The console sits inside the user's session and is surrounded by untrusted co-resident processes. Note that the co-resident-application boundary is not an ExactMac boundary at all, which is why no control on the console side can rely on it.",
+      "source": "flowchart TB\n  subgraph session[operator's login session - one trust boundary for every co-resident app]\n    subgraph console[consent-console-zone]\n      PR[prompt + disclosure surfaces]\n      MG[grants manager]\n      AC[activity timeline]\n      BI[biometric gate]\n      CI[console IPC client]\n    end\n    subgraph hostile[co-resident untrusted - not separated from the console by any control]\n      MA[malicious or co-opted application]\n    end\n    OS[os-platform-zone<br/>LocalAuthentication, screen recording<br/>indicator, TCC]\n    S[exactmac-server-zone<br/>consent-broker]\n  end\n  MA -.->|impersonates the prompt, or reads it<br/>via AX, or screenshots it| PR\n  MA -.->|reads clipboard when the operator<br/>copies a payload to inspect it| PR\n  PR --> O[operator]\n  BI --> OS\n  CI <--> S"
+    }
+  ],
+  "trust_zones": [
+    {
+      "symbolic_name": "consent-console-zone",
+      "title": "Consent console zone",
+      "description": "The ExactMacConsole process: the approval and pre-authorization prompts, the identity and signature disclosure, the payload renderer, the decision affordances, the grants manager, the activity timeline, the settings surface, the biometric gate, and the console's client side of the private channel. It holds no authority; it can only answer."
+    },
+    {
+      "symbolic_name": "operator-session-zone",
+      "title": "Operator session zone",
+      "description": "The logged-in desktop session, which contains the operator and every co-resident application at once. Critically, this is a single trust boundary: the console has no technical separation from a hostile application running in the same session, so anything the console draws can be imitated and anything it writes can be read."
+    },
+    {
+      "symbolic_name": "os-platform-zone",
+      "title": "macOS platform zone",
+      "description": "LocalAuthentication and the secure enclave, the screen-recording indicator, the TCC privacy database, and the window server. Trusted as a platform, with the explicit caveat that the biometric ceremony is a signal about a person rather than proof of a decision, and that the platform offers no way for an application to prevent its own windows being captured."
+    },
+    {
+      "symbolic_name": "exactmac-server-zone",
+      "title": "ExactMac server zone",
+      "description": "The peer across the private channel, and the authority that ultimately acts. The console trusts nothing it is told beyond the operator's answer, and the server re-derives capability and scope itself."
+    },
+    {
+      "symbolic_name": "agent-process-zone",
+      "title": "Agent and caller zone",
+      "description": "The source of the request content the console is asked to display, and therefore the source of every piece of attacker-influenceable text that appears in a prompt."
+    }
+  ],
+  "trust_boundaries": [
+    {
+      "trust_zone_a": "exactmac-server-zone",
+      "trust_zone_b": "consent-console-zone",
+      "access_control_methods": [
+        "acl",
+        "dac"
+      ],
+      "authentication_methods": [
+        "token"
+      ],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": true
+    },
+    {
+      "trust_zone_a": "consent-console-zone",
+      "trust_zone_b": "os-platform-zone",
+      "access_control_methods": [
+        "mac"
+      ],
+      "authentication_methods": [
+        "biometrics"
+      ],
+      "access_token_expires": false,
+      "can_user_logout": true,
+      "can_system_logout": true
+    },
+    {
+      "trust_zone_a": "consent-console-zone",
+      "trust_zone_b": "operator-session-zone",
+      "access_control_methods": [
+        "none"
+      ],
+      "authentication_methods": [
+        "none"
+      ],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    },
+    {
+      "trust_zone_a": "agent-process-zone",
+      "trust_zone_b": "consent-console-zone",
+      "access_control_methods": [
+        "none"
+      ],
+      "authentication_methods": [],
+      "access_token_expires": false,
+      "can_user_logout": false,
+      "can_system_logout": false
+    }
+  ],
+  "actors": [
+    {
+      "symbolic_name": "operator",
+      "title": "Operator",
+      "description": "The developer who installed ExactMac and answers its prompts. The only decision-maker in the system. They are simultaneously the thing being protected and the thing whose judgement the whole design depends on, which is the central tension this model has to hold honestly rather than resolve.",
+      "type": "user",
+      "permissions": "Approve or deny any request, issue or revoke grants, configure posture and high-consequence targets, and lock the console. Cannot distinguish a genuine prompt from an impersonated one, because the platform offers no such primitive.",
+      "trust_zone": "operator-session-zone"
+    },
+    {
+      "symbolic_name": "hostile-co-resident-application",
+      "title": "Hostile co-resident application",
+      "description": "Any application in the same login session that wants to deceive the operator or harvest what the console displays: a malware sample, a malicious dependency, or a compromised application already on the machine. It shares the operator's session, so it can draw over the console, read the console's window through the accessibility API, capture the screen, and observe the pasteboard. It cannot be separated from the console by any control inside this product.",
+      "type": "third_party",
+      "permissions": "Effectively unlimited ability to influence what the operator sees and to read what the console shows, bounded only by its own code-signing and TCC state.",
+      "trust_zone": "operator-session-zone"
+    },
+    {
+      "symbolic_name": "requesting-agent",
+      "title": "Requesting agent",
+      "description": "The agent whose request is being judged. It supplies every piece of text the console displays about the target, which makes it an injection source even when the agent itself is legitimate and correctly signed.",
+      "type": "third_party",
+      "permissions": "Controls the content and the volume of what the operator is asked to read.",
+      "trust_zone": "agent-process-zone"
+    },
+    {
+      "symbolic_name": "coercing-party",
+      "title": "Coercing party",
+      "description": "An adversary who needs the operator to approve a specific action and can apply pressure to obtain it, ranging from social engineering to physical coercion. Biometrics do not help here: the ceremony proves a person is present, not that they are acting freely.",
+      "type": "third_party",
+      "permissions": "No technical access. Acts entirely through influence over the operator at the moment of decision.",
+      "trust_zone": "operator-session-zone"
+    }
+  ],
+  "components": [
+    {
+      "symbolic_name": "identity-disclosure-surface",
+      "title": "Caller identity disclosure",
+      "description": "The process tree from the host application down through intermediaries to the requesting process, and per-process identity rows carrying display name, full executable path, bundle identifier, pid, and parent pid. This is the surface that satisfies the requirement to show the subprocess and its details rather than only the application. It is a security control because a user who cannot see which process is asking cannot judge the request.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "signature-badge",
+      "title": "Code-signature state badge",
+      "description": "A compact, prominent rendering of the caller's code-signature state: signed and valid, signed but unnotarized, ad-hoc, unsigned, or invalid, plus an explicit unresolved state. Prominence is the point: an unsigned or ad-hoc-signed caller is materially more dangerous, and a UI that renders that indistinguishably from a signed one is what makes the graded-evidence model a lie rather than a disclosure.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "capability-consequence-disclosure",
+      "title": "Capability and consequence disclosure",
+      "description": "Each capability rendered as its plain-language consequence rather than as an enum name, together with what the grant would silently include by implication, since script execution subsumes screen reading, clipboard reading, and input synthesis. The operator cannot consent accurately to a capability they have not had translated into an effect.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "payload-renderer",
+      "title": "Argument payload renderer",
+      "description": "The complete, untruncated command, script, selector, region, or argument text the request carries, in a monospaced face, wrapped rather than clipped, with an explicit copy affordance. Truncation is treated as a security defect here, because truncation is exactly where an operator stops reading and approves a prefix.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "blast-radius-summary",
+      "title": "Blast radius summary",
+      "description": "A single sentence stating the cumulative reach of what is being approved, and for a pre-authorization envelope its full extent: which capabilities, which scopes, how long, and therefore what the agent will be able to do for the duration without asking again. This is the surface that makes an envelope comprehensible rather than a form to fill in.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "untrusted-field-marker",
+      "title": "Untrusted field marker",
+      "description": "A visual treatment distinguishing text the console derived from the platform, such as a resolved bundle identifier, from text the caller supplied, such as a window title, element label, or selector. Without it, a genuine dialog faithfully displays attacker-chosen text that reads as if it were system-derived, which is label spoofing inside an authentic prompt.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "decision-affordances",
+      "title": "Decision affordances",
+      "description": "The deny, allow-once, allow-for-session, allow-scoped, allow-global-persistent, and pre-authorize choices, with the destructive option never focused by default and never adjacent to the primary action, and with a biometric gate presented for the decisions that warrant one. Ordering is a security property because the default focus determines what a hurried operator approves.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "notification-surface",
+      "title": "Notification surface",
+      "description": "Banner and notification surfaces used to announce a pending request or a completed decision. Deliberately minimal in content: a notification is visible to screen-capture and notification-reading processes and is often mirrored to other devices, so it must never carry command text, argument values, or target paths.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "menu-bar-presence",
+      "title": "Menu bar presence",
+      "description": "The persistent status item conveying server state, pending count, posture, and a fail-closed indicator. Its job is to make the system's state legible at a glance so that a denied request reads as protection rather than as a fault, and so that a server which has stopped enforcing is visible rather than silent.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "grants-manager-surface",
+      "title": "Grants manager",
+      "description": "The list of active grants with holder, scope, origin request, expiry countdown, and per-grant revocation, plus revoke-all. Its security role is that a grant the operator cannot see is a grant they cannot revoke, so the surface must be complete and must state consequence rather than only capability.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "activity-timeline-surface",
+      "title": "Activity timeline",
+      "description": "The operator-facing view of the decision audit: what was asked, by whom, on what basis it was allowed or denied, and whether a biometric was required. Because the underlying log is readable by same-uid processes, this surface verifies the log's hash chain and shows its integrity state, so a doctored log is visibly doctored rather than silently believed.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "settings-surface",
+      "title": "Settings",
+      "description": "Posture, biometric requirements, the operator's own list of high-consequence target applications, console lock, and the destructive reset. The high-consequence target list is the mechanism that personalises risk: consequence is a fact about this operator's life, not a property of any taxonomy the product could ship.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "biometric-gate",
+      "title": "Biometric gate",
+      "description": "The LocalAuthentication evaluation, bound to a per-decision nonce and presented with the specific decision named in its reason, so the system dialog and the console agree about what is being authorized. Required by blast radius, and never silently falling back to a weaker check: an unavailable or locked-out biometric is a denial, not a downgrade.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "console-ipc-client",
+      "title": "Console channel client",
+      "description": "The console's side of the private channel: mutual authentication of the peer, receipt of pending requests, and submission of decisions bound to a single-use request id. It holds no persisted decision state, so there is nothing on disk for a same-uid process to forge.",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "screen-capture-detector",
+      "title": "Screen capture detector",
+      "description": "Observes the system's screen-recording indicator so the console can react to being captured. Recorded honestly: macOS provides no way for an application to prevent its windows being captured, so this can at best warn and can at best obscure content the console itself draws. It is a mitigation, not a control, and is not counted as one.",
+      "trust_zone": "os-platform-zone"
+    },
+    {
+      "symbolic_name": "co-resident-application",
+      "title": "Co-resident application",
+      "description": "The collective of every other application sharing the operator's login session, modeled as a component because flows between the console and that collective have no other typed endpoint. It is the source of the impersonation, window-reading, capture, and pasteboard-observation threats, and no control in this product separates the console from it.",
+      "trust_zone": "operator-session-zone"
+    },
+    {
+      "symbolic_name": "consent-broker",
+      "title": "Server-side consent broker",
+      "description": "The server's counterpart across the private channel, which supplies the pending request and receives the decision. The console treats everything it is told as untrusted display content except the operator's own answer.",
+      "trust_zone": "exactmac-server-zone"
+    },
+    {
+      "symbolic_name": "local-authentication-service",
+      "title": "LocalAuthentication service",
+      "description": "The platform biometric service and secure enclave behind the ceremony. Treated as trusted as a platform and as insufficient as a commitment device: it establishes that a person is present and willing, and establishes nothing about whether the decision is free of coercion.",
+      "trust_zone": "os-platform-zone"
+    },
+    {
+      "symbolic_name": "operator-pasteboard-service",
+      "title": "Pasteboard service",
+      "description": "The system pasteboard as a shared service. Modeled as a component because the console's copy affordance writes into it and every co-resident application can read from it, which makes it the one store in the system that the console actively pushes sensitive material toward.",
+      "trust_zone": "operator-session-zone"
+    },
+    {
+      "symbolic_name": "decision-audit-service",
+      "title": "Decision audit service",
+      "description": "The server-side reader that serves the decision log to the console and verifies its hash chain before returning it, so the activity timeline can display the log's integrity state rather than presenting whatever bytes it is handed as though they were trustworthy.",
+      "trust_zone": "exactmac-server-zone"
+    }
+  ],
+  "data_stores": [
+    {
+      "symbolic_name": "console-preferences",
+      "title": "Console preferences",
+      "description": "Owner-private operator settings: posture, biometric requirements, the high-consequence target list, and the console lock. Integrity matters as much as confidentiality, because a tampered high-consequence list is a list that has had its inconvenient entries removed.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac console preferences",
+      "trust_zone": "consent-console-zone"
+    },
+    {
+      "symbolic_name": "operator-pasteboard",
+      "title": "Operator pasteboard",
+      "description": "The system pasteboard, which the operator's own copy-to-inspect gesture writes payload text into. This is the console pushing secret material toward the one store in the system that every application can read.",
+      "type": "key_value",
+      "vendor": "Apple",
+      "product": "NSPasteboard",
+      "trust_zone": "operator-session-zone"
+    },
+    {
+      "symbolic_name": "server-decision-audit-log",
+      "title": "Server decision audit log",
+      "description": "The hash-chained, append-only record the activity timeline reads. Read-only to the console, and independently writable by any same-uid process, which is why the timeline verifies the chain instead of trusting the file.",
+      "type": "key_value",
+      "vendor": "local filesystem",
+      "product": "ExactMac decision audit log",
+      "trust_zone": "exactmac-server-zone"
+    }
+  ],
+  "data_sets": [
+    {
+      "symbolic_name": "pending-request-content",
+      "title": "Pending request content",
+      "description": "Everything the console is about to show: caller identity evidence, capability, resolved target, and the complete argument payload. The payload frequently contains a command, a script, a selector, a region, or a path, so this dataset routinely carries sensitive material and is displayed to a human inside a session other applications can observe.",
+      "placements": [],
+      "data_sensitivity": [
+        "cred",
+        "biz",
+        "ip"
+      ],
+      "access_control_methods": []
+    },
+    {
+      "symbolic_name": "operator-grant-records",
+      "title": "Operator grant records",
+      "description": "The active grants as the operator understands them: holder, scope, origin, and expiry. The console's rendering of this dataset is the only thing standing between an operator and an invisible grant, so the view must be complete rather than summarised.",
+      "placements": [
+        {
+          "data_store": "console-preferences",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "cred"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    },
+    {
+      "symbolic_name": "captured-approval-content",
+      "title": "Approval content exposed to the session",
+      "description": "Whatever a co-resident application manages to obtain from the console's windows or the pasteboard: command text read through the accessibility API, the prompt captured as pixels, or a payload the operator copied. This dataset does not exist in a well-behaved system; it is named so that the exposure has an owner and a control.",
+      "placements": [
+        {
+          "data_store": "operator-pasteboard",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "cred",
+        "biz",
+        "ip"
+      ],
+      "access_control_methods": []
+    },
+    {
+      "symbolic_name": "activity-log-records",
+      "title": "Activity log records",
+      "description": "The decisions presented in the activity timeline, which the operator may reasonably rely on when investigating what happened. Its integrity, not merely its availability, is what makes it useful.",
+      "placements": [
+        {
+          "data_store": "server-decision-audit-log",
+          "encrypted": false
+        }
+      ],
+      "data_sensitivity": [
+        "biz"
+      ],
+      "access_control_methods": [
+        "dac"
+      ]
+    }
+  ],
+  "data_flows": [
+    {
+      "symbolic_name": "server-to-console-pending-request",
+      "title": "Pending request from the server",
+      "description": "The request the console must render, carrying caller identity evidence, capability, target, and the complete payload. Sensitive, and partly attacker-influenceable, because the caller supplied the target labels, the element labels, and the selector text the console will display.",
+      "source": {
+        "type": "component",
+        "object": "consent-broker"
+      },
+      "destination": {
+        "type": "component",
+        "object": "identity-disclosure-surface"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-operator-prompt",
+      "title": "Prompt to the operator",
+      "description": "The rendered approval surface. This is the flow the entire product exists to produce, and the one where every disclosure defect becomes a security defect: a truncated payload, an unmarked attacker-supplied label, or an indistinct signature badge each cause the operator to approve something other than what they believe they are approving.",
+      "source": {
+        "type": "component",
+        "object": "payload-renderer"
+      },
+      "destination": {
+        "type": "actor",
+        "object": "operator"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "co-resident-to-console-window",
+      "title": "Co-resident process reading the console",
+      "description": "A hostile application reading the console's window text through the accessibility API, or capturing it as pixels, or observing it through the screen-recording indicator. The console cannot prevent any of these; it can at most reduce what it draws and react to capture.",
+      "source": {
+        "type": "component",
+        "object": "co-resident-application"
+      },
+      "destination": {
+        "type": "component",
+        "object": "identity-disclosure-surface"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-pasteboard-payload",
+      "title": "Payload copied to the pasteboard",
+      "description": "The operator copying a command or script out of the prompt in order to inspect it elsewhere. This is the console encouraging the one action that moves secret material into a store every co-resident application can read, and it is a genuinely bad trade that a careful designer must still make available, so it is disclosed rather than silently provided.",
+      "source": {
+        "type": "component",
+        "object": "payload-renderer"
+      },
+      "destination": {
+        "type": "component",
+        "object": "operator-pasteboard-service"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-os-biometric-ceremony",
+      "title": "Biometric ceremony",
+      "description": "A LocalAuthentication evaluation bound to a per-decision nonce, naming the specific decision being authorized. Proves a person is present and willing; does not prove the decision is free of coercion, and the reason string is itself a spoofing target, which is why the nonce is carried rather than the reason alone.",
+      "source": {
+        "type": "component",
+        "object": "biometric-gate"
+      },
+      "destination": {
+        "type": "component",
+        "object": "local-authentication-service"
+      },
+      "has_sensitive_data": false,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-server-decision",
+      "title": "Decision to the server",
+      "description": "The operator's answer, bound to a single-use request id so it cannot land on a different request, and transmitted over the mutually authenticated channel. The server re-derives capability and scope, so a lying console buys an attacker nothing that the server would not re-check.",
+      "source": {
+        "type": "component",
+        "object": "decision-affordances"
+      },
+      "destination": {
+        "type": "component",
+        "object": "consent-broker"
+      },
+      "has_sensitive_data": false,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "audit-to-activity-surface",
+      "title": "Audit records to the activity timeline",
+      "description": "The decision log read and hash-chain-verified for display, so that the operator is shown the log's integrity state alongside its contents. Without verification the timeline is a convenient way to display a doctored log as though it were trustworthy.",
+      "source": {
+        "type": "component",
+        "object": "decision-audit-service"
+      },
+      "destination": {
+        "type": "component",
+        "object": "activity-timeline-surface"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "console-to-operator-notification",
+      "title": "Notification to the operator",
+      "description": "A deliberately content-free announcement that a request is pending or that a decision was recorded. Carries no command text, no argument values, and no target paths, because notifications are readable by notification-access processes, are captured by screen recording, and are frequently mirrored to other devices.",
+      "source": {
+        "type": "component",
+        "object": "notification-surface"
+      },
+      "destination": {
+        "type": "actor",
+        "object": "operator"
+      },
+      "has_sensitive_data": false,
+      "encrypted": false
+    },
+    {
+      "symbolic_name": "co-resident-to-console-impersonation",
+      "title": "Impersonated prompt drawn over the console",
+      "description": "A co-resident application drawing a convincing ExactMac consent dialog, in the same position, with the same wording, to harvest an approval for a different action entirely. There is no control inside this product that prevents it, which is why the impersonated dialog must be made a poor target in the first place.",
+      "source": {
+        "type": "component",
+        "object": "co-resident-application"
+      },
+      "destination": {
+        "type": "actor",
+        "object": "operator"
+      },
+      "has_sensitive_data": true,
+      "encrypted": false
+    }
+  ],
+  "assumptions": [
+    {
+      "description": "The macOS window server and LocalAuthentication are trusted. If the platform itself is compromised, every disclosure control in this model is void, and there is no application-level defence against that.",
+      "topics": [
+        "os-platform-zone"
+      ],
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "The operator is not knowingly colluding with an attacker. Every threat here assumes the operator intends to protect their own machine, and that the problem is what they are shown and asked, not what they want.",
+      "topics": [
+        "operator"
+      ],
+      "validity": "unconfirmed"
+    },
+    {
+      "description": "The console and the server run in the same login session on the same machine, and the private channel between them is a Unix socket with a mutually authenticated handshake. The console exists only in the Unix-socket variant, so it has no network exposure to defend.",
+      "topics": [
+        "consent-console-zone",
+        "exactmac-server-zone"
+      ],
+      "validity": "confirmed"
+    },
+    {
+      "description": "A co-resident hostile application cannot be prevented from reading or imitating the console's windows. macOS offers no primitive for one application to assert exclusive visual ownership of a region, and the console does not hold any privilege that would let it. Any control in this area is a mitigation that raises cost or prompts suspicion, never a prevention.",
+      "topics": [
+        "co-resident-application",
+        "os-platform-zone"
+      ],
+      "validity": "confirmed"
+    },
+    {
+      "description": "The operator's decision is the only consent signal that exists. There is no second channel, no out-of-band confirmation, and no supervisory role, so the design's entire burden falls on making a single on-screen decision as informative as it can be made.",
+      "topics": [
+        "operator",
+        "decision-affordances"
+      ],
+      "validity": "confirmed"
+    }
+  ],
+  "threat_personas": [
+    {
+      "symbolic_name": "co-resident-spy-persona",
+      "title": "Co-resident spy",
+      "description": "An application already in the operator's session that reads what the console displays: the accessibility tree of the console's own window, the pixels of the approval prompt, or the pasteboard after the operator copies a payload. Its interest is the command text and the argument values, which frequently contain paths, URLs, tokens, and business data.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "high"
+    },
+    {
+      "symbolic_name": "prompt-impersonator-persona",
+      "title": "Prompt impersonator",
+      "description": "An application that draws a convincing ExactMac consent dialog to capture an approval for an action the operator never intended to permit. It gains nothing from a technical compromise; it needs only the operator to answer the wrong dialog.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "moderate"
+    },
+    {
+      "symbolic_name": "label-spoofer-persona",
+      "title": "In-dialog label spoofer",
+      "description": "The requesting agent itself, or content it processes, choosing the strings the console displays about the target: a window title, an element label, an application name, a selector. No impersonation is needed, because the genuine dialog faithfully renders attacker-chosen text that reads as though the system had produced it.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "high"
+    },
+    {
+      "symbolic_name": "coercing-adversary-persona",
+      "title": "Coercing adversary",
+      "description": "An adversary who needs one specific approval and can apply social or physical pressure to obtain it. Biometrics do not defend against this: the ceremony establishes presence and willingness, not freedom of choice.",
+      "is_person": true,
+      "skill_level": "insider",
+      "access_level": "user",
+      "malicious_intent": true,
+      "applicability_to_org": "moderate"
+    },
+    {
+      "symbolic_name": "fatigued-operator-persona",
+      "title": "Fatigued operator",
+      "description": "The operator, under interruption, having already answered many similar prompts. Not adversarial at all. The source of this persona is human_error, and it is the reason prompt flooding is modelled as a real attack rather than as a nuisance: an attacker who can make approval reflexive has defeated the control without ever forging anything.",
+      "is_person": true,
+      "skill_level": "insider",
+      "access_level": "user",
+      "malicious_intent": false,
+      "applicability_to_org": "high"
+    },
+    {
+      "symbolic_name": "over-reaching-agent-persona",
+      "title": "Over-reaching legitimate agent",
+      "description": "An agent that is not attacking the operator and not compromised, but that accumulates scope: it asks for a little repeatedly, floods when blocked, and treats a consent plane as a throughput obstacle rather than a boundary. Modelled separately from the adversarial personas because nothing about it is anomalous, which is precisely why the controls have to work without detecting it.",
+      "is_person": false,
+      "skill_level": "engineer",
+      "access_level": "user",
+      "malicious_intent": false,
+      "applicability_to_org": "high"
+    }
+  ],
+  "threats": [
+    {
+      "symbolic_name": "prompt-impersonation",
+      "title": "A co-resident application impersonates the consent dialog",
+      "description": "A malicious or co-opted application draws a convincing ExactMac approval dialog and captures the operator's answer for a different action entirely. The platform offers no way for the console to assert exclusive visual ownership of a region, so the defence cannot be prevention; it must be that the impersonated dialog is an unattractive target and that the operator has a way to tell.",
+      "components_affected": [
+        "decision-affordances",
+        "menu-bar-presence",
+        "signature-badge"
+      ],
+      "threat_persona": "prompt-impersonator-persona",
+      "event": "A co-resident application draws a fake ExactMac approval dialog and the operator approves it.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 151,
+          "capec_title": "Identity Spoofing"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 451,
+          "cwe_title": "User Interface (UI) Misrepresentation of Critical Information"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "in-dialog-label-spoofing",
+      "title": "Attacker-chosen text rendered as system-derived inside a genuine prompt",
+      "description": "The console faithfully renders a target application name, window title, element label, or selector that the requesting process chose. No impersonation is required and the dialog is genuine, so every other control in this model still holds; what fails is the operator's ability to distinguish system-derived facts from caller-supplied strings. This is the disclosure defect most likely to survive a design review, because each individual field is individually correct.",
+      "components_affected": [
+        "untrusted-field-marker",
+        "identity-disclosure-surface",
+        "capability-consequence-disclosure"
+      ],
+      "threat_persona": "label-spoofer-persona",
+      "event": "An agent names the target window and element so the genuine prompt reads as though it described a benign target.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 451,
+          "cwe_title": "User Interface (UI) Misrepresentation of Critical Information"
+        },
+        {
+          "cwe_id": 20,
+          "cwe_title": "Improper Input Validation"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "payload-truncation-approval",
+      "title": "Truncated payload causes approval of a prefix",
+      "description": "A long command or script is clipped with an ellipsis so the operator approves what they can see. Truncation is where reading stops, so this converts a complete disclosure into a misleading one while every individual component behaves correctly. It is a security defect, not a layout preference.",
+      "components_affected": [
+        "payload-renderer",
+        "decision-affordances"
+      ],
+      "threat_persona": "label-spoofer-persona",
+      "event": "A long shell command is clipped in the prompt and the operator approves the visible prefix.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 451,
+          "cwe_title": "User Interface (UI) Misrepresentation of Critical Information"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "prompt-enforcement-divergence",
+      "title": "What the prompt showed differs from what the server executes",
+      "description": "A time-of-check-to-time-of-use gap between the request the console displayed and the request the server acts on. If the server trusted the console's classification, or if a decision could be bound to something other than the exact request bytes, the operator could approve one thing and authorize another. The architectural answer is that the server re-derives capability and scope from the request bytes itself and treats the console only as the source of the human's verdict.",
+      "components_affected": [
+        "console-ipc-client",
+        "decision-affordances",
+        "capability-consequence-disclosure"
+      ],
+      "threat_persona": "prompt-impersonator-persona",
+      "event": "A decision is bound to a request id that does not uniquely identify the request bytes, and a substituted request is authorized under the operator's approval.",
+      "sources": [
+        "adversary",
+        "failure"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 151,
+          "capec_title": "Identity Spoofing"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 367,
+          "cwe_title": "Time-of-check Time-of-use Race Condition"
+        },
+        {
+          "cwe_id": 863,
+          "cwe_title": "Incorrect Authorization"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "decision-replay-and-concurrent-race",
+      "title": "A decision is replayed onto a different request",
+      "description": "Two requests are pending at once, or one request is re-presented, and the operator's answer is applied to the wrong one. This is a correctness bug that happens to be a security bug: an approval meant for a narrow read could authorize a script execution, and the operator would have no way to notice.",
+      "components_affected": [
+        "console-ipc-client",
+        "decision-affordances"
+      ],
+      "threat_persona": "over-reaching-agent-persona",
+      "event": "Two pending requests are answered out of order and one decision is applied to the other request.",
+      "sources": [
+        "failure",
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 151,
+          "capec_title": "Identity Spoofing"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 367,
+          "cwe_title": "Time-of-check Time-of-use Race Condition"
+        },
+        {
+          "cwe_id": 362,
+          "cwe_title": "Concurrent Execution using Shared Resource with Improper Synchronization"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "approval-content-leak-to-session",
+      "title": "Command text and argument values are exposed to the session",
+      "description": "A co-resident application reads the console's window through the accessibility API, captures it as pixels, or picks up a payload the operator copied to inspect it. The console cannot prevent any of these. What it can do is stop pushing secrets toward the pasteboard, keep notifications content-free, react visibly to capture, and accept that the strongest available guarantee is that the payload is on screen at the moment of a decision, which is unavoidable if the operator is to judge it at all.",
+      "components_affected": [
+        "payload-renderer",
+        "notification-surface",
+        "console-ipc-client",
+        "screen-capture-detector"
+      ],
+      "threat_persona": "co-resident-spy-persona",
+      "event": "A co-resident application reads the console's window text and recovers the command the operator was asked to approve.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 118,
+          "capec_title": "Data Leakage"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        },
+        {
+          "cwe_id": 522,
+          "cwe_title": "Insufficiently Protected Credentials"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "notification-content-exfiltration",
+      "title": "Sensitive request detail leaked through notifications",
+      "description": "A notification carrying the command text or the target path is readable by notification-access processes, captured by screen recording, and commonly mirrored to the operator's other devices. Notifications are the wrong place for anything the operator did not already know, and the fix is simply to carry nothing.",
+      "components_affected": [
+        "notification-surface"
+      ],
+      "threat_persona": "co-resident-spy-persona",
+      "event": "A notification announces a pending request including the command text, which is then observed or mirrored.",
+      "sources": [
+        "adversary"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 118,
+          "capec_title": "Data Leakage"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 200,
+          "cwe_title": "Exposure of Sensitive Information to an Unauthorized Actor"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "consent-flooding-desensitization",
+      "title": "Prompt flooding degrades the operator until approval is reflexive",
+      "description": "An agent raises a volume of requests until the operator begins approving without reading. No forgery, no impersonation, and no technical compromise is required; the attacker simply spends the operator's attention. This is the cheapest attack in the entire model and the one most likely to be dismissed as a nuisance, which is exactly why it is modelled with a real risk score.",
+      "components_affected": [
+        "notification-surface",
+        "menu-bar-presence",
+        "decision-affordances"
+      ],
+      "threat_persona": "fatigued-operator-persona",
+      "event": "An agent issues a sustained stream of requests until the operator approves them without reading, including one that should have been denied.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "attack_mechanisms": [
+        {
+          "capec_id": 151,
+          "capec_title": "Identity Spoofing"
+        }
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 400,
+          "cwe_title": "Uncontrolled Resource Consumption"
+        },
+        {
+          "cwe_id": 770,
+          "cwe_title": "Allocation of Resources Without Limits or Throttling"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "biometric-spoofing-and-relay",
+      "title": "Biometric ceremony spoofed or relayed to a coerced approval",
+      "description": "An adversary presents a recorded or synthetic biometric to the ceremony, or relays the ceremony to a coerced operator, obtaining approval for a decision the operator did not choose. The nonce binding limits replay of a success onto a different decision, but it does not address a ceremony that succeeds for the wrong reason, and no biometric defends against coercion at all.",
+      "components_affected": [
+        "biometric-gate",
+        "decision-affordances"
+      ],
+      "threat_persona": "coercing-adversary-persona",
+      "event": "A coerced or relayed biometric approval authorizes a high-blast-radius grant the operator did not intend to grant.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 287,
+          "cwe_title": "Improper Authentication"
+        },
+        {
+          "cwe_id": 290,
+          "cwe_title": "Authentication Bypass by Spoofing"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "biometric-silent-downgrade",
+      "title": "A failed biometric check silently downgrades to a weaker one",
+      "description": "An unavailable sensor, a lockout after repeated failures, or a cancelled prompt falls back to a passcode or to a plain click, so a decision the design rated as biometric-gated is approved without one. Silent downgrade is worse than no gate, because the operator believes a stronger check occurred than actually did.",
+      "components_affected": [
+        "biometric-gate",
+        "decision-affordances"
+      ],
+      "threat_persona": "coercing-adversary-persona",
+      "event": "Repeated biometric failures induce a lockout, after which the high-blast-radius decision is approved without any ceremony.",
+      "sources": [
+        "adversary",
+        "failure"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 287,
+          "cwe_title": "Improper Authentication"
+        },
+        {
+          "cwe_id": 303,
+          "cwe_title": "Incorrect Implementation of Authentication Algorithm"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "invisible-grant-accumulation",
+      "title": "Standing permission accumulates beyond what the operator can see",
+      "description": "Individual narrow approvals accumulate into a set of standing grants that the operator never reviews as a whole, and the grants manager summarises rather than enumerates, so a grant whose scope is broader than it appears is invisible. A grant the operator cannot see is a grant they cannot revoke.",
+      "components_affected": [
+        "grants-manager-surface",
+        "decision-affordances"
+      ],
+      "threat_persona": "over-reaching-agent-persona",
+      "event": "An agent accumulates scope through a sequence of individually acceptable grants until the union exceeds anything the operator would have agreed to.",
+      "sources": [
+        "adversary",
+        "human_error"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 269,
+          "cwe_title": "Improper Privilege Management"
+        },
+        {
+          "cwe_id": 863,
+          "cwe_title": "Incorrect Authorization"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "deceptive-activity-log",
+      "title": "The activity timeline displays a doctored or incomplete log",
+      "description": "The decision log is writable by any same-uid process, so a broad grant can be used and the record of that use removed. If the timeline renders whatever it reads without verifying the hash chain, the operator investigating an incident is shown a falsified history with no indication that anything is wrong.",
+      "components_affected": [
+        "activity-timeline-surface",
+        "grants-manager-surface"
+      ],
+      "threat_persona": "co-resident-spy-persona",
+      "event": "A same-uid process edits the decision log and the activity timeline presents the edited history as authoritative.",
+      "sources": [
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 117,
+          "cwe_title": "Improper Output Neutralization for Logs"
+        },
+        {
+          "cwe_id": 778,
+          "cwe_title": "Insufficient Logging"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "unattended-approval-default",
+      "title": "Absence of an answer is treated as consent",
+      "description": "The operator is away, the screen is locked, or the session is switched, and the console resolves a pending request in a way that permits it. Every such case must resolve to denial, and the failing state must be presented as protective so that a denied request during absence reads as the system working rather than as a fault to be worked around.",
+      "components_affected": [
+        "decision-affordances",
+        "menu-bar-presence",
+        "console-ipc-client"
+      ],
+      "threat_persona": "over-reaching-agent-persona",
+      "event": "The operator is absent and a pending request is resolved as permitted rather than denied.",
+      "sources": [
+        "failure",
+        "adversary"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 863,
+          "cwe_title": "Incorrect Authorization"
+        },
+        {
+          "cwe_id": 252,
+          "cwe_title": "Unchecked Return Value"
+        }
+      ]
+    },
+    {
+      "symbolic_name": "degraded-evidence-presented-as-resolved",
+      "title": "Unresolved or unsigned caller evidence presented as if it were resolved",
+      "description": "The identity resolver could not determine the caller's signature state, or the process exited mid-resolution, and the console renders the resulting identity in the same visual register as a fully resolved one. This is what would make the graded-evidence model a lie: the system would be escalating risk internally while showing the operator a badge indistinguishable from a clean one.",
+      "components_affected": [
+        "signature-badge",
+        "identity-disclosure-surface"
+      ],
+      "threat_persona": "label-spoofer-persona",
+      "event": "Signature resolution fails and the console displays the caller with the same visual weight as a validly signed application.",
+      "sources": [
+        "failure"
+      ],
+      "weaknesses": [
+        {
+          "cwe_id": 451,
+          "cwe_title": "User Interface (UI) Misrepresentation of Critical Information"
+        },
+        {
+          "cwe_id": 754,
+          "cwe_title": "Improper Check for Unusual or Exceptional Conditions"
+        }
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "symbolic_name": "untrusted-field-marking-control",
+      "title": "Caller-supplied text is visually distinguished from system-derived facts",
+      "description": "Every string the console shows about a target that originated from the requesting process, such as a window title, element label, or selector, carries a distinct visual treatment from facts the console or the platform derived, such as a resolved bundle identifier or code-signature state. This is the primary control against in-dialog label spoofing and it is a hard requirement rather than a nicety, because a genuine dialog rendering attacker-chosen text defeats the operator without defeating anything else.",
+      "threats": [
+        "in-dialog-label-spoofing",
+        "degraded-evidence-presented-as-resolved"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "no-truncation-payload-disclosure",
+      "title": "The payload is never truncated",
+      "description": "Commands, scripts, selectors, and paths wrap and scroll rather than clip, and the copy affordance is explicit. A prompt that hides part of what will run is worse than no prompt, because it converts an informed decision into an uninformed one while appearing to offer consent.",
+      "threats": [
+        "payload-truncation-approval"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "server-side-capability-derivation",
+      "title": "The server re-derives what it is about to execute",
+      "description": "The console's classification is display only. The server derives capability, scope, and the argument payload from the request bytes at enforcement time and treats the console's contribution solely as the human's verdict. This is the architectural answer to the check-to-use gap: there is no window in which what was shown and what runs can diverge, because what runs is never taken from the display path.",
+      "threats": [
+        "prompt-enforcement-divergence",
+        "in-dialog-label-spoofing"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "consent-console-zone",
+        "trust_zone_b": "exactmac-server-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "single-use-request-binding",
+      "title": "Decisions are bound to single-use request identifiers",
+      "description": "Each pending request carries an identifier derived from the exact request bytes, consumed on use, and the console presents one request at a time with a visible identity, so a decision cannot land on a different request. Concurrent pending requests are queued and shown serially rather than raced, and a request that changes underneath its identifier is discarded rather than re-prompted silently.",
+      "threats": [
+        "decision-replay-and-concurrent-race",
+        "prompt-enforcement-divergence"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "signature-state-prominence",
+      "title": "Code-signature state is rendered prominently and distinctly",
+      "description": "Signed and valid, signed but unnotarized, ad-hoc, unsigned, invalid, and unresolved each have their own unmistakable treatment, and unresolved is never rendered as merely present. Because a control that escalates risk internally while displaying nothing to the operator is a false assurance rather than a control, the badge is the disclosure of the escalation decision.",
+      "threats": [
+        "prompt-impersonation",
+        "degraded-evidence-presented-as-resolved",
+        "in-dialog-label-spoofing"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "implication-and-blast-radius-disclosure",
+      "title": "What a grant includes, and what it would cumulatively allow, is stated in words",
+      "description": "The prompt states which weaker capabilities the requested one subsumes, and a pre-authorization review states the envelope's full extent and the cumulative reach in one sentence. An operator cannot consent accurately to a capability they have not had translated into an effect and a duration.",
+      "threats": [
+        "invisible-grant-accumulation",
+        "payload-truncation-approval"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "mutually-authenticated-channel",
+      "title": "The console authenticates the server, not only the reverse",
+      "description": "The console verifies the server's peer uid and the shared secret before displaying anything, and holds no persisted decision state, so there is nothing on disk for a same-uid process to forge and no unauthenticated peer that can drive prompts. The residual, that same-uid malware can read the operator's private files, is stated rather than concealed.",
+      "threats": [
+        "prompt-impersonation",
+        "unattended-approval-default"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "exactmac-server-zone",
+        "trust_zone_b": "consent-console-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "no-persisted-decisions",
+      "title": "Decisions are never written to disk",
+      "description": "The console keeps no local record of approvals and no cache of pending decisions, so a same-uid process cannot pre-seed a decision, replay a stored one, or read a history the server has not already recorded. Authoritative history lives only in the server's hash-chained log.",
+      "threats": [
+        "decision-replay-and-concurrent-race",
+        "deceptive-activity-log"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "prompt-flood-coalescing",
+      "title": "Prompt volume is throttled and identical requests are coalesced",
+      "description": "Identical pending requests from the same holder collapse into one prompt with a count, the pending queue is bounded, and a sustained flood raises the console's visible state rather than competing for the operator's attention. The aim is to make flooding more expensive than the outcome it is trying to buy.",
+      "threats": [
+        "consent-flooding-desensitization"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "safe-decision-affordance-ordering",
+      "title": "The safe answer is the default and the destructive answer is not adjacent",
+      "description": "Deny holds default focus, the irreversible choices are never placed beside the primary action, and the highest-commitment option is visually separated from the routine one. Default focus is the single strongest determinant of what a hurried operator approves, so it is treated as a security control and not as a convenience.",
+      "threats": [
+        "consent-flooding-desensitization",
+        "invisible-grant-accumulation",
+        "unattended-approval-default"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "content-free-notifications",
+      "title": "Notifications carry no request content",
+      "description": "A notification states that a request is pending and nothing about what it asks for. Notifications are readable by notification-access processes, captured by screen recording, and commonly mirrored to other devices, so they are treated as public.",
+      "threats": [
+        "notification-content-exfiltration",
+        "approval-content-leak-to-session"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "copy-to-pasteboard-warning",
+      "title": "Copying a payload warns that it leaves the protected surface",
+      "description": "The copy affordance states plainly that the value will be placed on the system pasteboard where other applications can read it. The affordance is kept, because withholding it would push operators toward screenshotting the prompt instead, which is worse; it is made safe by disclosure rather than removed by prohibition.",
+      "threats": [
+        "approval-content-leak-to-session"
+      ],
+      "status": "scheduled",
+      "priority": "medium"
+    },
+    {
+      "symbolic_name": "screen-capture-reaction",
+      "title": "The console reacts visibly to being captured",
+      "description": "The system screen-recording indicator is observed and the console responds by surfacing that fact in its own surface. Recorded explicitly as a mitigation and not a control: macOS provides no way for an application to prevent its windows being captured, so the honest guarantee is that capture is noticed, never that it is prevented.",
+      "threats": [
+        "approval-content-leak-to-session"
+      ],
+      "status": "suggested",
+      "priority": "medium"
+    },
+    {
+      "symbolic_name": "biometric-nonce-binding",
+      "title": "A biometric success authorizes exactly one decision",
+      "description": "The LocalAuthentication evaluation carries a per-decision nonce so a success cannot be replayed onto a different decision, and the reason string names the specific decision so the system ceremony and the console agree. This is what makes the ceremony a commitment device rather than a speed bump, and it is necessary though not sufficient: it does not address a ceremony that succeeds for the wrong reason.",
+      "threats": [
+        "biometric-spoofing-and-relay",
+        "biometric-silent-downgrade"
+      ],
+      "trust_boundary": {
+        "trust_zone_a": "consent-console-zone",
+        "trust_zone_b": "os-platform-zone"
+      },
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "biometric-never-downgrades",
+      "title": "An unavailable or locked-out biometric denies rather than downgrading",
+      "description": "No enrolled biometric, biometry lockout, a cancelled prompt, unavailable hardware, and a console that is not frontmost all produce denial and a stated reason. A design that rated a decision as biometric-gated and then approved it without a ceremony is worse than one that never gated it, because the operator's model of the system is wrong.",
+      "threats": [
+        "biometric-silent-downgrade",
+        "unattended-approval-default"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "blast-radius-scaled-presentation",
+      "title": "Presentation weight scales with blast radius",
+      "description": "A narrow request is presented compactly and cheaply; a broad or long-lived one is presented as a distinct, heavier surface with the cumulative reach spelled out. A uniform presentation would train the operator to approve without reading, which converts the entire consent plane into a rubber stamp while continuing to look protective.",
+      "threats": [
+        "consent-flooding-desensitization",
+        "invisible-grant-accumulation"
+      ],
+      "status": "scheduled",
+      "priority": "critical"
+    },
+    {
+      "symbolic_name": "grants-manager-enumeration",
+      "title": "The grants manager enumerates rather than summarises",
+      "description": "Every active grant is listed with its holder, full scope, origin request, and live expiry countdown, and revoke-all is present. A summary is a grant the operator cannot reason about, and therefore cannot revoke when it should.",
+      "threats": [
+        "invisible-grant-accumulation"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "activity-log-integrity-display",
+      "title": "The activity timeline verifies and displays the log's integrity",
+      "description": "The console verifies the decision log's hash chain and shows its integrity state next to its contents, so a truncated or edited log is visibly not trustworthy. Rendering an unverified log as authoritative would turn the one surface the operator has for after-the-fact investigation into a way to be misled.",
+      "threats": [
+        "deceptive-activity-log"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "failing-closed-is-presented-as-protective",
+      "title": "The failing-closed state reads as protection, not as breakage",
+      "description": "When the console cannot reach the server, or the server cannot reach the console, or no answer is possible, the interface says plainly that actions are being denied and why, and says it in a register that reassures. An operator who experiences denial as a fault will work around it, and a control that invites being worked around is not a control.",
+      "threats": [
+        "unattended-approval-default",
+        "consent-flooding-desensitization"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "screen-lock-and-away-awareness",
+      "title": "No prompt is presented to a locked, switched, or absent session",
+      "description": "A locked screen, a fast user switch, or an absent operator results in denial rather than in a decision made without a human present, and the console's state reflects that requests are being held rather than silently discarded.",
+      "threats": [
+        "unattended-approval-default",
+        "biometric-spoofing-and-relay"
+      ],
+      "status": "scheduled",
+      "priority": "high"
+    },
+    {
+      "symbolic_name": "operator-defined-consequence-targets",
+      "title": "The operator names the applications where escalation is always required",
+      "description": "Because consequence is a fact about this operator's life rather than a property of a taxonomy, the settings surface lets the operator list the applications that always require escalation, and the preferences store is integrity-checked so the list cannot be quietly edited. This is the mechanism that makes the system escalate where escalation is actually wanted rather than everywhere or nowhere.",
+      "threats": [
+        "invisible-grant-accumulation",
+        "consent-flooding-desensitization"
+      ],
+      "status": "scheduled",
+      "priority": "medium"
+    }
+  ],
+  "risks": [
+    {
+      "symbolic_name": "risk-operator-approves-the-wrong-dialog",
+      "title": "The operator answers an impersonated dialog",
+      "description": "A co-resident application imitates the consent prompt and captures an approval. No control inside this product can prevent it, so the exposure is bounded by making the impersonated dialog a poor target and by giving the operator a reliable way to notice.",
+      "threats": [
+        "prompt-impersonation"
+      ],
+      "likelihood": "possible",
+      "impact": "severe",
+      "impact_description": "A single approval of a well-formed fake dialog is sufficient for arbitrary code execution as the operator, with the genuine console showing nothing at all, so the operator has no signal that anything unusual occurred.",
+      "score": 15,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-misleading-but-genuine-prompt",
+      "title": "A genuine prompt misleads through caller-chosen or clipped text",
+      "description": "The dialog is authentic and every other control holds, but the operator is shown a caller-supplied target label, or a clipped payload, and approves something other than what they believe. This is the disclosure class most likely to survive review, because each field is individually correct.",
+      "threats": [
+        "in-dialog-label-spoofing",
+        "payload-truncation-approval"
+      ],
+      "likelihood": "likely",
+      "impact": "major",
+      "impact_description": "Systematic misapproval of high-consequence actions under conditions where nothing appears anomalous, producing exactly the class of loss the consent plane was built to prevent while reporting every request as approved.",
+      "score": 16,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-approval-applied-to-wrong-request",
+      "title": "An approval authorizes a different request",
+      "description": "Replay or a concurrent race causes one decision to be applied to another request. It is rare, it is mostly a correctness bug, and when it occurs it converts a narrow approval into a broad one with no visible symptom.",
+      "threats": [
+        "decision-replay-and-concurrent-race",
+        "prompt-enforcement-divergence"
+      ],
+      "likelihood": "unlikely",
+      "impact": "severe",
+      "impact_description": "A single occurrence authorizes an action the operator examined and rejected, and because the audit records a legitimate approval the discrepancy may not be noticed until the damage is done.",
+      "score": 10,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-consent-fatigue-by-flooding",
+      "title": "Prompt flooding reduces the operator to reflexive approval",
+      "description": "An agent spends the operator's attention rather than defeating any control. Cheap to attempt, no technical sophistication required, and the resulting state is indistinguishable from a working system until the one request that mattered is approved unread.",
+      "threats": [
+        "consent-flooding-desensitization"
+      ],
+      "likelihood": "likely",
+      "impact": "major",
+      "impact_description": "The consent plane is neutralised wholesale while continuing to report that every request was individually decided, which is the most dangerous failure mode in the model because it produces no signal that anything is wrong.",
+      "score": 16,
+      "level": "high"
+    },
+    {
+      "symbolic_name": "risk-approval-content-exposed-to-session",
+      "title": "Command text and argument values leak to co-resident processes",
+      "description": "A hostile application in the same session reads the console's window, captures it, or receives a copied payload from the pasteboard. Unpreventable by construction, and the console's obligation is to minimise what it pushes outward and to be honest that it cannot keep the payload off the screen at all.",
+      "threats": [
+        "approval-content-leak-to-session",
+        "notification-content-exfiltration"
+      ],
+      "likelihood": "likely",
+      "impact": "moderate",
+      "impact_description": "Disclosure of paths, URLs, business data, and occasionally tokens, to an attacker already resident on the machine. Material, but secondary to the loss of the approval decision itself.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-biometric-gate-degraded-or-coerced",
+      "title": "The biometric commitment is degraded, spoofed, or coerced",
+      "description": "A locked-out sensor, a relayed ceremony, or an operator under pressure yields a high-blast-radius approval that the operator did not freely choose. Nonce binding limits replay onto a different decision but addresses none of these.",
+      "threats": [
+        "biometric-spoofing-and-relay",
+        "biometric-silent-downgrade"
+      ],
+      "likelihood": "unlikely",
+      "impact": "major",
+      "impact_description": "Approval of a global persistent or script-executing grant obtained under conditions the operator would not recognise as illegitimate, with the system's own ceremony supplying false assurance that the decision was deliberate.",
+      "score": 8,
+      "level": "low"
+    },
+    {
+      "symbolic_name": "risk-invisible-standing-permission",
+      "title": "Standing permission exceeds the operator's understanding",
+      "description": "Narrow approvals accumulate, or a summarised grants view hides a broader scope, and the operator's model of what the system may do diverges from reality until they need it.",
+      "threats": [
+        "invisible-grant-accumulation",
+        "deceptive-activity-log"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "A durable over-permission the operator cannot see and therefore does not revoke, which converts a transient compromise into a persistent one and is discovered only incidentally.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-misleading-forensic-view",
+      "title": "The operator investigates using a falsified activity log",
+      "description": "The decision log is writable by any same-uid process, and a timeline that renders it without verification will present an edited history as authoritative at exactly the moment the operator is trying to find out what happened.",
+      "threats": [
+        "deceptive-activity-log"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "The one surface available for after-the-fact investigation becomes a means of being misled about it, so an ongoing compromise is neither detected nor correctly scoped.",
+      "score": 12,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-absence-treated-as-consent",
+      "title": "An unanswered request is treated as consent",
+      "description": "A locked screen, a switched session, or an absent operator results in a request being permitted rather than denied. One implementation shortcut here removes the consent plane's entire value without changing any other behaviour.",
+      "threats": [
+        "unattended-approval-default"
+      ],
+      "likelihood": "unlikely",
+      "impact": "severe",
+      "impact_description": "Unattended execution of whatever the agent asked for, including code execution, with no human present at any point in the chain.",
+      "score": 10,
+      "level": "medium"
+    },
+    {
+      "symbolic_name": "risk-degraded-evidence-read-as-clean",
+      "title": "Unresolved caller evidence displayed as though it were resolved",
+      "description": "Signature resolution fails or the process exits mid-resolution and the console renders the identity in the same register as a clean one, so the internal escalation is invisible to the operator whose judgement it was meant to inform.",
+      "threats": [
+        "degraded-evidence-presented-as-resolved"
+      ],
+      "likelihood": "possible",
+      "impact": "major",
+      "impact_description": "The graded-evidence model becomes a false assurance: the system knows it has weak evidence and is compensating, while the operator is shown a reassuring badge, which is the specific dishonesty this design is meant to avoid.",
+      "score": 12,
+      "level": "medium"
+    }
+  ]
+}
