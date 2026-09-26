@@ -25,6 +25,7 @@ SWIFT_BUILD_FLAGS ?= --disable-prefetching --only-use-versions-from-resolved-fil
 include $(PROJECT_ROOT)/make/go.mk
 include $(PROJECT_ROOT)/make/swift.mk
 include $(PROJECT_ROOT)/make/buf.mk
+include $(PROJECT_ROOT)/make/threat-model.mk
 include $(PROJECT_ROOT)/make/exactmac.mk
 include $(PROJECT_ROOT)/make/release.mk
 
