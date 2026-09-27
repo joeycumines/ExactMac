@@ -449,6 +449,20 @@ struct CodeBinding: Sendable, Equatable, Hashable {
     }
 }
 
+/// One process in the caller's ancestry, resolved the same way the peer is.
+///
+/// The chain exists because the socket peer is the `exactmac` stdio MCP proxy, not the
+/// process the operator has in mind: the agent is the peer's PARENT. An identity that names
+/// only the peer tells the operator that a binary asked, which is not the decision they are
+/// making.
+struct ResolvedProcess: Sendable, Equatable, Hashable {
+    var processIdentifier: Int32
+    var parentProcessIdentifier: Int32?
+    var code: CodeIdentity
+    /// False when the process exited mid-walk or its path could not be read.
+    var isFullyResolved: Bool
+}
+
 /// The caller as the system resolved it, which is evidence for the operator's judgement
 /// and not an authentication verdict. The boundary was crossed at socket access.
 struct CallerIdentity: Sendable, Equatable, Hashable {
@@ -460,6 +474,12 @@ struct CallerIdentity: Sendable, Equatable, Hashable {
     /// unresolved identity RAISES the risk class; it is never trusted and never
     /// special-cased into a denial of its own.
     var isFullyResolved: Bool
+    /// Nearest ancestor first. Capped, and a truncated chain says so rather than
+    /// pretending it is complete — an unshown process is an unreviewed process.
+    var ancestors: [ResolvedProcess] = []
+    /// True when the chain hit the depth cap or a cycle, so the prompt can mark the tree
+    /// incomplete instead of showing a confident, short tree.
+    var isAncestryTruncated: Bool = false
 }
 
 // MARK: - Requests, grants, envelopes
