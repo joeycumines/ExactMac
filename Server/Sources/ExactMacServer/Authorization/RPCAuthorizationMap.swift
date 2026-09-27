@@ -96,10 +96,24 @@ enum RPCAuthorizationMap {
     /// The three groupings that are not obvious, each decided by reading the
     /// implementation rather than the method name:
     ///
-    ///   `localEcho` is for reads that touch nothing on the desktop and return only what
-    ///   the caller itself submitted — GetInput and ListInputs read the server's own input
-    ///   registry. It is still mapped and still passes through the interceptor, so the set
-    ///   of unmapped methods stays empty; it simply needs no consent.
+    ///   `localEcho` is for a call that touches nothing on the desktop, needs no consent,
+    ///   and returns only what the CALLER ITSELF put in. `ValidateScript` is the only one,
+    ///   and its judgement is recorded below.
+    ///
+    ///   `GetInput` and `ListInputs` WERE here, on the reasoning that they read the
+    ///   server's own input registry rather than the desktop. An adversarial review read
+    ///   the handlers and falsified it: `getInput` returns the whole stored
+    ///   `Exactmac_V1_Input`, which retains the submitted `action` — the literal
+    ///   `TextInput.text`, the `KeyPress.key`, the `MouseClick.position` — and the
+    ///   `target` naming the exact application and window. `ListInputs` with
+    ///   `parent: "applications/-"` enumerates that registry across every application.
+    ///   Neither handler checks who created the record; the only check is that the name's
+    ///   application segment parses. So these are a CONTENT READ of another caller's
+    ///   payload, metered at no cost and summarised as nothing, which is a fail-open on
+    ///   the same class the clipboard is metered for. They are `inputSynthesize` now: the
+    ///   content IS a synthesized input, so an `inputSynthesize` grant covers reading back
+    ///   what was synthesized, and a caller that may not synthesize may not read what
+    ///   someone else typed. `localEcho` therefore has ONE member.
     ///
     ///   `ValidateScript` is in the same group and the judgement is recorded rather than
     ///   assumed: it builds an `NSAppleScript` and COMPILES caller-supplied source in
@@ -149,9 +163,13 @@ enum RPCAuthorizationMap {
 
         // Input synthesis, and the two reads that only echo it back.
         simple(.inputSynthesize, .parentField, ["CreateInput"], summary: .synthesizedInput)
-        simple(.localEcho, .parentField, ["ListInputs"], summary: .none)
+        // Reading back a recorded input discloses the literal text and the coordinates, so
+        // it carries the same capability as writing one. The summary names the RECORD being
+        // read rather than describing a create, because what the operator is approving is
+        // the disclosure of that record, and the capability is what names the consequence.
+        simple(.inputSynthesize, .parentField, ["ListInputs"], summary: .resourceName)
         // GetInput names the input itself; the application is in the same resource name.
-        simple(.localEcho, .resourceName, ["GetInput"], summary: .none)
+        simple(.inputSynthesize, .resourceName, ["GetInput"], summary: .resourceName)
 
         // Accessibility traversal and observation.
         simple(.accessibilityTraverse, .resourceName, [
@@ -329,23 +347,63 @@ struct RequestFacts: Sendable {
         case nested(RequestFacts)
         case list([Value])
         case opaque(String)
+
+        /// The value as a number, for a repeated ENUM field: those arrive on the wire as
+        /// varints and can only be read by the operator through the generated name.
+        var number: Double? {
+            switch self {
+            case let .unsigned(raw): Double(raw)
+            case let .double(raw): raw
+            case let .boolean(raw): raw ? 1 : 0
+            case .text, .nested, .list, .opaque: nil
+            }
+        }
     }
+
+    /// Repeated ENUM fields, keyed by field name. `modifiers` is the only one in a
+    /// request-reachable message in this API, and it is the difference between a summary
+    /// that says the operator is being asked to hold command and one that says `[1]`.
+    private static let repeatedEnumNames: [String: [UInt64: String]] = [
+        "modifiers": enumNames(Exactmac_V1_KeyPress.Modifier.self),
+    ]
 
     private var fields: [String: Value] = [:]
 
-    init() {}
+    /// False when the request could NOT be read in full, which is a different fact from
+    /// "read, and it has no such field".
+    ///
+    /// The guard that used to stand here asked for a field named `__absent__`, which no
+    /// proto declares and which the normaliser could never produce: keys are
+    /// `camelCased(protoName)` or `field<n>`, so the lookup always missed and the
+    /// protection was never in force. A summary for an unreadable request therefore
+    /// produced affirmative falsehoods — "an empty shell invocation", "the whole screen",
+    /// "a macro with nothing recorded" — each of which reads to the operator as a fact
+    /// about what they are approving. The flag is set where the walk actually gives up.
+    private(set) var isFullyRead: Bool
+
+    init() {
+        isFullyRead = true
+    }
 
     init(message: any SwiftProtobuf.Message, policy: PublicRequestDescriptorPolicy) {
-        guard let bytes = try? message.serializedData() else { return }
+        guard let bytes = try? message.serializedData() else {
+            isFullyRead = false
+            return
+        }
         var accumulator = Accumulator()
-        Self.read(
+        let completed = Self.read(
             bytes: bytes,
             messageName: type(of: message).protoMessageName,
             policy: policy,
             into: &accumulator,
         )
         fields = accumulator.finish()
+        isFullyRead = completed
     }
+
+    /// Deeper than any message in this API nests, and comfortably inside what `describe()`
+    /// will render, so the bound costs nothing real and closes unbounded recursion.
+    private static let maximumReadDepth = 32
 
     /// Repeated fields need somewhere to accumulate, which a dictionary subscript cannot do.
     ///
@@ -359,6 +417,7 @@ struct RequestFacts: Sendable {
     private struct Accumulator {
         var fields: [String: Value] = [:]
         var lists: [String: [Value]] = [:]
+        var didFailToRead = false
 
         mutating func append(_ name: String, _ value: Value) {
             lists[name, default: []].append(value)
@@ -375,15 +434,32 @@ struct RequestFacts: Sendable {
         }
     }
 
+    /// - Returns: True when every field in `bytes` was understood. False means the walk
+    ///   hit bytes it could not read, and the summary must then SAY SO rather than
+    ///   describe a request nobody read.
+    ///
+    /// The depth is bounded for the same reason `describe()` bounds its own: this runs on
+    /// the consent path over a message type the caller chose, and a self-referential one
+    /// would otherwise be unbounded recursion chosen by whoever is asking for
+    /// authorization. `protoc` rejects recursive message types today, so the reachable
+    /// depth is the schema's own, and the cap is the defence rather than the control.
     private static func read(
         bytes: Data,
         messageName: String,
         policy: PublicRequestDescriptorPolicy,
         into accumulator: inout Accumulator,
-    ) {
+        depth: Int = 0,
+    ) -> Bool {
+        guard depth < maximumReadDepth else {
+            accumulator.didFailToRead = true
+            return false
+        }
         var index = bytes.startIndex
         while index < bytes.endIndex {
-            guard let tag = readVarint(bytes, &index) else { return }
+            guard let tag = readVarint(bytes, &index) else {
+                accumulator.didFailToRead = true
+                return false
+            }
             let number = Int(tag >> 3)
             let wire = Int(tag & 7)
             let descriptor = policy.field(messageName: messageName, number: number)
@@ -396,24 +472,47 @@ struct RequestFacts: Sendable {
             let name = descriptor.map { camelCased($0.name) } ?? "field\(number)"
             switch wire {
             case 0:
-                guard let raw = readVarint(bytes, &index) else { return }
+                guard let raw = readVarint(bytes, &index) else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
                 if descriptor?.isRepeated == true {
                     accumulator.append(name, .unsigned(raw))
                 } else {
                     accumulator.fields[name] = .unsigned(raw)
                 }
             case 1:
-                guard let raw = readFixed64(bytes, &index) else { return }
+                guard let raw = readFixed64(bytes, &index) else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
                 accumulator.fields[name] = descriptor?.wireKind == .fixed64
                     ? .double(Double(bitPattern: raw))
                     : .opaque("8 bytes")
             case 5:
-                guard let raw = readFixed32(bytes, &index) else { return }
+                guard let raw = readFixed32(bytes, &index) else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
                 accumulator.fields[name] = .opaque("\(raw) (32-bit)")
             case 2:
-                guard let raw = readVarint(bytes, &index) else { return }
+                guard let raw = readVarint(bytes, &index) else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
+                // A declared length beyond Int.max TRAPS at `Int(raw)`, and the bytes are
+                // caller-chosen, so the check is a bound rather than a conversion. This is
+                // the same class the numeric summary already fixed: a crash is not the
+                // fail-closed deny the invariant requires.
+                guard raw <= UInt64(Int.max) else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
                 let end = index + Int(raw)
-                guard end <= bytes.endIndex else { return }
+                guard end <= bytes.endIndex else {
+                    accumulator.didFailToRead = true
+                    return false
+                }
                 let payload = Data(bytes[index ..< end])
                 index = end
                 // A PACKED repeated scalar arrives as ONE length-delimited field holding
@@ -431,7 +530,14 @@ struct RequestFacts: Sendable {
                           policy.message(nestedName) != nil
                 {
                     var nested = Accumulator()
-                    read(bytes: payload, messageName: nestedName, policy: policy, into: &nested)
+                    let nestedCompleted = read(
+                        bytes: payload,
+                        messageName: nestedName,
+                        policy: policy,
+                        into: &nested,
+                        depth: depth + 1,
+                    )
+                    accumulator.didFailToRead = accumulator.didFailToRead || !nestedCompleted
                     // `finish()`, not `.fields`: a nested message's OWN repeated fields
                     // live in the separate lists dictionary, so reading `.fields` here
                     // silently dropped every repeated field below the top level. That is
@@ -451,18 +557,25 @@ struct RequestFacts: Sendable {
                 }
             default:
                 // Groups are not used by this API, and an unknown wire type means the bytes
-                // are not what we think they are, so the walk stops rather than guessing.
-                return
+                // are not what we think they are, so the walk stops rather than guessing —
+                // and says it stopped, so the summary cannot describe a request nobody
+                // read as if it were whole.
+                accumulator.didFailToRead = true
+                return false
             }
         }
+        // Nothing was given up on, so the walk read the whole message.
+        return !accumulator.didFailToRead
     }
 
+    /// A submessage the parent's walk already read. Its own completeness is not tracked
+    /// here: a failure inside it is folded into the TOP-LEVEL accumulator, which is the
+    /// only place a summary consults.
     private init(fields: [String: Value]) {
         self.fields = fields
+        isFullyRead = true
     }
 
-    /// `working_directory` becomes `workingDirectory`, matching the generated Swift, so the
-    /// accessors read the way the API reads. A name that is already camelCase is unchanged.
     /// The values inside one packed repeated field. A truncated tail stops the walk rather
     /// than being read as a value, because a varint cut short by the end of the buffer is
     /// not a number the caller sent.
@@ -494,6 +607,8 @@ struct RequestFacts: Sendable {
         return values
     }
 
+    /// `working_directory` becomes `workingDirectory`, matching the generated Swift, so the
+    /// accessors read the way the API reads. A name that is already camelCase is unchanged.
     private static func camelCased(_ name: String) -> String {
         var result = ""
         var upperNext = false
@@ -645,10 +760,27 @@ struct RequestFacts: Sendable {
                     parts.append("\(key): \(rendered)")
                 }
             case let .list(values):
+                // EVERY element, not only the nested ones. A repeated SCALAR — a held
+                // modifier, a set of file paths — is `compactMap`ped to nothing by a
+                // nested-only reader, so a macro action summarized as
+                // "input: keyPress: key: q" with the command not held, and a clipboard
+                // write of two files summarized as "the file paths " followed by nothing.
+                // The two payloads the operator most needs to see before approving were the
+                // two the reader dropped, and the `files` case dropped the paths
+                // altogether: `FilePaths` holds nothing but `repeated string paths`, so the
+                // whole message rendered empty.
                 let rendered = values.compactMap { value -> String? in
-                    guard case let .nested(entry) = value else { return nil }
-                    let nested = entry.describe(depth: depth + 1)
-                    return nested.isEmpty ? nil : nested
+                    switch value {
+                    case let .nested(entry):
+                        let nested = entry.describe(depth: depth + 1)
+                        return nested.isEmpty ? nil : nested
+                    case .list, .opaque:
+                        return nil
+                    default:
+                        return Self.repeatedEnumNames[key].flatMap { table in
+                            value.number.flatMap { AuthorizationRequestDeriver.enumName($0, table) }
+                        } ?? text(key: value)
+                    }
                 }
                 if !rendered.isEmpty {
                     parts.append("\(key): [\(rendered.joined(separator: ", "))]")
@@ -660,6 +792,20 @@ struct RequestFacts: Sendable {
             }
         }
         return parts.joined(separator: " ")
+    }
+
+    /// One element of a repeated field, as text. Enums and numbers are rendered by the
+    /// caller's table where it has one, and as their own text where it does not, so a
+    /// repeated enum in a summary the caller has not special-cased still reaches the
+    /// operator rather than being dropped.
+    private func text(key value: Value) -> String? {
+        switch value {
+        case let .text(raw): raw.isEmpty ? nil : raw
+        case let .unsigned(raw): String(raw)
+        case let .double(raw): formatted(raw)
+        case let .boolean(raw): raw ? "true" : "false"
+        case .nested, .list, .opaque: nil
+        }
     }
 
     private static let maximumDescriptionDepth = 6
@@ -715,6 +861,41 @@ struct RequestFacts: Sendable {
         }
         return nil
     }
+}
+
+/// Every case name of a generated enum, keyed by its raw value.
+///
+/// A hand-written table of enum values is exactly the kind of table that rots: a value
+/// added to the proto would be missing from the prompt and a value renamed would drift.
+/// Reading the GENERATED type means neither can happen. `allCases` includes
+/// `UNRECOGNIZED(-1)`, and clamping that to zero would let it overwrite the real name of
+/// the unspecified value, so it is dropped.
+/// A number as the operator should read it.
+///
+/// A double that is finite but beyond `Int.max` used to go through `Int(_:)`, which
+/// TRAPS — and the only numeric gate on these fields accepts anything finite, so
+/// `region.x = 1e30` killed the server on the path that gates every other request. A
+/// crash is not the fail-closed deny the invariant requires, and a caller with socket
+/// access should not be able to take the process down with a number.
+func formatted(_ value: Double) -> String {
+    guard value.isFinite else { return String(value) }
+    let rounded = value.rounded()
+    if rounded.magnitude < 9.0e15, rounded == rounded.rounded() {
+        return String(Int64(rounded))
+    }
+    return String(value)
+}
+
+func enumNames<Enum: SwiftProtobuf.Enum & CaseIterable & RawRepresentable>(
+    _: Enum.Type,
+) -> [UInt64: String] where Enum.RawValue == Int {
+    var table: [UInt64: String] = [:]
+    for value in Enum.allCases {
+        let raw = value.rawValue
+        guard raw >= 0 else { continue }
+        table[UInt64(raw)] = String(describing: value)
+    }
+    return table
 }
 
 /// Parses the application resource names the API uses, and nothing else.
@@ -862,8 +1043,12 @@ enum AuthorizationRequestDeriver {
         method _: String,
         operationLimit: Int? = nil,
     ) -> String {
-        if facts.text("__absent__") != nil {
-            return "the request could not be read for display; it is shown uninspected"
+        // A request the parser could not read in full must never be described as though it
+        // were read. The old guard asked for a field named `__absent__`, which no proto
+        // declares and which the normaliser could never produce, so it could never fire
+        // and every unreadable request produced an affirmative falsehood instead.
+        guard facts.isFullyRead else {
+            return "this request could not be read in full; it is shown uninspected"
         }
         switch kind {
         case .none:
@@ -1278,25 +1463,17 @@ enum AuthorizationRequestDeriver {
         return parts.isEmpty ? "an input with no described action" : parts.joined(separator: ", ")
     }
 
-    /// A double that is finite but beyond `Int.max` used to go through `Int(_:)`, which
-    /// TRAPS — and the only numeric gate on these fields accepts anything finite, so
-    /// `region.x = 1e30` killed the server on the path that gates every other request. A
-    /// crash is not the fail-closed deny the invariant requires, and a caller with socket
-    /// access should not be able to take the process down with a number.
-    private static func formatted(_ value: Double) -> String {
-        guard value.isFinite else { return String(value) }
-        let rounded = value.rounded()
-        if rounded.magnitude < 9.0e15, rounded == rounded.rounded() {
-            return String(Int64(rounded))
-        }
-        return String(value)
-    }
+    // A double that is finite but beyond `Int.max` used to go through `Int(_:)`, which
+    // TRAPS — and the only numeric gate on these fields accepts anything finite, so
+    // `region.x = 1e30` killed the server on the path that gates every other request. A
+    // crash is not the fail-closed deny the invariant requires, and a caller with socket
+    // access should not be able to take the process down with a number.
 
     /// Enum names are read from the GENERATED Swift types rather than a hand-written
     /// table, so a new value cannot be missing from the prompt and a renamed one cannot
     /// drift. A summary that printed `2` where the operator needs to see `png` would be
     /// worse than no summary.
-    private static func enumName(_ raw: Double?, _ names: [UInt64: String]) -> String? {
+    static func enumName(_ raw: Double?, _ names: [UInt64: String]) -> String? {
         guard let raw, raw >= 0, let name = names[UInt64(raw)] else { return nil }
         return name
     }
@@ -1309,15 +1486,7 @@ enum AuthorizationRequestDeriver {
     private static func names<Enum: SwiftProtobuf.Enum & CaseIterable & RawRepresentable>(
         _: Enum.Type,
     ) -> [UInt64: String] where Enum.RawValue == Int {
-        var table: [UInt64: String] = [:]
-        for value in Enum.allCases {
-            let raw = value.rawValue
-            // `allCases` includes UNRECOGNIZED(-1), and clamping it to zero would let it
-            // overwrite the real name of the unspecified value.
-            guard raw >= 0 else { continue }
-            table[UInt64(raw)] = String(describing: value)
-        }
-        return table
+        enumNames(Enum.self)
     }
 
     private static let clickTypeNames = names(Exactmac_V1_MouseClick.ClickType.self)

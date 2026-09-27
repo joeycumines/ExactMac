@@ -76,13 +76,16 @@ final class CallerIdentityResolverTests: XCTestCase {
                 || identity.code.executablePath.hasSuffix("swift-testing"),
             "the resolved path should be this test host: \(identity.code.executablePath)",
         )
-        XCTAssertTrue(
-            SignatureState.allCases.contains(identity.code.signature),
-            "a real binary has a real signature state",
+        // A REAL state, not "some state": `SignatureState.allCases.contains(x)` is true for
+        // every value the type can hold, so it asserted the type system rather than the
+        // resolver. The SwiftPM test host is ad-hoc signed, and that is checkable.
+        XCTAssertEqual(
+            identity.code.signature, .adHoc,
+            "a SwiftPM-built test host is ad-hoc signed, and that is the state it reports",
         )
-        // A SwiftPM test host is ad-hoc signed, and its requirement text is EMPTY — so the
-        // grant must not be able to bind to it. Asserting the empty case is the point: an
-        // empty requirement that got stored would be satisfied by anything.
+        // Its requirement text is EMPTY — so the grant must not be able to bind to it.
+        // Asserting the empty case is the point: an empty requirement that got stored would
+        // be satisfied by anything.
         if identity.code.signature == .adHoc {
             XCTAssertNil(identity.code.designatedRequirement)
             XCTAssertNil(identity.code.binding.designatedRequirement)

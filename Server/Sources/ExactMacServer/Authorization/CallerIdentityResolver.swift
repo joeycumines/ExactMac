@@ -220,8 +220,15 @@ enum CallerIdentitySource: Sendable {
 /// kernel are authoritative, and AGENTS.md already records that the AppKit view of a
 /// process can lag the Accessibility server.
 struct SystemProcessInspector: ProcessInspecting {
+    /// - Returns: The resolved identity, or nil for a pid the kernel does not name.
+    ///
+    /// pid 1 IS resolvable and is deliberately not excluded. `/sbin/launchd` is a perfectly
+    /// readable process, it is the root of every chain this walk produces, and excluding it
+    /// made the row that marks the tree complete always read as `unresolved` — a false
+    /// statement in the one position the operator looks to for whether they have seen
+    /// everything. The walk stops at pid 1 because ITS parent is 0, which is not a process.
     func codeIdentity(processIdentifier: Int32) -> CodeIdentity? {
-        guard processIdentifier > 1,
+        guard processIdentifier > 0,
               let path = executablePath(processIdentifier: processIdentifier),
               !path.isEmpty
         else {

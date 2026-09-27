@@ -724,6 +724,85 @@ final class AuthorizationMapDriftTests: XCTestCase {
         XCTAssertTrue(created.argumentSummary.contains("SetElementValue"), created.argumentSummary)
     }
 
+    /// A REPEATED SCALAR inside a nested message, which is the one shape the summary reader
+    /// silently dropped. Every earlier fixture here used `method_call`, whose `args` is a
+    /// `map<string,string>` — a repeated MESSAGE — so the one reader that rendered messages
+    /// was the only one exercised, and a macro holding ⌘-click or ⌘-Q summarized as a bare
+    /// key press. A macro's actions replay unattended long after the consent, so this is
+    /// the payload that most needed to be on the screen.
+    func testAMacroActionCarriesItsHeldModifiers() async throws {
+        let created = try await derived(
+            "CreateMacro",
+            Exactmac_V1_CreateMacroRequest.with {
+                $0.macro = Exactmac_V1_Macro.with {
+                    $0.name = "macros/m-3"
+                    $0.actions = [
+                        Exactmac_V1_MacroAction.with {
+                            $0.input = Exactmac_V1_InputAction.with {
+                                $0.keyPress = Exactmac_V1_KeyPress.with {
+                                    $0.key = "q"
+                                    $0.modifiers = [.command, .shift]
+                                }
+                            }
+                        },
+                    ]
+                }
+            },
+            policy: Self.loadPolicy(),
+        )
+        XCTAssertTrue(created.argumentSummary.contains("command"), created.argumentSummary)
+        XCTAssertTrue(created.argumentSummary.contains("shift"), created.argumentSummary)
+        XCTAssertFalse(
+            created.argumentSummary.contains("modifiers: [1"),
+            "a held modifier must be named, not numbered: \(created.argumentSummary)",
+        )
+
+        let click = try await derived(
+            "CreateMacro",
+            Exactmac_V1_CreateMacroRequest.with {
+                $0.macro = Exactmac_V1_Macro.with {
+                    $0.name = "macros/m-4"
+                    $0.actions = [
+                        Exactmac_V1_MacroAction.with {
+                            $0.input = Exactmac_V1_InputAction.with {
+                                $0.mouseClick = Exactmac_V1_MouseClick.with {
+                                    $0.position = Exactmac_Type_Point.with { $0.x = 420; $0.y = 118 }
+                                    $0.clickType = .left
+                                    $0.modifiers = [.command]
+                                }
+                            }
+                        },
+                    ]
+                }
+            },
+            policy: Self.loadPolicy(),
+        )
+        XCTAssertTrue(click.argumentSummary.contains("command"), click.argumentSummary)
+        XCTAssertTrue(click.argumentSummary.contains("420"), click.argumentSummary)
+    }
+
+    /// A clipboard write of FILE PATHS. `FilePaths` holds nothing but `repeated string
+    /// paths`, so a nested-only reader rendered the whole message empty and the summary
+    /// said "the file paths " followed by nothing — the operator approving the disclosure
+    /// of a file list that was not shown to them.
+    func testAClipboardFileWriteCarriesItsPaths() async throws {
+        let request = try await derived(
+            "WriteClipboard",
+            Exactmac_V1_WriteClipboardRequest.with {
+                $0.content = Exactmac_V1_ClipboardContent.with {
+                    $0.type = .files
+                    $0.files = Exactmac_V1_FilePaths.with {
+                        $0.paths = ["/Users/joeyc/.ssh/id_rsa", "/Users/joeyc/Documents/tax.pdf"]
+                    }
+                }
+            },
+            policy: Self.loadPolicy(),
+        )
+        let summary = request.argumentSummary
+        XCTAssertTrue(summary.contains("/Users/joeyc/.ssh/id_rsa"), summary)
+        XCTAssertTrue(summary.contains("/Users/joeyc/Documents/tax.pdf"), summary)
+    }
+
     /// The clipboard history is a record of EVERYTHING the operator has copied. Describing
     /// that as "reads metadata only" told the operator the opposite of the truth.
     func testAContentReadIsNeverDescribedAsMetadataOnly() async throws {
@@ -812,19 +891,39 @@ final class AuthorizationMapDriftTests: XCTestCase {
         XCTAssertEqual(wrong, [])
     }
 
-    /// The methods that need no consent are exactly three, and the membership is asserted
-    /// so a future reclassification has to be deliberate.
-    func testNoConsentFreeCapabilityIsMappedToSomethingThatReachesTheDesktop() {
+    /// The methods that need no consent are exactly ONE, and the membership is asserted so
+    /// a future reclassification has to be deliberate.
+    ///
+    /// IT WAS THREE. `GetInput` and `ListInputs` were classified `localEcho` on the claim
+    /// that they return only what the caller itself submitted, because they read the
+    /// server's own input registry. An adversarial review read `InputMethods.getInput` and
+    /// `AppStateStore` and falsified it: the stored record keeps the submitted
+    /// `TextInput.text`, the `KeyPress.key` and the `MouseClick.position`, `getInput`
+    /// returns that record whole, `ListInputs` with `parent: "applications/-"` enumerates
+    /// it across every application, and neither handler asks who created it. The claim was
+    /// a comment about the handler, sitting on top of a handler that said otherwise — so
+    /// this assertion now names the real cost of the three-way split, and a reclassification
+    /// has to be argued from the handler rather than from the method name.
+    func testOnlyValidateScriptNeedsNoConsent() {
         let consentFree = Set(
             RPCAuthorizationMap.table.filter { !$0.value.capability.requiresConsent }.keys,
         )
-        XCTAssertEqual(
-            consentFree,
-            [
-                "exactmac.v1.ExactMac/GetInput",
-                "exactmac.v1.ExactMac/ListInputs",
-                "exactmac.v1.ExactMac/ValidateScript",
-            ],
-        )
+        XCTAssertEqual(consentFree, ["exactmac.v1.ExactMac/ValidateScript"])
+    }
+
+    /// A read of the server's own input registry is a CONTENT READ, and this says so
+    /// independently of the capability table: both methods must be metered and must name
+    /// what they read.
+    func testReadingBackARecordedInputIsMeteredAndNamed() throws {
+        for method in ["GetInput", "ListInputs"] {
+            let entry = try XCTUnwrap(
+                RPCAuthorizationMap.authorization(
+                    forMethod: "\(RPCAuthorizationMap.serviceName)/\(method)",
+                ),
+            )
+            XCTAssertTrue(entry.capability.requiresConsent, "\(method) discloses typed content")
+            XCTAssertEqual(entry.capability, .inputSynthesize, method)
+            XCTAssertNotEqual(entry.summary, .none, "\(method) must name the record it reads")
+        }
     }
 }
