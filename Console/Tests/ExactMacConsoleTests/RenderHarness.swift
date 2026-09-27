@@ -181,3 +181,51 @@ struct WindowRenderTests {
         )
     }
 }
+
+@Suite("The remaining designed surfaces render", .serialized)
+@MainActor
+struct RemainingRenderTests {
+    @Test
+    func `the settings window renders at 720pt`() throws {
+        try RenderHarness.png(
+            SettingsWindow(),
+            size: CGSize(width: 720, height: 1008),
+            to: RenderHarness.outputDirectory + "settings.png",
+        )
+    }
+
+    @Test
+    func `the envelope review is a different surface from the prompt`() throws {
+        try RenderHarness.png(
+            EnvelopeReview(
+                requester: "Codex",
+                reason: "Refactoring the parser, which needs clipboard and tree reads at each step.",
+                capabilities: [
+                    .init(
+                        id: "clipboard",
+                        consequence: "Read the clipboard in any app the agent names",
+                        breadth: "clipboard.read  ·  any application",
+                        risk: .elevated,
+                    ),
+                    .init(
+                        id: "observation",
+                        consequence: "Read the accessibility tree of any app",
+                        breadth: "observation.ax  ·  any application",
+                        risk: .elevated,
+                    ),
+                    .init(
+                        id: "input",
+                        consequence: "Type and click as you, in any app",
+                        breadth: "input.synthesize  ·  any application",
+                        risk: .high,
+                    ),
+                ],
+                duration: "2 hours",
+                maximumDuration: "8 hours",
+                biometricLine: "Touch ID will confirm: pre-authorize 3 capabilities for 2 hours",
+            ),
+            size: CGSize(width: 420, height: 617),
+            to: RenderHarness.outputDirectory + "envelope.png",
+        )
+    }
+}
