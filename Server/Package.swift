@@ -22,6 +22,11 @@ let package = Package(
         .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", from: "2.4.0"),
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", from: "2.7.0"),
         .package(url: "https://github.com/grpc/grpc-swift-extras.git", from: "2.2.0"),
+        // The server owns its own Unix-socket accept loop so it can read the kernel's peer
+        // evidence at accept time, and `ServerBootstrap` — the only way to hand SwiftNIO a
+        // connected socket — lives in NIOPosix. The version requirement is deliberately
+        // wide and the resolved file still pins the exact revision.
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         .package(name: "ExactMac", path: "../"),
     ],
     targets: [
@@ -45,6 +50,7 @@ let package = Package(
             dependencies: [
                 .product(name: "GRPCCore", package: "grpc-swift-2"),
                 .product(name: "GRPCNIOTransportHTTP2", package: "grpc-swift-nio-transport"),
+                .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "GRPCReflectionService", package: "grpc-swift-extras"),
                 .product(name: "GRPCHealthService", package: "grpc-swift-extras"),
                 "ExactMac",
@@ -67,6 +73,7 @@ let package = Package(
                 .product(name: "GRPCCore", package: "grpc-swift-2"),
                 .product(name: "GRPCInProcessTransport", package: "grpc-swift-2"),
                 .product(name: "GRPCNIOTransportHTTP2", package: "grpc-swift-nio-transport"),
+                .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "GRPCProtobuf", package: "grpc-swift-protobuf"),
             ],
         ),

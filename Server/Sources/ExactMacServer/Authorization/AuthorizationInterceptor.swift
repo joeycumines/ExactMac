@@ -133,6 +133,37 @@ struct NoGrantIssuance: GrantIssuing {
 
 // MARK: - Settings and wiring
 
+/// The kernel's answer about the connected socket behind ONE rpc, resolved at enforcement time.
+///
+/// A FUNCTION OVER THE CONTEXT rather than a value, because the evidence is per-connection
+/// and the interceptor is per-RPC, and because `ServerContext` is the only handle the
+/// pinned gRPC stack gives an interceptor. Production resolves it through
+/// `ConnectionPeerRegistry`; a test says "this call arrived with no evidence" or "with this
+/// evidence" without inventing a socket. The nil case is the fail-closed one and the engine
+/// escalates it, so a resolver that fails is a system that denies rather than one that
+/// proceeds as though it knew.
+struct PeerProcessResolution: Sendable {
+    var resolve: @Sendable (ServerContext) -> PeerProcessEvidence?
+
+    /// Production: the registry the listener writes to, keyed by the connection token the
+    /// transport reports in the peer description.
+    static func registry(_ registry: ConnectionPeerRegistry) -> PeerProcessResolution {
+        PeerProcessResolution { context in
+            registry.evidence(forPeerDescription: context.remotePeer)
+        }
+    }
+
+    /// Nothing is known about any connection, which is the TCP posture and the shape a test
+    /// uses to say "this call has no identifiable caller".
+    static let unavailable = PeerProcessResolution { _ in nil }
+
+    /// One fixed answer for every call, which is the only shape a test can use and the
+    /// reason production does not go through here.
+    static func fixed(_ evidence: PeerProcessEvidence?) -> PeerProcessResolution {
+        PeerProcessResolution { _ in evidence }
+    }
+}
+
 /// Everything the interceptor needs, gathered so a test can vary one thing at a time and
 /// production cannot accidentally omit one.
 struct AuthorizationRuntime: Sendable {
@@ -151,15 +182,16 @@ struct AuthorizationRuntime: Sendable {
     /// The application resolver C2 needs to turn an opaque application name into the
     /// application it names. The server's own catalog in production.
     var applicationResolver: any ApplicationTargetResolving
-    /// The kernel's answer about the connected socket, WHEN THE TRANSPORT CAN SUPPLY ONE.
+    /// The kernel's answer about the socket this call arrived on, WHEN THE TRANSPORT CAN
+    /// SUPPLY ONE.
     ///
-    /// Nil today, and recorded in `knowledgeStore.transportLimit`: no `ServerInterceptor`
-    /// in the pinned gRPC/NIO can reach the accepted socket's descriptor. Nil is treated as
-    /// an UNRESOLVED identity, which the engine escalates and which denies once a grant is
-    /// needed — the fail-closed rule arriving early rather than a workaround. The seam is
-    /// this one optional value, and `SocketPeerProcessEvidence` is already written and
-    /// tested against a real socket pair.
-    var peerEvidence: PeerProcessEvidence?
+    /// Production resolves it per call through `ConnectionPeerRegistry`, which
+    /// `PeerIdentifyingListenerFactory` fills at accept time from `LOCAL_PEERPID` and
+    /// `LOCAL_PEERCRED`. `.unavailable` is the TCP posture, where the engine denies before
+    /// this is consulted anyway. A lookup that misses — an unnamed peer, a connection that
+    /// has closed, a caller that never registered — is an UNRESOLVED identity, which the
+    /// engine escalates and which denies.
+    var peerEvidence: PeerProcessResolution
 
     /// The Unix-socket variant, which is the only one with an identity and the only one
     /// that can consent.
@@ -175,7 +207,7 @@ struct AuthorizationRuntime: Sendable {
         biometric: AuthorizationContext.BiometricAvailability = .available,
         highConsequenceTargets: Set<String> = [],
         applicationResolver: any ApplicationTargetResolving = UnresolvableApplicationTarget(),
-        peerEvidence: PeerProcessEvidence? = nil,
+        peerEvidence: PeerProcessResolution = .unavailable,
     ) -> AuthorizationRuntime {
         AuthorizationRuntime(
             descriptorPolicy: descriptorPolicy,
@@ -220,6 +252,7 @@ struct AuthorizationRuntime: Sendable {
             biometric: .unavailable(reason: "the reduced unauthenticated posture has no ceremony"),
             highConsequenceTargets: [],
             applicationResolver: UnresolvableApplicationTarget(),
+            peerEvidence: .unavailable,
         )
     }
 
@@ -311,6 +344,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
                 method: context.descriptor.fullyQualifiedMethod,
                 message: first,
                 metadata: request.metadata,
+                context: context,
             )
         } catch let error as AuthorizationDenial {
             counters.record(error.reason)
@@ -366,6 +400,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         method: String,
         message: any Sendable,
         metadata: Metadata,
+        context: ServerContext,
     ) async throws -> AuthorizationDecision {
         guard let protobuf = message as? any SwiftProtobuf.Message else {
             throw AuthorizationDenial(
@@ -392,7 +427,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
             throw AuthorizationDenial(reason: .notPermitted, capability: .localEcho)
         }
 
-        let identity = await resolveIdentity(for: requestID)
+        let identity = resolveIdentity(for: context)
         let snapshot = await runtime.grants.snapshot()
         var context = AuthorizationContext(
             transport: runtime.transport,
@@ -431,40 +466,42 @@ struct AuthorizationInterceptor: ServerInterceptor {
 
     /// Identity evidence, and the variant's shape.
     ///
-    /// There is no descriptor to ask yet — see `knowledgeStore.transportLimit` — so the
-    /// Unix-socket variant currently resolves an UNRESOLVED identity, which the engine
-    /// escalates and which denies once a grant is needed. The seam is one function: hand
-    /// this a descriptor and it returns a complete identity.
-    private func resolveIdentity(for _: AuthorizationRequestID) async -> CallerIdentity {
+    /// THE EVIDENCE IS RESOLVED PER CALL, from the connection this call arrived on, and the
+    /// context is the only thing that says which connection that is. Production looks the
+    /// connection's token up in the registry the listener filled at accept; a test supplies
+    /// a fixed answer. A lookup that misses is an UNRESOLVED identity, which the engine
+    /// escalates and which denies — an unnamed peer, a connection that has since closed, and
+    /// the TCP posture all arrive here as the same nil and are all refused.
+    private func resolveIdentity(for context: ServerContext) -> CallerIdentity {
         guard let resolver = runtime.identity.resolver else {
-            return CallerIdentity(
-                processIdentifier: 0,
-                effectiveUserIdentifier: 0,
-                parentProcessIdentifier: nil,
-                code: CodeIdentity(
-                    executablePath: "<no authenticating principal>",
-                    bundleIdentifier: nil,
-                    designatedRequirement: nil,
-                    signature: .unresolved,
-                ),
-                isFullyResolved: false,
-            )
+            return Self.unresolvedCaller(path: "<no authenticating principal>")
         }
-        guard let evidence = runtime.peerEvidence else {
-            return CallerIdentity(
-                processIdentifier: 0,
-                effectiveUserIdentifier: 0,
-                parentProcessIdentifier: nil,
-                code: CodeIdentity(
-                    executablePath: "<peer evidence unavailable>",
-                    bundleIdentifier: nil,
-                    designatedRequirement: nil,
-                    signature: .unresolved,
-                ),
-                isFullyResolved: false,
-            )
+        guard let evidence = runtime.peerEvidence.resolve(context) else {
+            return Self.unresolvedCaller(path: "<peer evidence unavailable>")
         }
         return resolver.resolve(evidence)
+    }
+
+    /// A placeholder that SAYS it is a placeholder.
+    ///
+    /// Its path cannot be satisfied by any real binary, so no grant can bind to it, and the
+    /// signature state is `unresolved` so it escalates. The two causes get two different
+    /// paths because they are genuinely different facts — a transport with no principal at
+    /// all, and a transport that has one this connection did not earn — and that difference
+    /// is diagnostic only: both are `isFullyResolved: false` and both deny identically.
+    private static func unresolvedCaller(path: String) -> CallerIdentity {
+        CallerIdentity(
+            processIdentifier: 0,
+            effectiveUserIdentifier: 0,
+            parentProcessIdentifier: nil,
+            code: CodeIdentity(
+                executablePath: path,
+                bundleIdentifier: nil,
+                designatedRequirement: nil,
+                signature: .unresolved,
+            ),
+            isFullyResolved: false,
+        )
     }
 
     /// Asks the operator, under a bounded wait, and denies on the bound.

@@ -448,10 +448,10 @@ final class ConsoleChannelTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             isConsoleReachable: true,
-            peerEvidence: PeerProcessEvidence(
+            peerEvidence: .fixed(PeerProcessEvidence(
                 processIdentifier: getpid(),
                 effectiveUserIdentifier: getuid(),
-            ),
+            )),
         )
         runtime.consent = EndpointConsentBroker(endpoint: server)
         let interceptor = AuthorizationInterceptor(runtime: runtime, counters: counters)

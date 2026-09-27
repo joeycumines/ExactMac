@@ -154,7 +154,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             isConsoleReachable: true,
-            peerEvidence: Self.thisProcess,
+            peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.consent = NeverAnsweringBroker()
         runtime.consentTimeout = .milliseconds(50)
@@ -177,7 +177,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             isConsoleReachable: true,
-            peerEvidence: Self.thisProcess,
+            peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.consent = MislabelledAnswerBroker()
         let counters = AuthorizationCounters()
@@ -199,7 +199,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             isConsoleReachable: true,
-            peerEvidence: Self.thisProcess,
+            peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.consent = ApprovingBroker(obtainsCeremony: false)
         runtime.posture = .balanced
@@ -229,7 +229,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
             runtime: .unixSocket(
                 descriptorPolicy: policy,
                 isConsoleReachable: false,
-                peerEvidence: Self.thisProcess,
+                peerEvidence: .fixed(Self.thisProcess),
             ),
             counters: counters,
             method: "\(RPCAuthorizationMap.serviceName)/GetClipboard",
@@ -247,7 +247,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         let interceptor = AuthorizationInterceptor(runtime: .unixSocket(
             descriptorPolicy: policy,
-            peerEvidence: Self.thisProcess,
+            peerEvidence: .fixed(Self.thisProcess),
         ))
         do {
             _ = try await interceptor.intercept(
@@ -334,7 +334,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             isConsoleReachable: true,
-            peerEvidence: Self.thisProcess,
+            peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.consent = recorder
         let counters = AuthorizationCounters()
