@@ -74,6 +74,40 @@ struct RenderTests {
     }
 
     @Test
+    func `prompt disclosure geometry ensures caption is inside viewport and copy control is not cut`() throws {
+        let tree: [CallerTree.Row] = [
+            .init(id: 1, name: "Terminal", role: "host", depth: 0, signature: .signed, isRequester: false),
+            .init(id: 2, name: "zsh", role: "login shell", depth: 1, signature: .unresolved, isRequester: false),
+            .init(id: 3, name: "opencode", role: "agent  ·  origin", depth: 2, signature: .unsigned, isRequester: false),
+            .init(id: 4, name: "exactmac", role: "requesting", depth: 3, signature: .unnotarized, isRequester: true),
+        ]
+        let treeView = NSHostingView(rootView: CallerTree(rows: tree).frame(width: 388))
+        treeView.layoutSubtreeIfNeeded()
+        let treeHeight = treeView.fittingSize.height
+        #expect(abs(treeHeight - 140) <= 1.0)
+
+        let targetView = NSHostingView(rootView: ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surface)
+            SystemField(caption: .target, value: "/Users/joeyc/dev/secret-project/notes.txt")
+        }.frame(width: 388, height: 35))
+        targetView.layoutSubtreeIfNeeded()
+        let targetHeight = targetView.fittingSize.height
+        #expect(abs(targetHeight - 35) <= 1.0)
+
+        let captionTop = Design.Space.three + treeHeight + Design.Space.component + targetHeight + Design.Space.component + Design.Space.two
+        let captionHeight: CGFloat = 14.5
+        let captionBottom = captionTop + captionHeight
+
+        let viewportHeight = Design.Layout.promptScrollHeight
+        #expect(viewportHeight == 236)
+        #expect(captionBottom < viewportHeight)
+
+        let copyTop = captionBottom + Design.Space.two
+        #expect(copyTop >= viewportHeight)
+    }
+
+    @Test
     func `the popover renders at 360pt and hugs its content`() throws {
         let model = ConsoleModel(channel: ConsoleChannelClient(socketPath: "/nonexistent", token: ""))
         try RenderHarness.png(

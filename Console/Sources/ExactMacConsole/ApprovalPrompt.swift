@@ -70,7 +70,7 @@ struct PayloadBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.leading) {
-            VStack(alignment: .leading, spacing: Design.Space.one) {
+            VStack(alignment: .leading, spacing: Design.Space.two) {
                 Text("EXACT REQUEST — NOTHING IS TRUNCATED")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Design.Ink.textSecondary)
@@ -97,7 +97,8 @@ struct PayloadBlock: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(Design.Space.three)
+        .padding(.vertical, Design.Space.two)
+        .padding(.horizontal, Design.Space.three)
         .background(
             RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
                 .fill(Design.Ink.surfaceSunken),
@@ -269,9 +270,13 @@ struct ApprovalPrompt: View {
                             .fill(Design.Ink.surface)
                         SystemField(caption: .target, value: target)
                     }
+                    .frame(height: 35)
                 }
                 PayloadBlock(text: payload, onCopy: onCopyPayload)
             }
+            .padding(.top, Design.Space.three)
+            .padding(.horizontal, Design.Space.four)
+            .padding(.bottom, Design.Space.three)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: Design.Layout.promptScrollHeight)
