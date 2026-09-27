@@ -228,6 +228,12 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
     private func consume(_ decision: ConsentDecision) -> Bool {
         guard let request = pendingByRequestID[decision.requestID] else { return false }
         guard decision.requestDigest == request.requestDigest else { return false }
+        // THE NONCE MUST BE THIS REQUEST'S. Checking only that it is unspent was a hole the
+        // concurrency suite found: with two requests pending, an answer carrying the first
+        // one's UNSPENT nonce was accepted for the second, so a fingerprint given for a shell
+        // authorised a clipboard read. Single-use is not the same as belonging-to-this-
+        // decision, and only the second one stops the deputy.
+        guard decision.nonce == request.nonce else { return false }
         guard consumedNonces.consume(decision.nonce) else { return false }
         answers.withLock { $0[decision.requestID] = decision }
         return true
@@ -235,13 +241,21 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
 
     /// The requests this endpoint has put to the console, so a decision can be checked
     /// against what was actually shown rather than against what the caller says was shown.
+    /// A request that is waiting on the operator.
+    ///
+    /// It holds the FRAME as well as the two bindings, and the frame is kept so a console
+    /// that authenticates after the request was raised still receives it: broadcasting only
+    /// at the moment the request is raised loses the request whenever the console's
+    /// connection has not been accepted yet, which at launch is most of the time, and a
+    /// request nobody ever sees times out into a denial the operator experiences as a broken
+    /// system.
     private struct Pending {
+        /// The digest of the request the operator was SHOWN, so a decision that borrowed
+        /// another request's consent is refused.
         var requestDigest: String
-        /// Kept so a console that authenticates AFTER the request was raised still receives
-        /// it. Broadcasting only at the moment the request is raised loses the request
-        /// whenever the console's connection has not been accepted yet, which at launch is
-        /// most of the time — and a request nobody ever sees times out into a denial the
-        /// operator experiences as a broken system.
+        /// Single-use, and bound to this request. A ceremony proves presence, and presence is
+        /// not consent for a particular request.
+        var nonce: String
         var frame: ConsoleFrame
     }
 
@@ -321,7 +335,9 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
         // console sees it cannot land before there is anything to check it against, and KEPT
         // so a console that authenticates later is caught up.
         pendingLock.withLock {
-            pendingByRequestID[request.id.rawValue] = Pending(requestDigest: digest, frame: frame)
+            pendingByRequestID[request.id.rawValue] = Pending(
+                requestDigest: digest, nonce: nonce, frame: frame,
+            )
         }
         defer { pendingLock.withLock { _ = pendingByRequestID.removeValue(forKey: request.id.rawValue) } }
         broadcast(frame)
@@ -354,6 +370,32 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
         for connection in lock.withLock({ connections }) {
             _ = try? FrameReader.write(frame, to: connection)
         }
+    }
+
+    // MARK: - Seams the concurrency suite drives
+
+    //
+    // The socket handshake is proven end to end in `ConsoleChannelTests`. What cannot be
+    // driven through a socket is the state that matters most here — which request is
+    // pending, and whether a decision belongs to it — because two requests racing a real
+    // socket is a test that passes for reasons that have nothing to do with the race. These
+    // two expose exactly that state and nothing else.
+
+    /// The consent a request is currently under, or nil when there is none.
+    func pendingConsent(for requestID: String) -> (nonce: String, digest: String)? {
+        let found: Pending? = pendingLock.withLock { pendingByRequestID[requestID] }
+        guard let pending = found else { return nil }
+        return (nonce: pending.nonce, digest: pending.requestDigest)
+    }
+
+    /// Posts a decision, and reports whether it was HONOURED.
+    ///
+    /// The return value is the point: "did this decision apply to the request it claims" is
+    /// the question a caller has, and a channel that swallows the answer cannot be tested
+    /// for the confused deputy it exists to prevent.
+    @discardableResult
+    func answer(_ decision: ConsentDecision) -> Bool {
+        consume(decision)
     }
 
     private static func tokenText(_ token: ConsoleChannelToken) -> String {
