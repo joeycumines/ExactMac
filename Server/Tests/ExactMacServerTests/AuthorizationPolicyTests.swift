@@ -1,5 +1,5 @@
-import Foundation
 @testable import ExactMacServer
+import Foundation
 import XCTest
 
 /// The decision engine's acceptance suite.
@@ -191,7 +191,7 @@ final class AuthorizationPolicyTests: XCTestCase {
                     grants: [grant(capability, scope: entry.scope)],
                 )
                 XCTAssertEqual(live.outcome, .allow, "\(capability) \(entry.name)")
-                if case .grant(let id) = live.basis {
+                if case let .grant(id) = live.basis {
                     XCTAssertEqual(id, "grant-1")
                 } else {
                     XCTFail("\(capability) \(entry.name) allowed on the wrong basis: \(live.basis)")
@@ -474,7 +474,7 @@ final class AuthorizationPolicyTests: XCTestCase {
         let unsigned = peerIdentity(signature: .unsigned, requirement: nil)
         let decision = decide(request(.clipboardRead), identity: unsigned)
         XCTAssertEqual(decision.basis, .promptRequired)
-        if case .required(let reason) = decision.biometric {
+        if case let .required(reason) = decision.biometric {
             XCTAssertTrue(reason.contains("unsigned"), "the reason must name the weakness")
         } else {
             XCTFail("an unsigned caller must escalate to a ceremony")
@@ -643,7 +643,7 @@ final class AuthorizationPolicyTests: XCTestCase {
             envelopes: [envelope(.clipboardRead)],
         )
         XCTAssertEqual(inside.outcome, .allow)
-        if case .envelope(let id) = inside.basis {
+        if case let .envelope(id) = inside.basis {
             XCTAssertEqual(id, "env-1")
         } else {
             XCTFail("allowed on the wrong basis: \(inside.basis)")
@@ -711,7 +711,7 @@ final class AuthorizationPolicyTests: XCTestCase {
         let everywhere = AuthorizationScope()
         for capability in Capability.allCases {
             for scope in [oneApp, everywhere] {
-                for duration in [GrantDuration.once, .monotonicSeconds(900), .monotonicSeconds(28_800)] {
+                for duration in [GrantDuration.once, .monotonicSeconds(900), .monotonicSeconds(28800)] {
                     for risk in RiskClass.allCases {
                         for signature in [SignatureState.signedAndValid, .unsigned] {
                             for high in [false, true] {
@@ -735,7 +735,8 @@ final class AuthorizationPolicyTests: XCTestCase {
                                 // screen, the clipboard and the interface, so no script runs
                                 // on a hurried keystroke.
                                 if capability == .scriptExecute, duration == .once,
-                                   risk == .routine, !high, signature == .signedAndValid {
+                                   risk == .routine, !high, signature == .signedAndValid
+                                {
                                     XCTAssertEqual(
                                         requirement,
                                         .required(reason: "running a shell reaches everything this Mac can do"),
@@ -743,7 +744,8 @@ final class AuthorizationPolicyTests: XCTestCase {
                                 }
                                 // The exemption itself, on a capability where it does apply.
                                 if capability == .clipboardRead, duration == .once, !scope.application.isGlobal,
-                                   risk == .routine, !high, signature == .signedAndValid {
+                                   risk == .routine, !high, signature == .signedAndValid
+                                {
                                     XCTAssertEqual(
                                         requirement,
                                         .notRequired,
@@ -778,7 +780,7 @@ final class AuthorizationPolicyTests: XCTestCase {
             // Asserted as a CASE, not as a string. A shell answers with its own reason
             // before the breadth one, and that ordering is deliberate: the ceremony
             // should name the most dangerous thing being authorised.
-            guard case .required(let reason) = AuthorizationPolicy.biometricRequirement(
+            guard case let .required(reason) = AuthorizationPolicy.biometricRequirement(
                 capability: capability,
                 scope: AuthorizationScope(),
                 duration: .monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds),
@@ -873,7 +875,8 @@ final class AuthorizationPolicyTests: XCTestCase {
                     }
                     if let defaultIndex = offered.firstIndex(where: \.isDefault),
                        let denyIndex = offered.firstIndex(where: { $0.kind == .deny }),
-                       let primaryIndex = offered.firstIndex(where: \.isPrimary) {
+                       let primaryIndex = offered.firstIndex(where: \.isPrimary)
+                    {
                         XCTAssertNotEqual(
                             abs(denyIndex - primaryIndex),
                             1,
@@ -937,8 +940,8 @@ final class AuthorizationPolicyTests: XCTestCase {
         let advanced = start.advanced(by: .seconds(3600))
         XCTAssertEqual(advanced.nanoseconds, UInt64.max, "overflow must saturate, not wrap into the past")
 
-        let base = MonotonicInstant(nanoseconds: 1_000)
-        XCTAssertEqual(base.remaining(until: MonotonicInstant(nanoseconds: 1_500)), .nanoseconds(500))
+        let base = MonotonicInstant(nanoseconds: 1000)
+        XCTAssertEqual(base.remaining(until: MonotonicInstant(nanoseconds: 1500)), .nanoseconds(500))
         XCTAssertNil(base.remaining(until: base), "a deadline in the past leaves nothing")
     }
 }
@@ -1341,11 +1344,11 @@ final class AuthorizationPolicyReviewRegressionTests: XCTestCase {
             UInt64.max,
         )
         XCTAssertEqual(
-            MonotonicInstant(nanoseconds: UInt64.max).advanced(by: .seconds(86_400)).nanoseconds,
+            MonotonicInstant(nanoseconds: UInt64.max).advanced(by: .seconds(86400)).nanoseconds,
             UInt64.max,
         )
         XCTAssertEqual(
-            MonotonicInstant(nanoseconds: 1_000).advanced(by: .seconds(2)).nanoseconds,
+            MonotonicInstant(nanoseconds: 1000).advanced(by: .seconds(2)).nanoseconds,
             2_000_001_000,
         )
     }
@@ -1463,7 +1466,6 @@ final class AuthorizationPolicyReviewRegressionTests: XCTestCase {
     }
 }
 
-
 /// The second review's findings, each pinned.
 final class AuthorizationPolicySecondReviewRegressionTests: XCTestCase {
     private let now = MonotonicInstant(nanoseconds: 1_000_000_000_000)
@@ -1514,14 +1516,14 @@ final class AuthorizationPolicySecondReviewRegressionTests: XCTestCase {
     /// grant that never expires — the fail-open direction, in the function issuance calls
     /// on values read back from a store.
     func testANegativeDurationIsZeroAndNeverProducesANeverExpiringGrant() {
-        XCTAssertEqual(MonotonicInstant(nanoseconds: 1_000).advanced(by: .seconds(-1)).nanoseconds, 1_000)
+        XCTAssertEqual(MonotonicInstant(nanoseconds: 1000).advanced(by: .seconds(-1)).nanoseconds, 1000)
         XCTAssertEqual(
-            MonotonicInstant(nanoseconds: 1_000).advanced(by: .seconds(-10_000_000_000)).nanoseconds,
-            1_000,
+            MonotonicInstant(nanoseconds: 1000).advanced(by: .seconds(-10_000_000_000)).nanoseconds,
+            1000,
         )
         XCTAssertEqual(
-            MonotonicInstant(nanoseconds: 1_000).advanced(by: .seconds(Int64.min)).nanoseconds,
-            1_000,
+            MonotonicInstant(nanoseconds: 1000).advanced(by: .seconds(Int64.min)).nanoseconds,
+            1000,
         )
     }
 
@@ -1668,7 +1670,9 @@ final class AuthorizationPolicySecondReviewRegressionTests: XCTestCase {
         )
         XCTAssertEqual(Set(options).count, options.count, "two options compared equal")
         var tally: [OfferedDecision: Int] = [:]
-        for option in options { tally[option, default: 0] += 1 }
+        for option in options {
+            tally[option, default: 0] += 1
+        }
         XCTAssertEqual(tally.count, options.count)
     }
 }

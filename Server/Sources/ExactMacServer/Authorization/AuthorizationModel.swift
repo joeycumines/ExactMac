@@ -71,7 +71,9 @@ enum GrantDuration: Sendable, Equatable, Hashable {
     case monotonicSeconds(Int)
 
     var isPersistent: Bool {
-        if case .monotonicSeconds = self { return true }
+        if case .monotonicSeconds = self {
+            return true
+        }
         return false
     }
 
@@ -81,7 +83,7 @@ enum GrantDuration: Sendable, Equatable, Hashable {
     var seconds: Int? {
         switch self {
         case .once: nil
-        case .monotonicSeconds(let value): value
+        case let .monotonicSeconds(value): value
         }
     }
 }
@@ -230,14 +232,18 @@ enum TargetApplication: Sendable, Equatable, Hashable {
     case opaqueApplication(resourceName: String, resolvedBundleIdentifier: String?)
 
     var isGlobal: Bool {
-        if case .any = self { return true }
+        if case .any = self {
+            return true
+        }
         return false
     }
 
     /// A grant on the opaque form is narrower than any other named target, and that is
     /// deliberate: it names one process instance, not an application.
     var isProcessInstance: Bool {
-        if case .opaqueApplication = self { return true }
+        if case .opaqueApplication = self {
+            return true
+        }
         return false
     }
 
@@ -250,24 +256,24 @@ enum TargetApplication: Sendable, Equatable, Hashable {
         { other in
             switch (self, other) {
             case (.any, _):
-                return true
-            case (.bundleIdentifier(let granted), .bundleIdentifier(let requested)):
-                return granted == requested
-            case (.processIdentifier(let granted), .processIdentifier(let requested)):
-                return granted == requested
+                true
+            case let (.bundleIdentifier(granted), .bundleIdentifier(requested)):
+                granted == requested
+            case let (.processIdentifier(granted), .processIdentifier(requested)):
+                granted == requested
             // A grant on the opaque form covers that exact process instance, and the same
             // instance resolved to a bundle — because the resource name is derived from the
             // pid and the start time, so an identical name IS the same process.
-            case (.opaqueApplication(let granted, _), .opaqueApplication(let requested, _)):
-                return granted == requested
-            case (.opaqueApplication(_, let resolved), .bundleIdentifier(let requested)):
-                return resolved == requested
+            case let (.opaqueApplication(granted, _), .opaqueApplication(requested, _)):
+                granted == requested
+            case let (.opaqueApplication(_, resolved), .bundleIdentifier(requested)):
+                resolved == requested
             // A grant naming a bundle never covers a request that named the opaque form,
             // even though the resolver may know they are the same application: the grant
             // was made for an application and this request named an instance, and the
             // conservative direction is to ask again rather than assume.
             case (.bundleIdentifier, .opaqueApplication):
-                return false
+                false
             // A grant naming one process INSTANCE does not cover a request that named
             // only a pid: the instance is identified by pid AND start time, and a bare pid
             // is exactly the identity a recycled process could present. Refusing here is
@@ -278,11 +284,11 @@ enum TargetApplication: Sendable, Equatable, Hashable {
                  (.opaqueApplication, .any),
                  (.processIdentifier, .opaqueApplication),
                  (.opaqueApplication, .processIdentifier):
-                return false
-            // Exhaustiveness is asserted rather than papered over with a `default`, because
-            // a `default` here would turn every pairing nobody thought about into "allowed".
-            // Adding a case to TargetApplication therefore fails the build until its
-            // coverage is decided.
+                false
+                // Exhaustiveness is asserted rather than papered over with a `default`, because
+                // a `default` here would turn every pairing nobody thought about into "allowed".
+                // Adding a case to TargetApplication therefore fails the build until its
+                // coverage is decided.
             }
         }
     }
@@ -299,11 +305,11 @@ enum TargetWindow: Sendable, Equatable, Hashable {
         { other in
             switch (self, other) {
             case (.any, _):
-                return true
-            case (.identifier(let granted), .identifier(let requested)):
-                return granted == requested
+                true
+            case let (.identifier(granted), .identifier(requested)):
+                granted == requested
             case (.identifier, .any):
-                return false
+                false
             }
         }
     }
@@ -351,7 +357,7 @@ struct AuthorizationScope: Sendable, Equatable, Hashable {
         }
         return switch (operationLimit, other.operationLimit) {
         case (nil, nil): true
-        case (let granted?, let requested?): granted >= requested
+        case let (granted?, requested?): granted >= requested
         // An unbounded grant covers a bounded request; a bounded grant never covers an
         // unbounded one, which is the whole reason a transaction carries a count.
         case (nil, .some): true
@@ -563,7 +569,9 @@ struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
     var holder: CodeBinding
     /// Never true, and asserted rather than assumed: an envelope that could become
     /// global-persistent would outlive the session it was granted for.
-    var isGlobalPersistent: Bool { grants.contains { $0.scope.isGlobalPersistent } }
+    var isGlobalPersistent: Bool {
+        grants.contains { $0.scope.isGlobalPersistent }
+    }
 
     func authorizes(
         _ request: AuthorizationRequest,
@@ -670,7 +678,9 @@ enum RiskClass: String, Sendable, Equatable, Comparable, CaseIterable {
         }
     }
 
-    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rank < rhs.rank }
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.rank < rhs.rank
+    }
 }
 
 /// The product the risk model is built from. Each factor is normalised to 0...1 and the
@@ -728,14 +738,16 @@ enum BiometricRequirement: Sendable, Hashable {
     case required(reason: String)
 
     var isRequired: Bool {
-        if case .required = self { return true }
+        if case .required = self {
+            return true
+        }
         return false
     }
 
     /// Nil unless one is required, so a caller cannot read a reason off a requirement
     /// that does not have one.
     var reason: String? {
-        guard case .required(let reason) = self else { return nil }
+        guard case let .required(reason) = self else { return nil }
         return reason
     }
 }
@@ -815,10 +827,12 @@ struct AuthorizationDecision: Sendable, Equatable {
     /// When a standing grant or envelope matched, the instant it stops authorising.
     var expiresAt: MonotonicInstant?
 
-    var isAllowed: Bool { outcome == .allow }
+    var isAllowed: Bool {
+        outcome == .allow
+    }
 
     var denialReason: DenialReason? {
-        guard case .denied(let reason) = basis else { return nil }
+        guard case let .denied(reason) = basis else { return nil }
         return reason
     }
 }

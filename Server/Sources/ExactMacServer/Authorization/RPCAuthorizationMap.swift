@@ -305,7 +305,9 @@ protocol ApplicationTargetResolving: Sendable {
 /// unknown application" would be a lie, while the opaque scope is narrow and cannot be
 /// covered by anything the operator did not aim at it.
 struct UnresolvableApplicationTarget: ApplicationTargetResolving {
-    func applicationTarget(forResourceName _: String) async -> ResolvedApplicationTarget? { nil }
+    func applicationTarget(forResourceName _: String) async -> ResolvedApplicationTarget? {
+        nil
+    }
 }
 
 /// The request's own contents, read once, from the WIRE FORMAT and the SAME descriptor
@@ -327,20 +329,6 @@ struct RequestFacts: Sendable {
         case nested(RequestFacts)
         case list([Value])
         case opaque(String)
-
-        /// Appends in place rather than rebuilding the array, so a long repeated field costs
-        /// linear rather than quadratic time. The accumulator used to rebuild the whole
-        /// list per element, which made a 96KB request take nineteen seconds on the path
-        /// that runs before any consent decision.
-        fileprivate mutating func listAppend(_ value: Value) {
-            switch self {
-            case .list(var existing):
-                existing.append(value)
-                self = .list(existing)
-            case .text, .unsigned, .double, .boolean, .nested, .opaque:
-                self = .list([self, value])
-            }
-        }
     }
 
     private var fields: [String: Value] = [:]
@@ -356,18 +344,34 @@ struct RequestFacts: Sendable {
             policy: policy,
             into: &accumulator,
         )
-        fields = accumulator.fields
+        fields = accumulator.finish()
     }
 
     /// Repeated fields need somewhere to accumulate, which a dictionary subscript cannot do.
+    ///
+    /// THE LISTS ARE HELD OUTSIDE `fields`, and that is the whole trick. An array inside an
+    /// enum cannot be appended to in place: `case .list(var existing)` copies the buffer,
+    /// the append copy-on-writes it back, and every element pays for the whole list. That
+    /// made a 96KB request — well under gRPC's 4 MiB default — take nineteen seconds,
+    /// quadratically, on the path that runs before any consent decision. The stdlib's
+    /// `dictionary[key, default: []].append` is amortised O(1) because the array there has
+    /// exactly one owner.
     private struct Accumulator {
         var fields: [String: Value] = [:]
+        var lists: [String: [Value]] = [:]
 
-        /// In place, and the difference is not cosmetic. Rebuilding the array on every
-        /// append made a 96KB request — well under gRPC's 4 MiB default — take nineteen
-        /// seconds, quadratically, on the path that runs before any consent decision.
         mutating func append(_ name: String, _ value: Value) {
-            fields[name, default: .list([])].listAppend(value)
+            lists[name, default: []].append(value)
+        }
+
+        /// A protobuf field is either repeated or singular, never both, so folding the lists
+        /// back in cannot collide with a singular value.
+        func finish() -> [String: Value] {
+            var merged = fields
+            for (name, values) in lists {
+                merged[name] = .list(values)
+            }
+            return merged
         }
     }
 
@@ -407,17 +411,34 @@ struct RequestFacts: Sendable {
                 guard let raw = readFixed32(bytes, &index) else { return }
                 accumulator.fields[name] = .opaque("\(raw) (32-bit)")
             case 2:
-                guard let length = readVarint(bytes, &index) else { return }
-                let end = index + Int(length)
+                guard let raw = readVarint(bytes, &index) else { return }
+                let end = index + Int(raw)
                 guard end <= bytes.endIndex else { return }
-                let payload = Data(bytes[index..<end])
+                let payload = Data(bytes[index ..< end])
                 index = end
-                if let nestedName = descriptor?.messageName,
-                   policy.message(nestedName) != nil
+                // A PACKED repeated scalar arrives as ONE length-delimited field holding
+                // every value, not as one field per value, and protobuf3 does this by
+                // default for repeated numeric and enum fields. A reader with only the
+                // unpacked path saw the whole list as a single blob of bytes, so the
+                // modifiers on a command-click decoded to the single value 0 and the
+                // prompt read "with unspecified" — which looks like a malformed request
+                // rather than the command-click it is.
+                if descriptor?.isRepeated == true, descriptor?.isPackable == true {
+                    for value in unpack(payload, wireKind: descriptor?.wireKind ?? .varint) {
+                        accumulator.append(name, value)
+                    }
+                } else if let nestedName = descriptor?.messageName,
+                          policy.message(nestedName) != nil
                 {
                     var nested = Accumulator()
                     read(bytes: payload, messageName: nestedName, policy: policy, into: &nested)
-                    let value = Value.nested(RequestFacts(fields: nested.fields))
+                    // `finish()`, not `.fields`: a nested message's OWN repeated fields
+                    // live in the separate lists dictionary, so reading `.fields` here
+                    // silently dropped every repeated field below the top level. That is
+                    // an observation's roles, a macro's actions, a click's modifiers and a
+                    // compound selector's children — each one a thing the operator is
+                    // approving on the strength of.
+                    let value = Value.nested(RequestFacts(fields: nested.finish()))
                     if descriptor?.isRepeated == true {
                         accumulator.append(name, value)
                     } else {
@@ -440,9 +461,39 @@ struct RequestFacts: Sendable {
         self.fields = fields
     }
 
-
     /// `working_directory` becomes `workingDirectory`, matching the generated Swift, so the
     /// accessors read the way the API reads. A name that is already camelCase is unchanged.
+    /// The values inside one packed repeated field. A truncated tail stops the walk rather
+    /// than being read as a value, because a varint cut short by the end of the buffer is
+    /// not a number the caller sent.
+    private static func unpack(
+        _ payload: Data,
+        wireKind: PublicRequestDescriptorPolicy.WireKind,
+    ) -> [Value] {
+        var index = payload.startIndex
+        var values: [Value] = []
+        switch wireKind {
+        case .varint:
+            while index < payload.endIndex {
+                guard let raw = readVarint(payload, &index) else { break }
+                values.append(.unsigned(raw))
+            }
+        case .fixed64:
+            while index < payload.endIndex {
+                guard let raw = readFixed64(payload, &index) else { break }
+                values.append(.double(Double(bitPattern: raw)))
+            }
+        case .fixed32:
+            while index < payload.endIndex {
+                guard let raw = readFixed32(payload, &index) else { break }
+                values.append(.opaque("\(raw) (32-bit)"))
+            }
+        case .lengthDelimited, .group:
+            values.append(.opaque("\(payload.count) bytes"))
+        }
+        return values
+    }
+
     private static func camelCased(_ name: String) -> String {
         var result = ""
         var upperNext = false
@@ -464,9 +515,13 @@ struct RequestFacts: Sendable {
             let byte = bytes[index]
             index = bytes.index(after: index)
             value |= UInt64(byte & 0x7F) << shift
-            if byte & 0x80 == 0 { return value }
+            if byte & 0x80 == 0 {
+                return value
+            }
             shift += 7
-            if shift > 63 { return nil }
+            if shift > 63 {
+                return nil
+            }
         }
         return nil
     }
@@ -475,7 +530,9 @@ struct RequestFacts: Sendable {
         let end = index + 8
         guard end <= bytes.endIndex else { return nil }
         var value: UInt64 = 0
-        for offset in 0..<8 { value |= UInt64(bytes[index + offset]) << (8 * UInt64(offset)) }
+        for offset in 0 ..< 8 {
+            value |= UInt64(bytes[index + offset]) << (8 * UInt64(offset))
+        }
         index = end
         return value
     }
@@ -484,48 +541,56 @@ struct RequestFacts: Sendable {
         let end = index + 4
         guard end <= bytes.endIndex else { return nil }
         var value: UInt64 = 0
-        for offset in 0..<4 { value |= UInt64(bytes[index + offset]) << (8 * UInt64(offset)) }
+        for offset in 0 ..< 4 {
+            value |= UInt64(bytes[index + offset]) << (8 * UInt64(offset))
+        }
         index = end
         return value
     }
 
     // MARK: Accessors
 
-    func has(_ key: String) -> Bool { fields[key] != nil }
+    func has(_ key: String) -> Bool {
+        fields[key] != nil
+    }
 
     func text(_ key: String) -> String? {
         switch fields[key] {
-        case .text(let value): value
-        case .unsigned(let value): String(value)
-        case .boolean(let value): value ? "true" : "false"
-        case .double(let value): String(value)
+        case let .text(value): value
+        case let .unsigned(value): String(value)
+        case let .boolean(value): value ? "true" : "false"
+        case let .double(value): String(value)
         case nil, .nested, .list, .opaque: nil
         }
     }
 
     func boolean(_ key: String) -> Bool? {
         switch fields[key] {
-        case .boolean(let value): value
-        case .unsigned(let value): value != 0
+        case let .boolean(value): value
+        case let .unsigned(value): value != 0
         case nil, .text, .double, .nested, .list, .opaque: nil
         }
     }
 
     func number(_ key: String) -> Double? {
         switch fields[key] {
-        case .unsigned(let value): Double(value)
-        case .double(let value): value
-        case .boolean(let value): value ? 1 : 0
+        case let .unsigned(value): Double(value)
+        case let .double(value): value
+        case let .boolean(value): value ? 1 : 0
         case nil, .text, .nested, .list, .opaque: nil
         }
     }
 
     func texts(_ key: String) -> [String] {
         switch fields[key] {
-        case .list(let values): values.compactMap { value in
-            if case .text(let text) = value { return text } else { return nil }
-        }
-        case .text(let value): [value]
+        case let .list(values): values.compactMap { value in
+                if case let .text(text) = value {
+                    text
+                } else {
+                    nil
+                }
+            }
+        case let .text(value): [value]
         case nil, .unsigned, .double, .boolean, .nested, .opaque: []
         }
     }
@@ -538,47 +603,115 @@ struct RequestFacts: Sendable {
     /// silently dropped the payloads an operator most needs to see.
     func entries(_ key: String) -> [String] {
         switch fields[key] {
-        case .list(let values):
-            return values.compactMap { value in
-                guard case .nested(let entry) = value else { return nil }
+        case let .list(values):
+            values.compactMap { value in
+                guard case let .nested(entry) = value else { return nil }
                 let name = entry.text("key") ?? ""
                 switch entry.text("value") {
-                case .some(let text) where !text.isEmpty: return "\(name): \(text)"
+                case let .some(text) where !text.isEmpty: return "\(name): \(text)"
                 case .some: return name
                 case nil: return entry.describe()
                 }
             }
-        case .nested(let entry):
-            return [entry.describe()]
-        case .text(let value):
-            return [value]
+        case let .nested(entry):
+            [entry.describe()]
+        case let .text(value):
+            [value]
         case nil, .unsigned, .double, .boolean, .opaque:
-            return []
+            []
         }
     }
 
     /// A one-line description of a nested message, for the cases where a map's value is
     /// itself a message.
-    func describe() -> String {
+    ///
+    /// IT RECURSES, because a macro action is a oneof of NESTED messages and nothing about
+    /// it is scalar: `MacroAction.methodCall` is a `MethodCall` whose own `method` is the
+    /// only thing that action will do. A reader that stopped at the first level described
+    /// every such action as the empty string, so the prompt showed "action 1:" followed by
+    /// nothing while the operator was asked to approve input synthesis on the strength of it.
+    ///
+    /// The depth is bounded because this walk runs on the consent path over a message type
+    /// the CALLER chose, and a self-referential message would otherwise be unbounded work
+    /// chosen by whoever is asking for authorization.
+    func describe(depth: Int = 0) -> String {
+        guard depth < Self.maximumDescriptionDepth else { return "…" }
         var parts: [String] = []
         for key in fields.keys.sorted() {
-            guard let value = text(key), !value.isEmpty else { continue }
-            // The keys are already normalised on the way in.
-            parts.append("\(key): \(value)")
+            switch fields[key] {
+            case let .nested(entry):
+                let rendered = entry.describe(depth: depth + 1)
+                if !rendered.isEmpty {
+                    parts.append("\(key): \(rendered)")
+                }
+            case let .list(values):
+                let rendered = values.compactMap { value -> String? in
+                    guard case let .nested(entry) = value else { return nil }
+                    let nested = entry.describe(depth: depth + 1)
+                    return nested.isEmpty ? nil : nested
+                }
+                if !rendered.isEmpty {
+                    parts.append("\(key): [\(rendered.joined(separator: ", "))]")
+                }
+            default:
+                guard let value = text(key), !value.isEmpty else { continue }
+                // The keys are already normalised on the way in.
+                parts.append("\(key): \(value)")
+            }
         }
         return parts.joined(separator: " ")
     }
 
+    private static let maximumDescriptionDepth = 6
+
     func nested(_ key: String) -> RequestFacts? {
-        guard case .nested(let value) = fields[key] else { return nil }
+        guard case let .nested(value) = fields[key] else { return nil }
         return value
+    }
+
+    /// A repeated message field. A `oneof` with a nested arm and a `repeated` field of
+    /// messages look identical on the wire, and a compound selector's children arrive as a
+    /// list — which is why reading them as a single nested message found nothing.
+    func nestedList(_ key: String) -> [RequestFacts] {
+        switch fields[key] {
+        case let .list(values): values.compactMap { value in
+                guard case let .nested(entry) = value else { return nil }
+                return entry
+            }
+        case let .nested(entry): [entry]
+        case nil, .text, .unsigned, .double, .boolean, .opaque: []
+        }
+    }
+
+    /// A repeated enum field, which arrives as a list of varints rather than strings.
+    ///
+    /// `texts()` returns nothing for one, so a command-click described itself as
+    /// "click at x 420, y 118 … , with " — the operator could not tell a bare click from a
+    /// command-click, which are different requests with different consequences.
+    func numbers(_ key: String) -> [Double] {
+        switch fields[key] {
+        case let .list(values):
+            values.map { (value: Value) -> Double in
+                switch value {
+                case let .unsigned(raw): Double(raw)
+                case let .double(raw): raw
+                case let .boolean(raw): raw ? 1 : 0
+                case .text, .nested, .list, .opaque: 0
+                }
+            }
+        case let .unsigned(raw): [Double(raw)]
+        case let .double(raw): [raw]
+        case nil, .text, .boolean, .nested, .opaque: []
+        }
     }
 
     /// The first non-empty string among `keys`, which is how a resource reference is found
     /// without knowing which of the three conventional fields this request uses.
     func firstText(among keys: [String]) -> (key: String, value: String)? {
         for key in keys {
-            if let value = text(key), !value.isEmpty { return (key, value) }
+            if let value = text(key), !value.isEmpty {
+                return (key, value)
+            }
         }
         return nil
     }
@@ -611,7 +744,12 @@ enum ResourceReference: Sendable, Equatable {
             window = parts[3].isEmpty ? nil : parts[3]
         }
         if parts[1].count == 64, parts[1].allSatisfy({ $0.isHexDigit && !$0.isUppercase }) {
-            return .opaqueApplication(resourceName: name, window: window)
+            // The APPLICATION name, not the reference that named it. `applications/<sha256>`
+            // is what the resolver looks up and what a grant on one process instance is
+            // written against; carrying the trailing `/windows/77` made the lookup miss
+            // (the catalog is keyed by application), so every resolved request silently
+            // degraded to the unresolvable form even when the server knew the answer.
+            return .opaqueApplication(resourceName: "\(parts[0])/\(parts[1])", window: window)
         }
         guard let pid = Int32(parts[1]), pid > 0 else { return nil }
         return .legacyProcess(processIdentifier: pid, window: window)
@@ -630,10 +768,10 @@ enum AuthorizationRequestDeriver {
         requestID: AuthorizationRequestID,
         agentReason: String?,
         origin: RequestOrigin,
-        /// The transaction's declared operation count, which the API does not carry in the
-        /// request: it lives in the server's own transaction state, so the interceptor
-        /// supplies it. Without it a transaction is authorized UNBOUNDED, which is the
-        /// consent-bypass the blueprint names.
+        // The transaction's declared operation count, which the API does not carry in the
+        // request: it lives in the server's own transaction state, so the interceptor
+        // supplies it. Without it a transaction is authorized UNBOUNDED, which is the
+        // consent-bypass the blueprint names.
         operationLimit: Int? = nil,
         resolver: any ApplicationTargetResolving = UnresolvableApplicationTarget(),
     ) async -> AuthorizationRequest? {
@@ -665,7 +803,11 @@ enum AuthorizationRequestDeriver {
         resolver: any ApplicationTargetResolving,
         operationLimit: Int? = nil,
     ) async -> AuthorizationScope {
-        guard source != .global else { return AuthorizationScope() }
+        // The operation limit is NOT dropped on the global path, which is where
+        // `BeginTransaction` lives. A transaction is authorized as a scope with a declared
+        // operation count, and returning a scope with no count here authorized an UNBOUNDED
+        // transaction while the summary beside it told the operator "up to 12 operations".
+        guard source != .global else { return AuthorizationScope(operationLimit: operationLimit) }
         let keys: [String] = switch source {
         case .resourceName: ["name"]
         case .parentField: ["parent"]
@@ -683,27 +825,26 @@ enum AuthorizationRequestDeriver {
             return AuthorizationScope(operationLimit: operationLimit)
         }
         let window: TargetWindow = switch parsed {
-        case .opaqueApplication(_, let window), .legacyProcess(_, let window):
+        case let .opaqueApplication(_, window), let .legacyProcess(_, window):
             window.map(TargetWindow.identifier) ?? .any
         case nil:
             .any
         }
-        let application: TargetApplication
-        switch parsed {
-        case .opaqueApplication(let resourceName, _):
+        let application: TargetApplication = switch parsed {
+        case let .opaqueApplication(resourceName, _):
             // Resolved, the operator's application-scoped grant can cover this request;
             // unresolved, the scope names the PROCESS INSTANCE, which is narrow and cannot
             // be covered by anything aimed at a different application.
             if let resolved = await resolver.applicationTarget(forResourceName: resourceName) {
-                application = resolved.bundleIdentifier.map { TargetApplication.bundleIdentifier($0) }
+                resolved.bundleIdentifier.map { TargetApplication.bundleIdentifier($0) }
                     ?? .processIdentifier(resolved.processIdentifier)
             } else {
-                application = .opaqueApplication(resourceName: resourceName, resolvedBundleIdentifier: nil)
+                .opaqueApplication(resourceName: resourceName, resolvedBundleIdentifier: nil)
             }
-        case .legacyProcess(let processIdentifier, _):
-            application = .processIdentifier(processIdentifier)
+        case let .legacyProcess(processIdentifier, _):
+            .processIdentifier(processIdentifier)
         case nil:
-            application = .any
+            .any
         }
 
         return AuthorizationScope(
@@ -718,7 +859,7 @@ enum AuthorizationRequestDeriver {
     static func summary(
         for kind: RPCAuthorizationMap.ArgumentSummary,
         facts: RequestFacts,
-        method: String,
+        method _: String,
         operationLimit: Int? = nil,
     ) -> String {
         if facts.text("__absent__") != nil {
@@ -736,13 +877,19 @@ enum AuthorizationRequestDeriver {
             return describeReference(facts)
         case .shellInvocation:
             var parts: [String] = []
-            if let command = facts.text("command") { parts.append(command) }
+            if let command = facts.text("command") {
+                parts.append(command)
+            }
             let arguments = facts.texts("args")
-            if !arguments.isEmpty { parts.append(arguments.joined(separator: " ")) }
+            if !arguments.isEmpty {
+                parts.append(arguments.joined(separator: " "))
+            }
             if let directory = facts.text("workingDirectory"), !directory.isEmpty {
                 parts.append("(in \(directory))")
             }
-            if let shell = facts.text("shell"), !shell.isEmpty { parts.append("via \(shell)") }
+            if let shell = facts.text("shell"), !shell.isEmpty {
+                parts.append("via \(shell)")
+            }
             // The environment is carried LITERALLY. `LD_PRELOAD=/tmp/evil.dylib` and
             // `AWS_SECRET_ACCESS_KEY=...` are the payloads an operator most needs to see
             // before approving a shell, and this used to drop the map entirely because a
@@ -776,9 +923,15 @@ enum AuthorizationRequestDeriver {
             return describeInput(facts)
         case .elementTarget:
             var parts: [String] = []
-            if let parent = facts.text("parent") { parts.append("in \(parent)") }
-            if let name = facts.text("name") { parts.append(name) }
-            if let element = facts.text("elementId"), !element.isEmpty { parts.append(element) }
+            if let parent = facts.text("parent") {
+                parts.append("in \(parent)")
+            }
+            if let name = facts.text("name") {
+                parts.append(name)
+            }
+            if let element = facts.text("elementId"), !element.isEmpty {
+                parts.append(element)
+            }
             // The SELECTOR, which is how most of these methods name their target: the
             // request either carries an element id or a selector, and reading only the
             // first meant the operator saw "in applications/4211" and nothing about WHAT
@@ -789,7 +942,9 @@ enum AuthorizationRequestDeriver {
             if let action = facts.text("action"), !action.isEmpty {
                 parts.append("performing \(action)")
             }
-            if let value = facts.text("value"), !value.isEmpty { parts.append("value \(value)") }
+            if let value = facts.text("value"), !value.isEmpty {
+                parts.append("value \(value)")
+            }
             // A right-click and a double-click on the same element are different requests,
             // so the click type is named rather than left in the request.
             if let click = enumName(facts.number("clickType"), elementClickTypeNames) {
@@ -798,24 +953,39 @@ enum AuthorizationRequestDeriver {
             return parts.isEmpty ? "an element with no described target" : parts.joined(separator: " ")
         case .captureRegion:
             var parts: [String] = []
-            if let display = facts.text("display"), !display.isEmpty { parts.append(display) }
-            if let window = facts.text("window"), !window.isEmpty { parts.append(window) }
-            if let parent = facts.text("parent"), !parent.isEmpty { parts.append(parent) }
+            if let display = facts.text("display"), !display.isEmpty {
+                parts.append(display)
+            }
+            if let window = facts.text("window"), !window.isEmpty {
+                parts.append(window)
+            }
+            if let parent = facts.text("parent"), !parent.isEmpty {
+                parts.append(parent)
+            }
             if let region = facts.nested("region"),
                let x = region.number("x"), let y = region.number("y"),
                let width = region.number("width"), let height = region.number("height")
             {
                 parts.append(
-                    "region x \(Int(x)) y \(Int(y)) \(Int(width))x\(Int(height)) in Global Display Coordinates",
+                    "region x \(formatted(x)) y \(formatted(y)) "
+                        + "\(formatted(width))x\(formatted(height)) in Global Display Coordinates",
                 )
             }
-            if let format = enumName(facts.number("format"), imageFormatNames) { parts.append(format) }
+            if let format = enumName(facts.number("format"), imageFormatNames) {
+                parts.append(format)
+            }
             if let padding = facts.number("padding"), padding > 0 {
                 parts.append("with \(formatted(padding))pt padding")
             }
-            if facts.boolean("shadowEnabled") == true { parts.append("including window shadows") }
-            if facts.boolean("ocrEnabled") == true { parts.append("with OCR") }
-            if let quality = facts.number("quality") { parts.append("quality \(formatted(quality))") }
+            if facts.boolean("shadowEnabled") == true {
+                parts.append("including window shadows")
+            }
+            if facts.boolean("ocrEnabled") == true {
+                parts.append("with OCR")
+            }
+            if let quality = facts.number("quality") {
+                parts.append("quality \(formatted(quality))")
+            }
             return parts.isEmpty ? "the whole screen" : parts.joined(separator: ", ")
         case .macroDefinition:
             // The proto spells it `actions`, not `steps`, has no `step_count` at all, and
@@ -825,19 +995,25 @@ enum AuthorizationRequestDeriver {
             // zero steps — while the operator was asked to approve inputSynthesize and
             // transactionManage on the strength of it.
             var parts: [String] = []
-            if let name = facts.text("name"), !name.isEmpty { parts.append(name) }
-            if let reference = facts.text("macro"), !reference.isEmpty { parts.append(reference) }
+            if let name = facts.text("name"), !name.isEmpty {
+                parts.append(name)
+            }
+            if let reference = facts.text("macro"), !reference.isEmpty {
+                parts.append(reference)
+            }
             if let macro = facts.nested("macro") {
-                let declared = macro.texts("actions").count
-                parts.append("\(declared) recorded actions")
-                for (index, action) in macro.entries("actions").enumerated() {
-                    parts.append("action \(index + 1): \(action)")
+                let actions = macro.nestedList("actions")
+                parts.append("\(actions.count) recorded actions")
+                for (index, action) in actions.enumerated() {
+                    parts.append("action \(index + 1): \(action.describe())")
                 }
             }
             // The parameter values are the macro's arguments, and they are what it will
             // actually type or open.
             let parameters = facts.entries("parameterValues")
-            if !parameters.isEmpty { parts.append("(\(parameters.joined(separator: ", ")))") }
+            if !parameters.isEmpty {
+                parts.append("(\(parameters.joined(separator: ", ")))")
+            }
             return parts.isEmpty ? "a macro with nothing recorded" : parts.joined(separator: ", ")
         case .transactionScope:
             // The count is NOT in the request — no request message in the API has such a
@@ -852,11 +1028,17 @@ enum AuthorizationRequestDeriver {
             return "up to \(declared) operations, batched under \(target)"
         case .fileDialog:
             var parts: [String] = []
-            if let application = facts.text("application") { parts.append(application) }
-            if let title = facts.text("title"), !title.isEmpty { parts.append("title \(title)") }
+            if let application = facts.text("application") {
+                parts.append(application)
+            }
+            if let title = facts.text("title"), !title.isEmpty {
+                parts.append("title \(title)")
+            }
             // The destination. A save dialog aimed at ~/.ssh/authorized_keys and one aimed
             // at the Desktop are different requests, and the invariant names paths first.
-            if let path = facts.text("filePath"), !path.isEmpty { parts.append("writing \(path)") }
+            if let path = facts.text("filePath"), !path.isEmpty {
+                parts.append("writing \(path)")
+            }
             if let directory = facts.text("defaultDirectory"), !directory.isEmpty {
                 parts.append("starting in \(directory)")
             }
@@ -866,56 +1048,105 @@ enum AuthorizationRequestDeriver {
             return parts.isEmpty ? "a file dialog" : parts.joined(separator: ", ")
         case .observationFilter:
             var parts: [String] = []
-            if let name = facts.text("name") { parts.append(name) }
-            if let parent = facts.text("parent") { parts.append(parent) }
+            if let name = facts.text("name") {
+                parts.append(name)
+            }
+            if let parent = facts.text("parent") {
+                parts.append(parent)
+            }
             // CreateObservation nests the observation, and the filter inside it. Reading a
             // top-level `filter` found nothing, so the roles an observation would watch
             // and whether it is focus-only were both invisible.
             let filter = facts.nested("filter")
                 ?? facts.nested("observation")?.nested("filter")
             if let filter {
-                for role in filter.texts("roles") where !role.isEmpty { parts.append("watching \(role)") }
-                for attribute in filter.texts("attributes") { parts.append("attribute \(attribute)") }
-                if filter.boolean("focusOnly") == true { parts.append("focused elements only") }
-                if let kind = filter.text("kind"), !kind.isEmpty { parts.append(kind) }
+                for role in filter.texts("roles") where !role.isEmpty {
+                    parts.append("watching \(role)")
+                }
+                for attribute in filter.texts("attributes") {
+                    parts.append("attribute \(attribute)")
+                }
+                if filter.boolean("focusOnly") == true {
+                    parts.append("focused elements only")
+                }
+                if let kind = filter.text("kind"), !kind.isEmpty {
+                    parts.append(kind)
+                }
             }
             if let observation = facts.nested("observation") {
-                if let name = observation.text("name"), !name.isEmpty { parts.append(name) }
+                if let name = observation.text("name"), !name.isEmpty {
+                    parts.append(name)
+                }
             }
             return parts.isEmpty ? "every accessibility change" : parts.joined(separator: ", ")
         }
     }
 
-
     /// An `ElementSelector` in words. This is how most element methods name their target,
     /// and reading only the parent left the operator looking at "in applications/4211"
     /// with no idea what was about to be clicked.
+    ///
+    /// `ElementSelector` is a ONE-OF over `role`, `text`, `text_substring`, `text_regex`,
+    /// `position`, `attributes` and `compound`, so a caller naming two criteria uses
+    /// `compound` — and the six criteria that were read here and do not exist on the message
+    /// (`subrole`, `title`, `value`, `description`, `identifier`, `focusOnly`) returned
+    /// nothing at all, which is how a compound selector summarized to a bare parent and
+    /// three of the seven arms described nothing.
     private static func describeSelector(_ selector: RequestFacts?) -> String? {
         guard let selector else { return nil }
         var parts: [String] = []
-        if let role = selector.text("role"), !role.isEmpty { parts.append("role \(role)") }
-        if let subrole = selector.text("subrole"), !subrole.isEmpty { parts.append("subrole \(subrole)") }
-        if let title = selector.text("title"), !title.isEmpty { parts.append("titled \"\(title)\"") }
-        if let value = selector.text("value"), !value.isEmpty { parts.append("with value \"\(value)\"") }
-        if let text = selector.text("text"), !text.isEmpty { parts.append("with text \"\(text)\"") }
-        if let description = selector.text("description"), !description.isEmpty {
-            parts.append("described \"\(description)\"")
+        if let role = selector.text("role"), !role.isEmpty {
+            parts.append("role \(role)")
         }
-        if let identifier = selector.text("identifier"), !identifier.isEmpty {
-            parts.append("with identifier \(identifier)")
+        if let text = selector.text("text"), !text.isEmpty {
+            parts.append("with text \"\(text)\"")
         }
-        for attribute in selector.texts("attributes") {
-            parts.append("attribute \(attribute)")
+        if let substring = selector.text("textSubstring"), !substring.isEmpty {
+            parts.append("with text containing \"\(substring)\"")
         }
-        if selector.boolean("focusOnly") == true { parts.append("focused elements only") }
+        if let regex = selector.text("textRegex"), !regex.isEmpty {
+            parts.append("with text matching /\(regex)/")
+        }
+        if let position = selector.nested("position") {
+            let x = position.number("x").map(formatted) ?? "unset"
+            let y = position.number("y").map(formatted) ?? "unset"
+            let tolerance = position.number("tolerance").map(formatted) ?? "0"
+            parts.append("at x \(x), y \(y) in Global Display Coordinates within \(tolerance)pt")
+        }
+        let attributes = selector.entries("attributes")
+        if !attributes.isEmpty {
+            parts.append("with attributes \(attributes.joined(separator: ", "))")
+        }
+        if let compound = selector.nested("compound") {
+            // A compound selector is the ONLY way to name two criteria, so it is the common
+            // case rather than an exotic one, and it nests arbitrarily.
+            let raw = compound.number("logicalOperator")
+            let rendered = compound.nestedList("selectors").compactMap(describeSelector)
+            if !rendered.isEmpty {
+                parts.append(
+                    "matching \(compoundOperator(raw)) of: \(rendered.joined(separator: " and "))",
+                )
+            }
+        }
         return parts.isEmpty ? nil : "selecting " + parts.joined(separator: ", ")
     }
 
-    /// The one arm of `InputAction` that is set, described in words.
-    ///
-    /// `InputAction` is a ONE-OF with eight arms, so the earlier reading of `action.x` and
-    /// `action.text` was reading fields that do not exist on it. Coordinates live under
-    /// `mouse_click` and `mouse_move`, text under `text_input`, keys under `key_press`.
+    /// `OPERATOR_AND` / `OPERATOR_OR` / `OPERATOR_NOT` in words, because the raw number
+    /// tells the operator nothing and the generated name is shouty.
+    private static func compoundOperator(_ raw: Double?) -> String {
+        switch raw {
+        case .some(1): "all"
+        case .some(2): "any"
+        case .some(3): "none"
+        default: "an unstated combination"
+        }
+    }
+
+    // The one arm of `InputAction` that is set, described in words.
+    //
+    // `InputAction` is a ONE-OF with eight arms, so the earlier reading of `action.x` and
+    // `action.text` was reading fields that do not exist on it. Coordinates live under
+    // `mouse_click` and `mouse_move`, text under `text_input`, keys under `key_press`.
 
     /// A clipboard write carries a `ClipboardContent` whose payload is a oneof, so the
     /// summary names WHICH kind it is and shows the text literally when there is text. The
@@ -934,14 +1165,18 @@ enum AuthorizationRequestDeriver {
                 return "rich text (\(arm))"
             }
         }
-        if content.has("image") { return "an image" }
+        if content.has("image") {
+            return "an image"
+        }
         if content.has("files") {
             let files = content.entries("files")
             return files.isEmpty
                 ? "a set of file paths"
                 : "the file paths \(files.joined(separator: ", "))"
         }
-        if let url = content.text("url"), !url.isEmpty { return "the URL \(url)" }
+        if let url = content.text("url"), !url.isEmpty {
+            return "the URL \(url)"
+        }
         return "an empty clipboard write"
     }
 
@@ -954,23 +1189,45 @@ enum AuthorizationRequestDeriver {
         guard let action = facts.nested("action") ?? facts.nested("input")?.nested("action") else {
             return parts.isEmpty ? "an input with no action" : parts.joined(separator: ", ")
         }
-        // Coordinates are named as Global Display Coordinates (top-left origin), because
-        // that is the space these numbers live in and an operator reading "x 420" cannot
-        // place it on their desk without being told.
+        /// Coordinates are named as Global Display Coordinates (top-left origin), because
+        /// that is the space these numbers live in and an operator reading "x 420" cannot
+        /// place it on their desk without being told.
+        ///
+        /// A MISSING COMPONENT IS ZERO, not an absent point. `exactmac.type.Point` declares
+        /// `double x = 1` with implicit presence, so a caller clicking at x 1e30, y 0 puts
+        /// nothing on the wire for y — and requiring both meant the whole position was
+        /// dropped, which is how a click summarized to "an input with no described action"
+        /// and read as a malformed request rather than a click at the top edge.
         func position(_ point: RequestFacts?, _ label: String) {
-            guard let point, let x = point.number("x"), let y = point.number("y") else { return }
-            parts.append(
-                "\(label) x \(formatted(x)), y \(formatted(y)) in Global Display Coordinates",
-            )
+            guard let point, point.number("x") != nil || point.number("y") != nil else { return }
+            let x = point.number("x").map(formatted) ?? "0"
+            let y = point.number("y").map(formatted) ?? "0"
+            parts.append("\(label) x \(x), y \(y) in Global Display Coordinates")
+        }
+
+        /// A repeated modifier, named. Read through the GENERATED enum so a new value
+        /// cannot be missing from the prompt. The generated case for the zero value spells
+        /// its name `unspecified`, which is a real value here rather than a parse failure.
+        func modifiers(_ facts: RequestFacts) {
+            let held = facts.numbers("modifiers")
+                .compactMap { enumName($0, modifierNames) }
+                .filter { $0 != "unspecified" }
+            if !held.isEmpty {
+                parts.append("with \(held.joined(separator: "+").lowercased())")
+            }
         }
         if let click = action.nested("mouseClick") {
             position(click.nested("position"), "click at")
             if let type = enumName(click.number("clickType"), clickTypeNames) {
                 parts.append(type)
             }
-            if let count = click.number("clickCount"), count > 1 { parts.append("x\(Int(count))") }
+            if let count = click.number("clickCount"), count > 1 {
+                parts.append("x\(formatted(count))")
+            }
         }
-        if let move = action.nested("mouseMove") { position(move.nested("position"), "move to") }
+        if let move = action.nested("mouseMove") {
+            position(move.nested("position"), "move to")
+        }
         if let drag = action.nested("mouseDrag") {
             position(drag.nested("startPosition"), "drag from")
             position(drag.nested("endPosition"), "to")
@@ -998,10 +1255,7 @@ enum AuthorizationRequestDeriver {
             } else {
                 parts.append("press \(keys.joined(separator: " + "))")
             }
-            let pressModifiers = press.texts("modifiers")
-            if !pressModifiers.isEmpty {
-                parts.append("with \(pressModifiers.joined(separator: "+").lowercased())")
-            }
+            modifiers(press)
         }
         if let hover = action.nested("hoverAction") {
             // The seventh arm. It was unhandled, so a hover summarized to "an input with no
@@ -1010,13 +1264,12 @@ enum AuthorizationRequestDeriver {
             position(hover.nested("position"), "hover at")
         }
         if let click = action.nested("mouseClick") {
-            let clickModifiers = click.texts("modifiers")
-            if !clickModifiers.isEmpty {
-                parts.append("with \(clickModifiers.joined(separator: "+").lowercased())")
-            }
+            modifiers(click)
         }
         if let drag = action.nested("mouseDrag") {
-            if let button = enumName(drag.number("button"), clickTypeNames) { parts.append(button) }
+            if let button = enumName(drag.number("button"), clickTypeNames) {
+                parts.append(button)
+            }
             let waypoints = drag.entries("waypoints")
             if !waypoints.isEmpty {
                 parts.append("through \(waypoints.count) waypoints")
@@ -1054,7 +1307,7 @@ enum AuthorizationRequestDeriver {
     /// summary, and a hand-written table of enum values is exactly the kind of table that
     /// rots.
     private static func names<Enum: SwiftProtobuf.Enum & CaseIterable & RawRepresentable>(
-        _ type: Enum.Type,
+        _: Enum.Type,
     ) -> [UInt64: String] where Enum.RawValue == Int {
         var table: [UInt64: String] = [:]
         for value in Enum.allCases {
@@ -1071,10 +1324,15 @@ enum AuthorizationRequestDeriver {
     private static let elementClickTypeNames = names(Exactmac_V1_ClickElementRequest.ClickType.self)
     private static let imageFormatNames = names(Exactmac_V1_ImageFormat.self)
     private static let scriptTypeNames = names(Exactmac_V1_ScriptType.self)
+    /// `MouseClick.modifiers` and `KeyPress.modifiers` are the same enum, so a held
+    /// command reads the same however it was held.
+    private static let modifierNames = names(Exactmac_V1_KeyPress.Modifier.self)
 
     private static func describeReference(_ facts: RequestFacts) -> String {
         for key in ["name", "parent", "application", "display", "window", "session", "macro"] {
-            if let value = facts.text(key), !value.isEmpty { return value }
+            if let value = facts.text(key), !value.isEmpty {
+                return value
+            }
         }
         return "no resource named"
     }

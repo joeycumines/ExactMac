@@ -1,6 +1,6 @@
 import ExactMacProto
-import Foundation
 @testable import ExactMacServer
+import Foundation
 import SwiftProtobuf
 import XCTest
 
@@ -534,7 +534,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
     /// A long repeated field must cost linear time, not quadratic: a 96KB request is well
     /// under gRPC's 4 MiB default and this runs on every request.
     func testALongRepeatedFieldIsParsedInLinearTime() async throws {
-        let arguments = (0..<20_000).map { "arg\($0)" }
+        let arguments = (0 ..< 20000).map { "arg\($0)" }
         let start = Date()
         let request = try await derived(
             "ExecuteShellCommand",
@@ -555,14 +555,26 @@ final class AuthorizationMapDriftTests: XCTestCase {
     /// The SELECTOR is how most element methods name their target, and reading only the
     /// parent left the operator looking at "in applications/…" with no idea what was about
     /// to be clicked.
+    ///
+    /// `ElementSelector` is a ONE-OF, so this fixture uses the `compound` arm rather than
+    /// setting `role` and then `textSubstring`: the second assignment clears the first, so
+    /// a selector built the obvious way puts only ONE criterion on the wire and an
+    /// assertion about the other is asserting about bytes that cannot exist. A compound is
+    /// how a caller actually names two criteria, and it is also the arm that nests, so this
+    /// is the stronger case rather than a weaker one.
     func testAnElementSummaryCarriesItsSelector() async throws {
         let request = try await derived(
             "FindElements",
             Exactmac_V1_FindElementsRequest.with {
                 $0.parent = "\(Self.textEdit)/elements"
                 $0.selector = Exactmac_Type_ElementSelector.with {
-                    $0.role = "AXSecureTextField"
-                    $0.textSubstring = "password"
+                    $0.compound = Exactmac_Type_CompoundSelector.with {
+                        $0.logicalOperator = .or
+                        $0.selectors = [
+                            Exactmac_Type_ElementSelector.with { $0.role = "AXSecureTextField" },
+                            Exactmac_Type_ElementSelector.with { $0.textSubstring = "password" },
+                        ]
+                    }
                 }
             },
             policy: Self.loadPolicy(),
@@ -700,7 +712,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
                     $0.actions = [
                         Exactmac_V1_MacroAction.with {
                             $0.methodCall = Exactmac_V1_MethodCall.with {
-                                $0.name = "SetElementValue"
+                                $0.method = "SetElementValue"
                             }
                         },
                     ]
@@ -766,7 +778,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
                 continue
             }
             let names = Set(policy.message(input)?.fields.values.map(\.name) ?? [])
-            let field: String = switch entry.scopeSource {
+            let field = switch entry.scopeSource {
             case .resourceName: "name"
             case .parentField: "parent"
             case .applicationField: "application"
@@ -779,7 +791,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
         XCTAssertEqual(wrong, [], "scope sources naming a field the request does not have")
     }
 
-    func testApplicationScopedReadsAreNotGlobal() throws {
+    func testApplicationScopedReadsAreNotGlobal() {
         let mustNarrow = [
             "ListWindows", "ListElements", "ListObservations", "ListInputs",
             "TraverseAccessibility", "GetWindow", "ClickElement", "CreateInput",
@@ -802,7 +814,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
 
     /// The methods that need no consent are exactly three, and the membership is asserted
     /// so a future reclassification has to be deliberate.
-    func testNoConsentFreeCapabilityIsMappedToSomethingThatReachesTheDesktop() throws {
+    func testNoConsentFreeCapabilityIsMappedToSomethingThatReachesTheDesktop() {
         let consentFree = Set(
             RPCAuthorizationMap.table.filter { !$0.value.capability.requiresConsent }.keys,
         )
