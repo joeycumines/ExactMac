@@ -1694,7 +1694,6 @@ message ListMacrosResponse {
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-
 // A request to read one grant.
 message GetGrantRequest {
   // Resource name, in the format "grants/{grant}".

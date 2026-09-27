@@ -55,6 +55,27 @@ ExactMac is a macOS accessibility automation framework consisting of:
 - AVOID and REPLACE ad-hoc `fputs` or unannotated `print` with `Logger` and `OSLogPrivacy` for any message emitted from Swift server components or SDK helpers in `Server/Sources/ExactMacServer` and `Sources/ExactMac`.
 - `fputs` is forbidden in these server/SDK directories for diagnostic logs — it bypasses OS unified logging and cannot mark privacy. Use `Logger` with explicit `privacy` annotations for every interpolated value. For user-facing CLI help text (static strings) `print` is allowed only outside `Server/Sources/ExactMacServer` and `Sources/ExactMac`.
 
+### Standing Invariants (Server & Console)
+
+These properties must hold across all changes to `Server/Sources/ExactMacServer` and `Console/Sources/ExactMacConsole`. Each is a single falsifiable statement backed by automated tests:
+
+1. No RPC reaches a handler without a decision recorded in the decision audit log.
+2. Every consent failure mode denies: an unreachable console, a timeout, a cancelled, failed, or locked-out biometric, a corrupt or unreadable grant store, an unauthenticated channel peer, and an absent or locked operator. There is no path on which any of these produces allow.
+3. A biometric success authorizes exactly one decision, is bound to a per-decision nonce, and never downgrades silently to a weaker check.
+4. Capability and scope are re-derived by the server from the request bytes at enforcement time. The console's classification is for display only and is never an authorization input.
+5. A pre-authorization envelope can never confer a global-persistent grant, and expires as a unit on a monotonic clock.
+6. A grant binds to a caller's code identity — executable path, bundle identifier, and signing designated requirement — and never to a pid.
+7. App and process verification exists only in the Unix-socket variant, and is graded evidence surfaced to the operator, never an authentication gate. An unsigned caller is escalated, not silently rejected.
+8. A TCP-configured server never enters the consent or verification path. It denies every consent-requiring capability and reports that posture through the health service.
+9. A transaction is authorized as a scope with a declared operation count, and exceeding that count is denied rather than extended. A single approval is never amortised across an unbounded batch.
+10. Every growing server-side resource is bounded per resolved caller identity, and the quota survives reconnection.
+11. The decision audit log is hash-chained, and the console verifies the chain before displaying it rather than presenting unverified bytes as authoritative.
+12. The console persists no decision state, so there is nothing on disk for a same-uid process to forge.
+13. A prompt never truncates a command, script, path, or argument. It wraps and scrolls.
+14. Text the caller supplied is visually distinguished in the prompt from text the system derived.
+15. Payloads, command text, and target paths never appear in a notification.
+16. No UI change lands before the corresponding design exists in `docs/design.fig`.
+
 ### Core Directives
 
 Constraints in this section describe *requirements*, not current status.

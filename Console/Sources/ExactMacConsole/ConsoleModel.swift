@@ -21,27 +21,92 @@ final class ConsoleModel {
     var pendingPrompt: PendingRequest?
 
     private let channel: ConsoleChannelClient
+    private let serviceController: any ServiceControlling
+    private let onServiceDisabled: (@Sendable () async throws -> Void)?
     private let logger = Logger(
         subsystem: "io.github.joeycumines.exactmac.console",
         category: "console",
     )
 
-    init(channel: ConsoleChannelClient = .live()) {
+    init(
+        channel: ConsoleChannelClient = .live(),
+        serviceController: any ServiceControlling = LaunchdServiceController(),
+        onServiceDisabled: (@Sendable () async throws -> Void)? = nil,
+    ) {
         self.channel = channel
+        self.serviceController = serviceController
+        self.onServiceDisabled = onServiceDisabled
     }
 
     // MARK: The service control
 
-    /// Toggling drives launchd, the platform's own mechanism, and never a bespoke flag file.
-    ///
-    /// A disabled service denies EVERYTHING, and re-enabling it must not inherit grants the
-    /// operator had not intended to keep — which is why the popover says so beneath the
-    /// switch and why the store refuses to restore a revoked binding.
-    func toggleService() {
-        let enabling = !isServiceEnabled
+    /// Changes the service enablement state in launchd, revoking standing grants on disable.
+    func setServiceEnabled(_ enabling: Bool) async throws {
+        let previousEnabled = isServiceEnabled
+        let previousState = serviceState
+        let previousFailClosed = failClosed
+        let previousGrants = activeGrantCount
+
         isServiceEnabled = enabling
         serviceState = enabling ? .running : .stopped
+        if !enabling {
+            activeGrantCount = 0
+            failClosed = (
+                "The service is off",
+                "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
+            )
+        } else {
+            failClosed = nil
+        }
         logger.info("Service \(enabling ? "enabled" : "disabled", privacy: .public) by the operator")
+        do {
+            try await serviceController.setServiceEnabled(enabling)
+            if !enabling, let onServiceDisabled {
+                try await onServiceDisabled()
+            }
+        } catch {
+            isServiceEnabled = previousEnabled
+            serviceState = previousState
+            failClosed = previousFailClosed
+            activeGrantCount = previousGrants
+            throw error
+        }
+    }
+
+    /// Toggling drives launchd, the platform's own mechanism, and never a bespoke flag file.
+    func toggleService() {
+        let enabling = !isServiceEnabled
+        Task { [weak self] in
+            do {
+                try await self?.setServiceEnabled(enabling)
+            } catch {
+                self?.handleServiceControlError(error, desiredState: enabling)
+            }
+        }
+    }
+
+    /// Synchronizes the in-memory state with launchd's persistent configuration.
+    func refreshServiceState() async {
+        do {
+            let enabled = try await serviceController.isServiceEnabled()
+            isServiceEnabled = enabled
+            if !enabled {
+                serviceState = .stopped
+                failClosed = (
+                    "The service is off",
+                    "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
+                )
+            } else if serviceState == .stopped {
+                serviceState = .running
+                failClosed = nil
+            }
+        } catch {
+            logger.warning("Failed to refresh service state: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func handleServiceControlError(_ error: any Error, desiredState: Bool) {
+        logger.error("Failed to set service state to \(desiredState, privacy: .public): \(error.localizedDescription, privacy: .public)")
     }
 
     func quit() {
