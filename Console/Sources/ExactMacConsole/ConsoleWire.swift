@@ -364,3 +364,46 @@ extension ConsoleReply {
         return Int(payload.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
+
+// MARK: - The console's own copy of the decision vocabulary
+
+/// Why a ceremony could not be performed.
+///
+/// EVERY CASE DENIES. They are distinct because the operator needs to know which happened:
+/// "no biometric is enrolled" is fixable in System Settings, "the console is not frontmost"
+/// is a bug in the console, and one opaque "biometric failed" makes them the same.
+///
+/// THE SERVER HAS ITS OWN COPY, for the same reason it has its own copy of the wire format:
+/// the authorization types are not a library the console can import today. They are two
+/// enumerations of the same taxonomy rather than one shared type, and the two have to agree
+/// — the reason strings the server shows and the ones the console shows are the same words.
+enum BiometricFailure: Error, Equatable, Sendable {
+    case noEnrolment
+    case hardwareUnavailable
+    case lockedOut
+    case cancelled
+    case passcodeNotSet
+    case consoleNotFrontmost
+    case unavailable(reason: String)
+
+    /// The product's own words, which are what the prompt shows beside the sensor.
+    var explanation: String {
+        switch self {
+        case .noEnrolment: "no biometric is enrolled on this Mac"
+        case .hardwareUnavailable: "this Mac cannot perform a biometric check"
+        case .lockedOut: "the biometric sensor is locked out after too many attempts"
+        case .cancelled: "the check was cancelled"
+        case .passcodeNotSet: "no passcode is set, so presence cannot be proven"
+        case .consoleNotFrontmost: "the console was not frontmost, so the check could not be shown"
+        case let .unavailable(reason): reason
+        }
+    }
+}
+
+/// The request a decision belongs to, on the console side.
+struct AuthorizationRequestID: Hashable, Sendable, CustomStringConvertible {
+    let rawValue: String
+    var description: String {
+        rawValue
+    }
+}
