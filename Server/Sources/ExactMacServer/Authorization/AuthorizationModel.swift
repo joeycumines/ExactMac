@@ -609,7 +609,10 @@ struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
 /// The operator's standing choice. Three, and deliberately no permissive one: a posture
 /// that widens what may happen without asking is the vulnerability this product exists
 /// to remove, so the third is locked down rather than open.
-enum Posture: Sendable, Equatable, Hashable {
+///
+/// PUBLIC because it is a configuration surface: it arrives from the environment, and an
+/// operator choosing a posture is making a security decision rather than a tuning one.
+public enum Posture: Sendable, Equatable, Hashable, CaseIterable {
     /// Grants and envelopes are ignored; every request that needs consent prompts.
     case strict
     /// Friction scales with blast radius. The default.

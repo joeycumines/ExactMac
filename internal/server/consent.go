@@ -46,7 +46,7 @@ const MaxAgentReasonLength = 500
 // the capability from the request bytes — and a property that appears only sometimes is a
 // property an agent learns to omit.
 var agentReasonSchema = map[string]any{
-	"type": "string",
+	"type":      "string",
 	"maxLength": MaxAgentReasonLength,
 	"description": "WHY you are making this request, in your own words, for the person who " +
 		"will read it. This is REQUIRED on anything that needs consent and it is shown " +

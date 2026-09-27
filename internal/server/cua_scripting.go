@@ -70,9 +70,22 @@ func (s *MCPServer) handleRun(call *ToolCall) (*ToolResult, error) {
 
 // runShell executes a shell command.
 func (s *MCPServer) runShell(ctx context.Context, command string, timeout int32, effectiveTimeout time.Duration) (*ToolResult, error) {
-	// Security check: shell commands must be explicitly enabled
+	// This is a FEATURE SWITCH, not the security control, and the distinction is the whole
+	// point of the line.
+	//
+	// The control is on the server: whatever this layer allows is still authorized per
+	// request by a person, and setting the switch on buys an agent the ability to ASK, not
+	// the ability to run. The previous message said "set MCP_SHELL_COMMANDS_ENABLED=true to
+	// enable", which reads as though turning it on were the thing standing between the agent
+	// and a shell — so an operator reading it would believe the flag was the control and
+	// that the consent system was a formality. It is the other way round.
 	if !s.cfg.ShellCommandsEnabled {
-		return errorResult("Shell command execution is disabled. Set MCP_SHELL_COMMANDS_ENABLED=true to enable."), nil
+		return errorResult(
+			"Shell command execution is not offered by this configuration " +
+				"(MCP_SHELL_COMMANDS_ENABLED). This switch decides whether the feature is " +
+				"available at all; permission to run a command is decided separately, per " +
+				"request, by the person operating the machine.",
+		), nil
 	}
 
 	resp, err := s.client.ExecuteShellCommand(ctx, &pb.ExecuteShellCommandRequest{

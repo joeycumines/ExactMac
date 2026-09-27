@@ -57,6 +57,12 @@ type mockExactMacClient struct {
 	captureCursorPositionFunc func(ctx context.Context, req *pb.CaptureCursorPositionRequest) (*pb.CaptureCursorPositionResponse, error)
 	// ExecuteShellCommand mock
 	executeShellCommandFunc func(ctx context.Context, req *pb.ExecuteShellCommandRequest) (*pb.ExecuteShellCommandResponse, error)
+	// GetClipboard and GetClipboardHistory default to panicking, because most suites are
+	// display tests that must not reach them. A suite that DOES drive the clipboard sets
+	// these rather than replacing the mock, so a 68-method interface has one
+	// implementation rather than two that can fall behind each other.
+	getClipboardFunc        func(ctx context.Context, req *pb.GetClipboardRequest) (*pb.Clipboard, error)
+	getClipboardHistoryFunc func(ctx context.Context, req *pb.GetClipboardHistoryRequest) (*pb.ClipboardHistory, error)
 	// FindElements mock
 	findElementsFunc func(ctx context.Context, req *pb.FindElementsRequest) (*pb.FindElementsResponse, error)
 	// FocusWindow mock
@@ -342,6 +348,9 @@ func (m *mockExactMacClient) CaptureRegionScreenshot(ctx context.Context, in *pb
 }
 
 func (m *mockExactMacClient) GetClipboard(ctx context.Context, in *pb.GetClipboardRequest, opts ...grpc.CallOption) (*pb.Clipboard, error) {
+	if m.getClipboardFunc != nil {
+		return m.getClipboardFunc(ctx, in)
+	}
 	panic("GetClipboard not expected to be called in display tests")
 }
 
