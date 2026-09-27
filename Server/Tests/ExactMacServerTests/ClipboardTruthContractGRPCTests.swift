@@ -565,7 +565,7 @@ private func withClipboardTruthClient(
     let server = GRPCServer(
         transport: productionServerTransport(transport.server),
         services: [composition.exactMacService],
-        interceptors: productionServerInterceptors(),
+        interceptors: handlerContractTestInterceptors(),
     )
     let client = GRPCClient(transport: transport.client)
 

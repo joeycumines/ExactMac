@@ -618,7 +618,7 @@ private func withInputIntentClient(
     let server = GRPCServer(
         transport: productionServerTransport(inProcess.server),
         services: [composition.exactMacService],
-        interceptors: productionServerInterceptors(),
+        interceptors: handlerContractTestInterceptors(),
     )
     let client = GRPCClient(transport: inProcess.client)
     try await withThrowingDiscardingTaskGroup { group in

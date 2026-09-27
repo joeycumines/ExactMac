@@ -484,7 +484,7 @@ private func withPublicStreamClient(
     let server = GRPCServer(
         transport: productionServerTransport(serverTransport),
         services: [composition.exactMacService, composition.operationsProvider],
-        interceptors: productionServerInterceptors(),
+        interceptors: handlerContractTestInterceptors(),
     )
     let serverTask = Task { try await server.serve() }
     do {

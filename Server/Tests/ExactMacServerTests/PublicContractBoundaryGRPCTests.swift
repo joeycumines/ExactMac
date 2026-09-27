@@ -1195,7 +1195,7 @@ private func withPublicContractClient(
     let server = GRPCServer(
         transport: productionServerTransport(inProcess.server),
         services: [composition.exactMacService, composition.operationsProvider],
-        interceptors: productionServerInterceptors(),
+        interceptors: handlerContractTestInterceptors(),
     )
     let client = GRPCClient(transport: inProcess.client)
     try await withThrowingDiscardingTaskGroup { group in

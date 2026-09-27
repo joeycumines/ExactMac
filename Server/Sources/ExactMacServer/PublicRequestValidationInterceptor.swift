@@ -60,7 +60,31 @@ struct PublicRequestValidationInterceptor: ServerInterceptor {
     }
 }
 
-func productionServerInterceptors() -> [any ServerInterceptor] {
+/// The server's interceptor chain, in the order the security properties require.
+///
+/// ORDER IS A PROPERTY, not a convention. `PublicRequestValidationInterceptor` runs FIRST
+/// so a malformed request cannot probe the authorization layer, and authorization runs
+/// BEFORE every handler so none can allocate state, start work or touch the physical
+/// desktop without a decision.
+///
+/// `authorization` is REQUIRED and has no default, so no server can be built without
+/// stating which enforcement it has. A test that exercises handlers rather than
+/// enforcement passes `handlerContractTestInterceptors()` below, which is the single
+/// visible way to build a server that does not authorize — a decision at the call site
+/// rather than a default nobody chose.
+func productionServerInterceptors(
+    _ authorization: any ServerInterceptor,
+) -> [any ServerInterceptor] {
+    [PublicRequestValidationInterceptor(), authorization]
+}
+
+/// The ONLY way to build a server that does not authorize.
+///
+/// Named for what it is: these suites test handler behaviour, and a server that denied
+/// every call would test nothing. Anything security-relevant must use
+/// `productionServerInterceptors` instead, and `AuthorizationInterceptorTests` is where
+/// the enforcement itself is proven.
+func handlerContractTestInterceptors() -> [any ServerInterceptor] {
     [PublicRequestValidationInterceptor()]
 }
 

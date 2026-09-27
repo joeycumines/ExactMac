@@ -33,7 +33,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -250,7 +250,7 @@ struct PublicRequestValidationGRPCTests {
         let recorder = BoundaryAdmissionRecorder()
         let composition = ExactMacServiceComposition(system: system)
         let inProcess = InProcessTransport()
-        let interceptors: [any ServerInterceptor] = productionServerInterceptors() + [
+        let interceptors: [any ServerInterceptor] = handlerContractTestInterceptors() + [
             BoundaryAdmissionInterceptor(recorder: recorder),
         ]
         let server = GRPCServer(
@@ -479,7 +479,7 @@ struct PublicRequestValidationGRPCTests {
         let recorder = BoundaryAdmissionRecorder()
         let composition = ExactMacServiceComposition(system: MockSystemOperations())
         let inProcess = InProcessTransport()
-        let interceptors: [any ServerInterceptor] = productionServerInterceptors() + [
+        let interceptors: [any ServerInterceptor] = handlerContractTestInterceptors() + [
             BoundaryAdmissionInterceptor(recorder: recorder),
         ]
         let server = GRPCServer(
@@ -535,7 +535,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
         let suffix = UUID().uuidString
@@ -745,7 +745,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -822,7 +822,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -981,7 +981,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -1146,7 +1146,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -1214,7 +1214,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 
@@ -1269,7 +1269,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
         let invalidActions: [(label: String, action: Exactmac_V1_InputAction)] = [
@@ -1360,7 +1360,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
         let macroID = "invalid-positive-\(UUID().uuidString)"
@@ -1422,7 +1422,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
         let macroID = "invalid-update-\(UUID().uuidString)"
@@ -1511,7 +1511,7 @@ struct PublicRequestValidationGRPCTests {
         let server = GRPCServer(
             transport: productionServerTransport(inProcess.server),
             services: [composition.exactMacService, composition.operationsProvider],
-            interceptors: productionServerInterceptors(),
+            interceptors: handlerContractTestInterceptors(),
         )
         let client = GRPCClient(transport: inProcess.client)
 

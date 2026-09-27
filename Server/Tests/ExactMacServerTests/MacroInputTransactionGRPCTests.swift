@@ -1624,7 +1624,7 @@ private func withMacroTransactionClient(
     let server = GRPCServer(
         transport: productionServerTransport(transport.server),
         services: [composition.exactMacService, composition.operationsProvider],
-        interceptors: productionServerInterceptors(),
+        interceptors: handlerContractTestInterceptors(),
     )
     let client = GRPCClient(transport: transport.client)
     try await withThrowingDiscardingTaskGroup { group in

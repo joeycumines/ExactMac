@@ -268,10 +268,27 @@ func main() async throws {
 
     preboundSocketDescriptor = nil
 
+    // Authorization is built HERE, from the listener, because whether the server can say
+    // who is calling is a property of the LISTENER and not of a flag. A Unix-socket
+    // listener has an owning user and therefore a resolver; a TCP listener has no
+    // principal, so the reduced posture is constructed rather than inferred from a nil.
+    let authorizationPolicy = try PublicRequestDescriptorPolicy.load()
+    let authorizationRuntime: AuthorizationRuntime
+    if preboundSocketDescriptor != nil || config.unixSocketPath != nil {
+        logger.info("Authorization: unix-socket variant; the owning user is the principal.")
+        authorizationRuntime = .unixSocket(descriptorPolicy: authorizationPolicy)
+    } else {
+        logger.warning(
+            "Authorization: reduced unauthenticated posture. This listener has no owning user, so every consent-requiring capability is denied and no approval can be given. Do not expose this port beyond the loopback interface.",
+        )
+
+        authorizationRuntime = .tcp(descriptorPolicy: authorizationPolicy)
+    }
+
     let server = GRPCServer(
         transport: productionServerTransport(grpcTransport),
         services: services,
-        interceptors: productionServerInterceptors(),
+        interceptors: productionServerInterceptors(AuthorizationInterceptor(runtime: authorizationRuntime)),
     )
 
     // ═══════════════════════════════════════════════════════════════════════════
