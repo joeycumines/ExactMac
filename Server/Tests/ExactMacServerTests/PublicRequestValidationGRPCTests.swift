@@ -971,6 +971,7 @@ struct PublicRequestValidationGRPCTests {
                 "\(Exactmac_V1_ExactMac.Method.ExecuteAppleScript.descriptor.fullyQualifiedMethod):timeout",
                 "\(Exactmac_V1_ExactMac.Method.ExecuteJavaScript.descriptor.fullyQualifiedMethod):timeout",
                 "\(Exactmac_V1_ExactMac.Method.ExecuteShellCommand.descriptor.fullyQualifiedMethod):timeout",
+                "\(Exactmac_V1_ExactMac.Method.PreauthorizeEnvelope.descriptor.fullyQualifiedMethod):requested_lifetime",
                 "\(Google_Longrunning_Operations.Method.WaitOperation.descriptor.fullyQualifiedMethod):timeout",
             ]),
         )
@@ -1070,6 +1071,7 @@ struct PublicRequestValidationGRPCTests {
                 "\(Exactmac_V1_ExactMac.Method.ListSessions.descriptor.fullyQualifiedMethod):page_size",
                 "\(Exactmac_V1_ExactMac.Method.ListMacros.descriptor.fullyQualifiedMethod):page_size",
                 "\(Exactmac_V1_ExactMac.Method.ListDisplays.descriptor.fullyQualifiedMethod):page_size",
+                "\(Exactmac_V1_ExactMac.Method.ListGrants.descriptor.fullyQualifiedMethod):page_size",
                 "\(Google_Longrunning_Operations.Method.ListOperations.descriptor.fullyQualifiedMethod):page_size",
             ]),
         )
@@ -1108,6 +1110,7 @@ struct PublicRequestValidationGRPCTests {
                 "\(Exactmac_V1_ExactMac.Method.ListSessions.descriptor.fullyQualifiedMethod):skip",
                 "\(Exactmac_V1_ExactMac.Method.ListMacros.descriptor.fullyQualifiedMethod):skip",
                 "\(Exactmac_V1_ExactMac.Method.ListDisplays.descriptor.fullyQualifiedMethod):skip",
+                "\(Exactmac_V1_ExactMac.Method.ListGrants.descriptor.fullyQualifiedMethod):skip",
             ]),
         )
 

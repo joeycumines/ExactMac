@@ -368,6 +368,9 @@ func (m *mockExactMacClient) ClearClipboard(ctx context.Context, in *pb.ClearCli
 }
 
 func (m *mockExactMacClient) GetClipboardHistory(ctx context.Context, in *pb.GetClipboardHistoryRequest, opts ...grpc.CallOption) (*pb.ClipboardHistory, error) {
+	if m.getClipboardHistoryFunc != nil {
+		return m.getClipboardHistoryFunc(ctx, in)
+	}
 	panic("GetClipboardHistory not expected to be called in display tests")
 }
 

@@ -40,7 +40,7 @@ enum RenderHarness {
         _ view: some View,
         size: CGSize,
         appearance: AppearanceMode = .light,
-        to path: String
+        to path: String,
     ) throws {
         // The directory has to exist before the write, and a missing one is the difference
         // between "the surface does not render" and "there was nowhere to put it".
@@ -143,7 +143,7 @@ struct RenderTests {
     }
 
     @Test
-    func `prompt disclosure geometry ensures caption is inside viewport and copy control is not cut`() throws {
+    func `prompt disclosure geometry ensures caption is inside viewport and copy control is not cut`() {
         let tree: [CallerTree.Row] = [
             .init(id: 1, name: "Terminal", role: "host", depth: 0, signature: .signed, isRequester: false),
             .init(id: 2, name: "zsh", role: "login shell", depth: 1, signature: .unresolved, isRequester: false),
