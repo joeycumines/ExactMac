@@ -9,21 +9,56 @@ import Testing
 /// Screen Recording permission is not available here, so the only honest way to see what
 /// the app draws is to have the app draw it itself.
 enum RenderHarness {
+    enum AppearanceMode: Sendable, CaseIterable {
+        case light
+        case dark
+
+        var nsAppearance: NSAppearance {
+            switch self {
+            case .light: NSAppearance(named: .aqua)!
+            case .dark: NSAppearance(named: .darkAqua)!
+            }
+        }
+
+        var colorScheme: ColorScheme {
+            switch self {
+            case .light: .light
+            case .dark: .dark
+            }
+        }
+
+        var suffix: String {
+            switch self {
+            case .light: "-light.png"
+            case .dark: "-dark.png"
+            }
+        }
+    }
+
     @MainActor
-    static func png(_ view: some View, size: CGSize, to path: String) throws {
+    static func png(
+        _ view: some View,
+        size: CGSize,
+        appearance: AppearanceMode = .light,
+        to path: String
+    ) throws {
         // The directory has to exist before the write, and a missing one is the difference
         // between "the surface does not render" and "there was nowhere to put it".
         try FileManager.default.createDirectory(
             at: URL(fileURLWithPath: path).deletingLastPathComponent(),
             withIntermediateDirectories: true,
         )
-        let hosting = NSHostingView(rootView: view)
+        let app = appearance.nsAppearance
+        let hosting = NSHostingView(rootView: view.preferredColorScheme(appearance.colorScheme))
+        hosting.appearance = app
         hosting.frame = CGRect(origin: .zero, size: size)
         guard let representation = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
         else {
             throw CocoaError(.fileNoSuchFile)
         }
-        hosting.cacheDisplay(in: hosting.bounds, to: representation)
+        app.performAsCurrentDrawingAppearance {
+            hosting.cacheDisplay(in: hosting.bounds, to: representation)
+        }
         guard let data = representation.representation(using: .png, properties: [:]) else {
             throw CocoaError(.fileWriteUnknown)
         }
@@ -66,11 +101,45 @@ struct RenderTests {
             showOptionsLabel: "Show",
             selectedOption: .once,
         )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                prompt,
+                size: CGSize(width: Design.Layout.promptWidth, height: 710),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "prompt\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the render harness leaves the process appearance unchanged`() throws {
+        let initialAppearance = NSAppearance.currentDrawing()
+        let prompt = ApprovalPrompt(
+            state: .pending,
+            title: "Read the clipboard in TextEdit",
+            capabilityLine: "clipboard.read · scoped to one application",
+            risk: "Elevated",
+            riskDot: Design.Ink.caution,
+            clock: "decides in 0:45",
+            reason: "Testing appearance",
+            implication: nil,
+            tree: [],
+            target: nil,
+            payload: "test",
+            biometricLine: "Touch ID will confirm",
+            biometricDot: Design.Ink.success,
+            moreChoicesLabel: nil,
+            showOptionsLabel: nil,
+            selectedOption: .once,
+        )
         try RenderHarness.png(
             prompt,
             size: CGSize(width: Design.Layout.promptWidth, height: 710),
-            to: RenderHarness.outputDirectory + "prompt.png",
+            appearance: .dark,
+            to: RenderHarness.outputDirectory + "appearance-check.png",
         )
+        let restoredAppearance = NSAppearance.currentDrawing()
+        #expect(initialAppearance == restoredAppearance)
     }
 
     @Test
@@ -110,11 +179,14 @@ struct RenderTests {
     @Test
     func `the popover renders at 360pt and hugs its content`() throws {
         let model = ConsoleModel(channel: ConsoleChannelClient(socketPath: "/nonexistent", token: ""))
-        try RenderHarness.png(
-            MenuBarPopover(model: model),
-            size: CGSize(width: Design.Layout.popoverWidth, height: 380),
-            to: RenderHarness.outputDirectory + "popover.png",
-        )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                MenuBarPopover(model: model),
+                size: CGSize(width: Design.Layout.popoverWidth, height: 380),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "popover\(mode.suffix)",
+            )
+        }
     }
 }
 
@@ -169,11 +241,14 @@ struct WindowRenderTests {
                 countdown: .expired,
             ),
         ]
-        try RenderHarness.png(
-            GrantsManager(grants: grants),
-            size: CGSize(width: 720, height: 642),
-            to: RenderHarness.outputDirectory + "grants.png",
-        )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                GrantsManager(grants: grants),
+                size: CGSize(width: 720, height: 642),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "grants\(mode.suffix)",
+            )
+        }
     }
 
     @Test
@@ -204,15 +279,18 @@ struct WindowRenderTests {
                 operatorNote: "Use the scoped option next time — this reaches every app I have open.",
             ),
         ]
-        try RenderHarness.png(
-            ActivityTimeline(
-                rows: rows,
-                integrity: .broken(at: 1283),
-                subtitle: "Today · entries after 1,283 are untrusted",
-            ),
-            size: CGSize(width: 720, height: 824),
-            to: RenderHarness.outputDirectory + "activity.png",
-        )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                ActivityTimeline(
+                    rows: rows,
+                    integrity: .broken(at: 1283),
+                    subtitle: "Today · entries after 1,283 are untrusted",
+                ),
+                size: CGSize(width: 720, height: 824),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "activity\(mode.suffix)",
+            )
+        }
     }
 }
 
@@ -221,45 +299,52 @@ struct WindowRenderTests {
 struct RemainingRenderTests {
     @Test
     func `the settings window renders at 720pt`() throws {
-        try RenderHarness.png(
-            SettingsWindow(),
-            size: CGSize(width: 720, height: 1008),
-            to: RenderHarness.outputDirectory + "settings.png",
-        )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                SettingsWindow(),
+                size: CGSize(width: 720, height: 1008),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "settings\(mode.suffix)",
+            )
+        }
     }
 
     @Test
     func `the envelope review is a different surface from the prompt`() throws {
-        try RenderHarness.png(
-            EnvelopeReview(
-                requester: "Codex",
-                reason: "Refactoring the parser, which needs clipboard and tree reads at each step.",
-                capabilities: [
-                    .init(
-                        id: "clipboard",
-                        consequence: "Read the clipboard in any app the agent names",
-                        breadth: "clipboard.read  ·  any application",
-                        risk: .elevated,
-                    ),
-                    .init(
-                        id: "observation",
-                        consequence: "Read the accessibility tree of any app",
-                        breadth: "observation.ax  ·  any application",
-                        risk: .elevated,
-                    ),
-                    .init(
-                        id: "input",
-                        consequence: "Type and click as you, in any app",
-                        breadth: "input.synthesize  ·  any application",
-                        risk: .high,
-                    ),
-                ],
-                duration: "2 hours",
-                maximumDuration: "8 hours",
-                biometricLine: "Touch ID will confirm: pre-authorize 3 capabilities for 2 hours",
-            ),
-            size: CGSize(width: 420, height: 617),
-            to: RenderHarness.outputDirectory + "envelope.png",
+        let envelope = EnvelopeReview(
+            requester: "Codex",
+            reason: "Refactoring the parser, which needs clipboard and tree reads at each step.",
+            capabilities: [
+                .init(
+                    id: "clipboard",
+                    consequence: "Read the clipboard in any app the agent names",
+                    breadth: "clipboard.read  ·  any application",
+                    risk: .elevated,
+                ),
+                .init(
+                    id: "observation",
+                    consequence: "Read the accessibility tree of any app",
+                    breadth: "observation.ax  ·  any application",
+                    risk: .elevated,
+                ),
+                .init(
+                    id: "input",
+                    consequence: "Type and click as you, in any app",
+                    breadth: "input.synthesize  ·  any application",
+                    risk: .high,
+                ),
+            ],
+            duration: "2 hours",
+            maximumDuration: "8 hours",
+            biometricLine: "Touch ID will confirm: pre-authorize 3 capabilities for 2 hours",
         )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                envelope,
+                size: CGSize(width: 420, height: 617),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "envelope\(mode.suffix)",
+            )
+        }
     }
 }
