@@ -40,5 +40,5 @@ let package = Package(
             dependencies: ["ExactMacConsole"],
             path: "Tests/ExactMacConsoleTests",
         ),
-    ]
+    ],
 )
