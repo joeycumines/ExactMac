@@ -58,6 +58,16 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
     let clipboardHistoryManager: ClipboardHistoryManager
     let clipboardManager: ClipboardManager
     let physicalDesktopMutationGate: PhysicalDesktopMutationGate
+    /// The grant store, when one is open.
+    ///
+    /// OPTIONAL AND NIL BY DEFAULT, following the same shape as the clipboard manager, and
+    /// nil is the safe answer: a nil store is not an empty one, so the listing RPCs report
+    /// that grants could not be read rather than reporting zero. Which is the difference
+    /// between an agent that asks once and an agent that asks forever.
+    let grantStore: GrantStore?
+    /// The ceiling on an envelope, and the consent path, both from configuration.
+    let maximumEnvelopeSeconds: Int
+    let consentBroker: (any ConsentBroker)?
     let applicationTerminationGracePeriod: Duration
     let applicationTerminationForcePeriod: Duration
     let windowMutationConvergencePolicy: WindowMutationConvergencePolicy
@@ -87,6 +97,9 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
         applicationTerminationGracePeriod: Duration = .seconds(2),
         applicationTerminationForcePeriod: Duration = .seconds(3),
         windowMutationConvergencePolicy: WindowMutationConvergencePolicy = .production,
+        grantStore: GrantStore? = nil,
+        maximumEnvelopeSeconds: Int = ServerConfig.defaultMaximumEnvelopeSeconds,
+        consentBroker: (any ConsentBroker)? = nil,
     ) {
         let elementRegistry = automationCoordinator?.elementRegistry ?? ElementRegistry()
         let automationCoordinator = automationCoordinator ?? AutomationCoordinator(
@@ -156,5 +169,8 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
         self.applicationTerminationGracePeriod = applicationTerminationGracePeriod
         self.applicationTerminationForcePeriod = applicationTerminationForcePeriod
         self.windowMutationConvergencePolicy = windowMutationConvergencePolicy
+        self.grantStore = grantStore
+        self.maximumEnvelopeSeconds = maximumEnvelopeSeconds
+        self.consentBroker = consentBroker
     }
 }

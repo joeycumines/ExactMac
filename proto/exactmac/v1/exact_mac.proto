@@ -542,6 +542,37 @@ service ExactMac {
     option (google.api.http) = {get: "/v1/macros"};
   }
 
+  // Gets one grant by name.
+  rpc GetGrant(GetGrantRequest) returns (Grant) {
+    option (google.api.http) = {get: "/v1/{name=grants/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Lists the permissions currently held, and who holds them.
+  //
+  // An agent that cannot see what it already holds cannot work inside a grant it was given,
+  // so it asks again — and asking again costs the operator a prompt they have already
+  // answered. Introspection is therefore part of the contract, not a convenience.
+  rpc ListGrants(ListGrantsRequest) returns (ListGrantsResponse) {
+    option (google.api.http) = {get: "/v1/grants"};
+  }
+
+  // Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+  // before they are needed.
+  //
+  // The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+  // access across a refactor should say so once, at the start, rather than interrupting the
+  // work at every step. What it may not do is ask for more than it declared — an envelope
+  // may not cover an undeclared capability, can never be global, and never outlives the
+  // duration it was granted for.
+  rpc PreauthorizeEnvelope(PreauthorizeEnvelopeRequest) returns (PreauthorizeEnvelopeResponse) {
+    option (google.api.http) = {
+      post: "/v1/envelopes:preauthorizeEnvelope"
+      body: "*"
+    };
+    option (google.api.method_signature) = "reason,capabilities,requested_lifetime";
+  }
+
   // Updates a macro.
   rpc UpdateMacro(UpdateMacroRequest) returns (Macro) {
     option (google.api.http) = {
@@ -1661,6 +1692,140 @@ message ListMacrosResponse {
   // This token is opaque and its structure must not be relied upon by clients.
   // Only its presence or absence should be used to determine pagination state.
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+
+// A request to read one grant.
+message GetGrantRequest {
+  // Resource name, in the format "grants/{grant}".
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {type: "exactmac/Grant"}
+  ];
+}
+
+// A request to list the permissions currently held.
+message ListGrantsRequest {
+  // Maximum number of grants to return.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // Page token from a previous call. The token is bound to the other semantic query
+  // inputs, not page_size or skip; clients may change either when continuing.
+  // Its structure is opaque and must not be relied upon by clients.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Number of grants to skip.
+  int32 skip = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.
+  string filter = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Response from listing active grants.
+message ListGrantsResponse {
+  // The grants currently held.
+  repeated Grant grants = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Token to retrieve the next page of results.
+  // This token is opaque and its structure must not be relied upon by clients.
+  // Only its presence or absence should be used to determine pagination state.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One permission, and everything an agent needs to know it is inside it rather than beside
+// it.
+//
+// A RESOURCE, because the grants manager has to name a grant in order to revoke it, and a
+// thing that can be named is a thing that can be reasoned about. The pattern's collection
+// segment IS the plural, which is why there is no parent on the list: a grant is not owned
+// by an application, and pretending otherwise would be a false claim about where a
+// permission comes from.
+message Grant {
+  option (google.api.resource) = {
+    type: "exactmac/Grant"
+    pattern: "grants/{grant}"
+    singular: "grant"
+    plural: "grants"
+  };
+
+  // Resource name, in the format "grants/{grant}".
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+
+  // The capability this grant covers.
+  string capability = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The scope, in the API's own words.
+  string scope = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Who holds it, by executable path.
+  string holder = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The code identity the grant is bound to. A grant binds to a BINARY and never to a
+  // process id, so a restart does not lose it and a different binary cannot inherit it.
+  string holder_designated_requirement = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Whether the binding names a signature at all. An unsigned holder is bound by path
+  // alone, which is a narrower guarantee and is reported rather than hidden.
+  bool holder_is_signed = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // How the grant came about: an operator answering a prompt, or an envelope.
+  string basis = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The agent's stated reason, as the operator was shown it.
+  string reason = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // How long the grant has left to live. Zero means it has expired.
+  //
+  // A DURATION rather than a count of seconds, because an int64 whose name reads as a time
+  // is taken for a timestamp, and the obvious name for one carries a preposition the naming
+  // rules ban. Duration is the correct type either way.
+  google.protobuf.Duration lifetime = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A request to pre-authorize a set of capabilities for a bounded time.
+message PreauthorizeEnvelopeRequest {
+  // WHY the batch is being asked for, in the agent's own words. Required: an unexplained
+  // pre-authorization is a standing permission nobody can account for.
+  string reason = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The capabilities expected to be needed, named as the API's capability ids. An envelope
+  // may not cover anything absent from this list, which is what makes it a declaration
+  // rather than a blank cheque.
+  repeated string capabilities = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The boundary each capability is wanted for. Absent means every application, which is
+  // the broadest answer and the one that costs most.
+  repeated string scopes = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // How long the batch should live. The server applies its own ceiling regardless of what
+  // is asked for, so this is a request and not a decision.
+  google.protobuf.Duration requested_lifetime = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A granted pre-authorization: a declared set of capabilities for a bounded time.
+message PreauthorizeEnvelopeResponse {
+  // Identifier of this envelope.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The capabilities it covers.
+  repeated string capabilities = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The scope each capability is covered for.
+  repeated string scopes = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The life GRANTED, which is the server's ceiling applied rather than the duration asked
+  // for, so an agent that asked for eight hours and was given one is told it holds one.
+  google.protobuf.Duration lifetime = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // When it expires.
+  google.protobuf.Timestamp expiry_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Never true. An envelope that could become global would outlive the session it was
+  // granted for, so the type says so where a client reads it.
+  bool global_persistent = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // The agent's reason, as the operator was shown it.
+  string reason = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Request to update a macro.

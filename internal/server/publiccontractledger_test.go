@@ -21,7 +21,10 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
-const publicContractLedgerDigest = "dda6643789a3e6dccd999af9c8fd467843c2f2ffa60174bc026534b59c488f21"
+// Re-derived because the public contract genuinely changed: the service gained GetGrant,
+// ListGrants and PreauthorizeEnvelope, which is a real change to what a caller may ask for
+// and not a bookkeeping edit.
+const publicContractLedgerDigest = "7d81a1d2d2c7be55776776d2b9fbc68c129caa7fe77a39dedba81f37266285a2"
 
 const (
 	publicBoundaryAdmissionProof = "PublicRequestValidationGRPCTests.every descriptor valid public request crosses production validation"

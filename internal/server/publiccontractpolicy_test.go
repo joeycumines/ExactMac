@@ -26,6 +26,7 @@ var expectedPublicQuerySemantics = map[string]string{
 	"exactmac.v1.ExactMac.ListApplications:order_by":       "fields=name|pid|display_name|bundle_id|active; default=name asc; optional direction=desc",
 	"exactmac.v1.ExactMac.ListApplications:filter":         "quoted equality fields=display_name|bundle_id; conjunction=AND; empty=all",
 	"exactmac.v1.ExactMac.ListInputs:filter":               "state token=PENDING|EXECUTING|COMPLETED|FAILED|CANCELLED; empty=all",
+	"exactmac.v1.ExactMac.ListGrants:filter":               "Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.",
 	"exactmac.v1.ExactMac.GetWindow:read_mask":             "paths=name|title|bounds|visible|layer|bundle_id|*; empty=all; wildcard must be sole path",
 	"exactmac.v1.ExactMac.ListWindows:order_by":            "fields=name|title|layer; comma-separated; default=name asc; optional direction=asc|desc; ties=name asc",
 	"exactmac.v1.ExactMac.ListWindows:filter":              "clauses=title quoted case-sensitive equality with * wildcard|visible boolean; conjunction=whitespace|AND; empty=all; minimized is unsupported and rejected",
@@ -55,6 +56,9 @@ var expectedPublicQueryDocumentation = map[string][]string{
 	"UpdateMacroRequest": {
 		"Supported fields: display_name, description, actions, parameters, and tags. An empty mask replaces all mutable fields.",
 	},
+	"ListGrantsRequest": {
+		"Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.",
+	},
 }
 
 var publicPaginationInputs = map[string]string{
@@ -66,6 +70,7 @@ var publicPaginationInputs = map[string]string{
 	"exactmac.v1.ExactMac.ListElements":            "parent",
 	"exactmac.v1.ExactMac.ListWindows":             "parent,filter,order_by",
 	"exactmac.v1.ExactMac.ListObservations":        "parent",
+	"exactmac.v1.ExactMac.ListGrants":              "filter",
 	"exactmac.v1.ExactMac.ListSessions":            "",
 	"exactmac.v1.ExactMac.ListMacros":              "",
 	"exactmac.v1.ExactMac.ListDisplays":            "",

@@ -123,6 +123,16 @@ var executableToolContracts = map[string]executableToolContract{
 		proof:        "stored macro resource",
 		exactMacRPCs: []string{"GetMacro"},
 	},
+	"list_grants": {
+		source: "cua_authorization.go", handler: "handleListGrants", effect: "query",
+		proof:        "the standing grants, their scopes and their remaining life",
+		exactMacRPCs: []string{"ListGrants"},
+	},
+	"preauthorize": {
+		source: "cua_authorization.go", handler: "handlePreauthorize", effect: "consent lifecycle mutation",
+		proof:        "a granted pre-authorization envelope, with the life the server decided",
+		exactMacRPCs: []string{"PreauthorizeEnvelope"},
+	},
 	"list_macros": {
 		source: "cua_macro.go", handler: "handleListMacros", effect: "query",
 		proof:        "stored macro resources and pagination",
@@ -153,6 +163,11 @@ type rpcFamilyContract struct {
 }
 
 var rpcFamilyContracts = []rpcFamilyContract{
+	{
+		provider: "Authorization/AuthorizationMethods.swift", effect: "consent administration",
+		proof:   "the standing grants and their remaining life, and a granted envelope's real duration",
+		methods: []string{"GetGrant", "ListGrants", "PreauthorizeEnvelope"},
+	},
 	{
 		provider: "ApplicationMethods.swift", effect: "application lifecycle", proof: "live process and resource state",
 		methods: []string{

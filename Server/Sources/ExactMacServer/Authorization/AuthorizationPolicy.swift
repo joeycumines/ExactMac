@@ -248,6 +248,9 @@ enum AuthorizationPolicy {
         case .transactionManage: 0.4
         case .sessionManage: 0.3
         case .displayRead: 0.3
+        // Reading what is permitted discloses the operator's whole posture, so it costs
+        // more than a metadata read and far less than touching the desktop.
+        case .authorizationManage: 0.2
         case .localEcho: 0.1
         }
     }

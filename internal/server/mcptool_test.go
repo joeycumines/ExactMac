@@ -66,6 +66,8 @@ func TestToolSchema_RequiredFields(t *testing.T) {
 // TestAllToolsExist validates all expected MCP tools are defined
 func TestAllToolsExist(t *testing.T) {
 	expectedTools := []string{
+		"list_grants",
+		"preauthorize",
 		// CUA Core: Input (9)
 		"screenshot",
 		"click",
@@ -102,7 +104,9 @@ func TestAllToolsExist(t *testing.T) {
 		"execute_macro",
 	}
 
-	if len(expectedTools) != 29 {
+	// Authorization: what is permitted, and asking for more (2). An agent that cannot see
+	// what it holds re-asks, and re-asking costs a prompt the operator already answered.
+	if len(expectedTools) != 31 {
 		t.Errorf("Expected 29 tools but defined %d in test", len(expectedTools))
 	}
 

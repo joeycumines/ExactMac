@@ -581,6 +581,71 @@ func (s *MCPServer) registerTools() {
 			},
 			Handler: s.handleDeleteMacro,
 		},
+		// === AUTHORIZATION: what is permitted, and asking for more ===
+
+		"list_grants": {
+			Name:           "list_grants",
+			Description:    "List the permissions currently held, and how much life each has left. Use this BEFORE asking to do something you may already be permitted to do: re-asking costs the operator a prompt they have already answered.",
+			MutationPolicy: mutationPolicyReadOnly,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					// NO `skip` and no `page_size`: this project's rule is that a client
+					// does not compute offsets or choose a page, and passes back a token it
+					// was given without looking at it.
+					"page_token": map[string]any{
+						"type":        "string",
+						"description": "Token from a previous response. Opaque: pass it back unexamined.",
+					},
+					"filter": map[string]any{
+						"type":        "string",
+						"description": "Comma-separated capability ids. Omit for every capability.",
+					},
+				},
+			},
+			Handler: s.handleListGrants,
+		},
+		"preauthorize": {
+			Name:           "preauthorize",
+			Description:    "Ask the operator to pre-authorize a DECLARED set of capabilities for a bounded time, before you need them. Use this at the START of a long task rather than interrupting the work at every step. The server grants the life it decides, which may be shorter than you asked for, and an envelope can never be global.",
+			MutationPolicy: mutationPolicyExclusive,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"capabilities": map[string]any{
+						"type":        "array",
+						"minItems":    1,
+						"maxItems":    20,
+						"items":       map[string]any{"type": "string"},
+						"description": "The capability ids you expect to need, such as clipboard.read, observation.ax, input.synthesize. The envelope may NOT cover anything absent from this list, which is what makes it a declaration rather than a blank cheque.",
+					},
+					"reason": map[string]any{
+						"type":        "string",
+						"maxLength":   500,
+						"description": "Why you need this batch, for the operator. This is what they read before deciding.",
+					},
+					"scopes": map[string]any{
+						"type":        "array",
+						"maxItems":    20,
+						"items":       map[string]any{"type": "string"},
+						"description": "The boundary each capability is wanted for. Omit for every application, which is the broadest answer and the one that costs most.",
+					},
+					"requested_lifetime": map[string]any{
+						"type":        "object",
+						"description": "How long you want the batch to live, as a duration in seconds. The server applies its own ceiling regardless, so this is a request and not a decision.",
+						"properties": map[string]any{
+							"seconds": map[string]any{
+								"type":    "integer",
+								"minimum": 1,
+							},
+						},
+						"required": []string{"seconds"},
+					},
+				},
+				"required": []string{"capabilities", "requested_lifetime"},
+			},
+			Handler: s.handlePreauthorize,
+		},
 		"execute_macro": {
 			Name:           "execute_macro",
 			Description:    executeMacroDescription,

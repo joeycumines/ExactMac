@@ -170,7 +170,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
         let policy = try Self.loadPolicy()
         let declared = RPCAuthorizationMap.declaredMethods(using: policy)
         XCTAssertEqual(
-            declared.count, 68,
+            declared.count, 71,
             "the API's method count moved; this map has to be re-derived, not patched",
         )
         let unmapped = RPCAuthorizationMap.unmappedMethods(declared: declared)

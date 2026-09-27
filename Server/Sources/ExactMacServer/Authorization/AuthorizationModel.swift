@@ -116,6 +116,16 @@ enum Capability: String, Sendable, CaseIterable, Hashable {
     case fileDialogAutomate = "file.automate"
     case transactionManage = "transaction.manage"
     case sessionManage = "session.manage"
+    /// Reads or changes WHAT IS PERMITTED, rather than the desktop: the standing grants and
+    /// the pre-authorization envelopes.
+    ///
+    /// It is a capability of its own because neither adjacent answer is true of it. It is not
+    /// a local echo — the grants belong to the OPERATOR, not to the caller, so "returns only
+    /// what the caller itself submitted" is false of it. And it is not a desktop read,
+    /// because it touches nothing on the screen. Forcing it into either bucket would be the
+    /// exact rot the lattice exists to prevent: a capability whose name does not describe
+    /// what it permits is how a grant ends up covering something nobody read the label for.
+    case authorizationManage = "authorization.manage"
     /// Reads nothing off the desktop: it echoes back input the caller itself submitted.
     /// It still passes through the interceptor, and it is still mapped, so that the
     /// set of unmapped methods stays empty.
@@ -132,6 +142,7 @@ enum Capability: String, Sendable, CaseIterable, Hashable {
                 .observationStream, .displayRead, .clipboardRead, .clipboardWrite,
                 .inputSynthesize, .windowManage, .applicationControl,
                 .fileDialogAutomate, .transactionManage, .sessionManage,
+                .authorizationManage,
             ]
         case .macroExecute:
             // A recorded macro is a bounded sequence of input and transactions.
@@ -148,6 +159,10 @@ enum Capability: String, Sendable, CaseIterable, Hashable {
         case .observationStream, .windowManage, .applicationControl, .fileDialogAutomate,
              .transactionManage, .sessionManage, .displayRead, .clipboardRead,
              .clipboardWrite, .inputSynthesize, .localEcho:
+            []
+        case .authorizationManage:
+            // Reading what is permitted confers NO desktop power, which is the point: the
+            // capability is narrow, so an envelope carrying it is a small ask.
             []
         }
     }
@@ -202,6 +217,7 @@ enum Capability: String, Sendable, CaseIterable, Hashable {
         case .fileDialogAutomate: "Drive open and save panels"
         case .transactionManage: "Group actions into a transaction"
         case .sessionManage: "Create and inspect sessions"
+        case .authorizationManage: "See what is permitted, and pre-authorize a batch"
         case .localEcho: "Read back input this server was already given"
         }
     }

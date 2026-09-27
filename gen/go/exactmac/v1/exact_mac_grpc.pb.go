@@ -85,6 +85,9 @@ const (
 	ExactMac_CreateMacro_FullMethodName                   = "/exactmac.v1.ExactMac/CreateMacro"
 	ExactMac_GetMacro_FullMethodName                      = "/exactmac.v1.ExactMac/GetMacro"
 	ExactMac_ListMacros_FullMethodName                    = "/exactmac.v1.ExactMac/ListMacros"
+	ExactMac_GetGrant_FullMethodName                      = "/exactmac.v1.ExactMac/GetGrant"
+	ExactMac_ListGrants_FullMethodName                    = "/exactmac.v1.ExactMac/ListGrants"
+	ExactMac_PreauthorizeEnvelope_FullMethodName          = "/exactmac.v1.ExactMac/PreauthorizeEnvelope"
 	ExactMac_UpdateMacro_FullMethodName                   = "/exactmac.v1.ExactMac/UpdateMacro"
 	ExactMac_DeleteMacro_FullMethodName                   = "/exactmac.v1.ExactMac/DeleteMacro"
 	ExactMac_ExecuteMacro_FullMethodName                  = "/exactmac.v1.ExactMac/ExecuteMacro"
@@ -223,6 +226,23 @@ type ExactMacClient interface {
 	GetMacro(ctx context.Context, in *GetMacroRequest, opts ...grpc.CallOption) (*Macro, error)
 	// Lists macros.
 	ListMacros(ctx context.Context, in *ListMacrosRequest, opts ...grpc.CallOption) (*ListMacrosResponse, error)
+	// Gets one grant by name.
+	GetGrant(ctx context.Context, in *GetGrantRequest, opts ...grpc.CallOption) (*Grant, error)
+	// Lists the permissions currently held, and who holds them.
+	//
+	// An agent that cannot see what it already holds cannot work inside a grant it was given,
+	// so it asks again — and asking again costs the operator a prompt they have already
+	// answered. Introspection is therefore part of the contract, not a convenience.
+	ListGrants(ctx context.Context, in *ListGrantsRequest, opts ...grpc.CallOption) (*ListGrantsResponse, error)
+	// Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+	// before they are needed.
+	//
+	// The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+	// access across a refactor should say so once, at the start, rather than interrupting the
+	// work at every step. What it may not do is ask for more than it declared — an envelope
+	// may not cover an undeclared capability, can never be global, and never outlives the
+	// duration it was granted for.
+	PreauthorizeEnvelope(ctx context.Context, in *PreauthorizeEnvelopeRequest, opts ...grpc.CallOption) (*PreauthorizeEnvelopeResponse, error)
 	// Updates a macro.
 	UpdateMacro(ctx context.Context, in *UpdateMacroRequest, opts ...grpc.CallOption) (*Macro, error)
 	// Deletes a macro.
@@ -867,6 +887,36 @@ func (c *exactMacClient) ListMacros(ctx context.Context, in *ListMacrosRequest, 
 	return out, nil
 }
 
+func (c *exactMacClient) GetGrant(ctx context.Context, in *GetGrantRequest, opts ...grpc.CallOption) (*Grant, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Grant)
+	err := c.cc.Invoke(ctx, ExactMac_GetGrant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *exactMacClient) ListGrants(ctx context.Context, in *ListGrantsRequest, opts ...grpc.CallOption) (*ListGrantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListGrantsResponse)
+	err := c.cc.Invoke(ctx, ExactMac_ListGrants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *exactMacClient) PreauthorizeEnvelope(ctx context.Context, in *PreauthorizeEnvelopeRequest, opts ...grpc.CallOption) (*PreauthorizeEnvelopeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreauthorizeEnvelopeResponse)
+	err := c.cc.Invoke(ctx, ExactMac_PreauthorizeEnvelope_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *exactMacClient) UpdateMacro(ctx context.Context, in *UpdateMacroRequest, opts ...grpc.CallOption) (*Macro, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Macro)
@@ -1075,6 +1125,23 @@ type ExactMacServer interface {
 	GetMacro(context.Context, *GetMacroRequest) (*Macro, error)
 	// Lists macros.
 	ListMacros(context.Context, *ListMacrosRequest) (*ListMacrosResponse, error)
+	// Gets one grant by name.
+	GetGrant(context.Context, *GetGrantRequest) (*Grant, error)
+	// Lists the permissions currently held, and who holds them.
+	//
+	// An agent that cannot see what it already holds cannot work inside a grant it was given,
+	// so it asks again — and asking again costs the operator a prompt they have already
+	// answered. Introspection is therefore part of the contract, not a convenience.
+	ListGrants(context.Context, *ListGrantsRequest) (*ListGrantsResponse, error)
+	// Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+	// before they are needed.
+	//
+	// The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+	// access across a refactor should say so once, at the start, rather than interrupting the
+	// work at every step. What it may not do is ask for more than it declared — an envelope
+	// may not cover an undeclared capability, can never be global, and never outlives the
+	// duration it was granted for.
+	PreauthorizeEnvelope(context.Context, *PreauthorizeEnvelopeRequest) (*PreauthorizeEnvelopeResponse, error)
 	// Updates a macro.
 	UpdateMacro(context.Context, *UpdateMacroRequest) (*Macro, error)
 	// Deletes a macro.
@@ -1280,6 +1347,15 @@ func (UnimplementedExactMacServer) GetMacro(context.Context, *GetMacroRequest) (
 }
 func (UnimplementedExactMacServer) ListMacros(context.Context, *ListMacrosRequest) (*ListMacrosResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMacros not implemented")
+}
+func (UnimplementedExactMacServer) GetGrant(context.Context, *GetGrantRequest) (*Grant, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGrant not implemented")
+}
+func (UnimplementedExactMacServer) ListGrants(context.Context, *ListGrantsRequest) (*ListGrantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGrants not implemented")
+}
+func (UnimplementedExactMacServer) PreauthorizeEnvelope(context.Context, *PreauthorizeEnvelopeRequest) (*PreauthorizeEnvelopeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreauthorizeEnvelope not implemented")
 }
 func (UnimplementedExactMacServer) UpdateMacro(context.Context, *UpdateMacroRequest) (*Macro, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateMacro not implemented")
@@ -2392,6 +2468,60 @@ func _ExactMac_ListMacros_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ExactMac_GetGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGrantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExactMacServer).GetGrant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExactMac_GetGrant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExactMacServer).GetGrant(ctx, req.(*GetGrantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ExactMac_ListGrants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListGrantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExactMacServer).ListGrants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExactMac_ListGrants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExactMacServer).ListGrants(ctx, req.(*ListGrantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ExactMac_PreauthorizeEnvelope_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreauthorizeEnvelopeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExactMacServer).PreauthorizeEnvelope(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExactMac_PreauthorizeEnvelope_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExactMacServer).PreauthorizeEnvelope(ctx, req.(*PreauthorizeEnvelopeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ExactMac_UpdateMacro_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateMacroRequest)
 	if err := dec(in); err != nil {
@@ -2774,6 +2904,18 @@ var ExactMac_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMacros",
 			Handler:    _ExactMac_ListMacros_Handler,
+		},
+		{
+			MethodName: "GetGrant",
+			Handler:    _ExactMac_GetGrant_Handler,
+		},
+		{
+			MethodName: "ListGrants",
+			Handler:    _ExactMac_ListGrants_Handler,
+		},
+		{
+			MethodName: "PreauthorizeEnvelope",
+			Handler:    _ExactMac_PreauthorizeEnvelope_Handler,
 		},
 		{
 			MethodName: "UpdateMacro",

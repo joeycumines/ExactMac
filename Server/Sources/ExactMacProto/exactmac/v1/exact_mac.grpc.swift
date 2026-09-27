@@ -805,6 +805,45 @@ public enum Exactmac_V1_ExactMac: Sendable {
                 type: .unary
             )
         }
+        /// Namespace for "GetGrant" metadata.
+        public enum GetGrant: Sendable {
+            /// Request type for "GetGrant".
+            public typealias Input = Exactmac_V1_GetGrantRequest
+            /// Response type for "GetGrant".
+            public typealias Output = Exactmac_V1_Grant
+            /// Descriptor for "GetGrant".
+            public static let descriptor = GRPCCore.MethodDescriptor(
+                service: GRPCCore.ServiceDescriptor(fullyQualifiedService: "exactmac.v1.ExactMac"),
+                method: "GetGrant",
+                type: .unary
+            )
+        }
+        /// Namespace for "ListGrants" metadata.
+        public enum ListGrants: Sendable {
+            /// Request type for "ListGrants".
+            public typealias Input = Exactmac_V1_ListGrantsRequest
+            /// Response type for "ListGrants".
+            public typealias Output = Exactmac_V1_ListGrantsResponse
+            /// Descriptor for "ListGrants".
+            public static let descriptor = GRPCCore.MethodDescriptor(
+                service: GRPCCore.ServiceDescriptor(fullyQualifiedService: "exactmac.v1.ExactMac"),
+                method: "ListGrants",
+                type: .unary
+            )
+        }
+        /// Namespace for "PreauthorizeEnvelope" metadata.
+        public enum PreauthorizeEnvelope: Sendable {
+            /// Request type for "PreauthorizeEnvelope".
+            public typealias Input = Exactmac_V1_PreauthorizeEnvelopeRequest
+            /// Response type for "PreauthorizeEnvelope".
+            public typealias Output = Exactmac_V1_PreauthorizeEnvelopeResponse
+            /// Descriptor for "PreauthorizeEnvelope".
+            public static let descriptor = GRPCCore.MethodDescriptor(
+                service: GRPCCore.ServiceDescriptor(fullyQualifiedService: "exactmac.v1.ExactMac"),
+                method: "PreauthorizeEnvelope",
+                type: .unary
+            )
+        }
         /// Namespace for "UpdateMacro" metadata.
         public enum UpdateMacro: Sendable {
             /// Request type for "UpdateMacro".
@@ -971,6 +1010,9 @@ public enum Exactmac_V1_ExactMac: Sendable {
             CreateMacro.descriptor,
             GetMacro.descriptor,
             ListMacros.descriptor,
+            GetGrant.descriptor,
+            ListGrants.descriptor,
+            PreauthorizeEnvelope.descriptor,
             UpdateMacro.descriptor,
             DeleteMacro.descriptor,
             ExecuteMacro.descriptor,
@@ -2089,6 +2131,71 @@ extension Exactmac_V1_ExactMac {
             request: GRPCCore.StreamingServerRequest<Exactmac_V1_ListMacrosRequest>,
             context: GRPCCore.ServerContext
         ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_ListMacrosResponse>
+
+        /// Handle the "GetGrant" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Gets one grant by name.
+        ///
+        /// - Parameters:
+        ///   - request: A streaming request of `Exactmac_V1_GetGrantRequest` messages.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A streaming response of `Exactmac_V1_Grant` messages.
+        func getGrant(
+            request: GRPCCore.StreamingServerRequest<Exactmac_V1_GetGrantRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_Grant>
+
+        /// Handle the "ListGrants" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Lists the permissions currently held, and who holds them.
+        /// > 
+        /// > An agent that cannot see what it already holds cannot work inside a grant it was given,
+        /// > so it asks again — and asking again costs the operator a prompt they have already
+        /// > answered. Introspection is therefore part of the contract, not a convenience.
+        ///
+        /// - Parameters:
+        ///   - request: A streaming request of `Exactmac_V1_ListGrantsRequest` messages.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A streaming response of `Exactmac_V1_ListGrantsResponse` messages.
+        func listGrants(
+            request: GRPCCore.StreamingServerRequest<Exactmac_V1_ListGrantsRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_ListGrantsResponse>
+
+        /// Handle the "PreauthorizeEnvelope" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+        /// > before they are needed.
+        /// > 
+        /// > The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+        /// > access across a refactor should say so once, at the start, rather than interrupting the
+        /// > work at every step. What it may not do is ask for more than it declared — an envelope
+        /// > may not cover an undeclared capability, can never be global, and never outlives the
+        /// > duration it was granted for.
+        ///
+        /// - Parameters:
+        ///   - request: A streaming request of `Exactmac_V1_PreauthorizeEnvelopeRequest` messages.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A streaming response of `Exactmac_V1_PreauthorizeEnvelopeResponse` messages.
+        func preauthorizeEnvelope(
+            request: GRPCCore.StreamingServerRequest<Exactmac_V1_PreauthorizeEnvelopeRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_PreauthorizeEnvelopeResponse>
 
         /// Handle the "UpdateMacro" method.
         ///
@@ -3329,6 +3436,71 @@ extension Exactmac_V1_ExactMac {
             context: GRPCCore.ServerContext
         ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_ListMacrosResponse>
 
+        /// Handle the "GetGrant" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Gets one grant by name.
+        ///
+        /// - Parameters:
+        ///   - request: A request containing a single `Exactmac_V1_GetGrantRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A response containing a single `Exactmac_V1_Grant` message.
+        func getGrant(
+            request: GRPCCore.ServerRequest<Exactmac_V1_GetGrantRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_Grant>
+
+        /// Handle the "ListGrants" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Lists the permissions currently held, and who holds them.
+        /// > 
+        /// > An agent that cannot see what it already holds cannot work inside a grant it was given,
+        /// > so it asks again — and asking again costs the operator a prompt they have already
+        /// > answered. Introspection is therefore part of the contract, not a convenience.
+        ///
+        /// - Parameters:
+        ///   - request: A request containing a single `Exactmac_V1_ListGrantsRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A response containing a single `Exactmac_V1_ListGrantsResponse` message.
+        func listGrants(
+            request: GRPCCore.ServerRequest<Exactmac_V1_ListGrantsRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_ListGrantsResponse>
+
+        /// Handle the "PreauthorizeEnvelope" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+        /// > before they are needed.
+        /// > 
+        /// > The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+        /// > access across a refactor should say so once, at the start, rather than interrupting the
+        /// > work at every step. What it may not do is ask for more than it declared — an envelope
+        /// > may not cover an undeclared capability, can never be global, and never outlives the
+        /// > duration it was granted for.
+        ///
+        /// - Parameters:
+        ///   - request: A request containing a single `Exactmac_V1_PreauthorizeEnvelopeRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A response containing a single `Exactmac_V1_PreauthorizeEnvelopeResponse` message.
+        func preauthorizeEnvelope(
+            request: GRPCCore.ServerRequest<Exactmac_V1_PreauthorizeEnvelopeRequest>,
+            context: GRPCCore.ServerContext
+        ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_PreauthorizeEnvelopeResponse>
+
         /// Handle the "UpdateMacro" method.
         ///
         /// > Source IDL Documentation:
@@ -4568,6 +4740,71 @@ extension Exactmac_V1_ExactMac {
             context: GRPCCore.ServerContext
         ) async throws -> Exactmac_V1_ListMacrosResponse
 
+        /// Handle the "GetGrant" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Gets one grant by name.
+        ///
+        /// - Parameters:
+        ///   - request: A `Exactmac_V1_GetGrantRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A `Exactmac_V1_Grant` to respond with.
+        func getGrant(
+            request: Exactmac_V1_GetGrantRequest,
+            context: GRPCCore.ServerContext
+        ) async throws -> Exactmac_V1_Grant
+
+        /// Handle the "ListGrants" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Lists the permissions currently held, and who holds them.
+        /// > 
+        /// > An agent that cannot see what it already holds cannot work inside a grant it was given,
+        /// > so it asks again — and asking again costs the operator a prompt they have already
+        /// > answered. Introspection is therefore part of the contract, not a convenience.
+        ///
+        /// - Parameters:
+        ///   - request: A `Exactmac_V1_ListGrantsRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A `Exactmac_V1_ListGrantsResponse` to respond with.
+        func listGrants(
+            request: Exactmac_V1_ListGrantsRequest,
+            context: GRPCCore.ServerContext
+        ) async throws -> Exactmac_V1_ListGrantsResponse
+
+        /// Handle the "PreauthorizeEnvelope" method.
+        ///
+        /// > Source IDL Documentation:
+        /// >
+        /// > Asks the operator to pre-authorize a declared set of capabilities for a bounded time,
+        /// > before they are needed.
+        /// > 
+        /// > The whole point is ANTICIPATION: an agent that knows it will need clipboard and tree
+        /// > access across a refactor should say so once, at the start, rather than interrupting the
+        /// > work at every step. What it may not do is ask for more than it declared — an envelope
+        /// > may not cover an undeclared capability, can never be global, and never outlives the
+        /// > duration it was granted for.
+        ///
+        /// - Parameters:
+        ///   - request: A `Exactmac_V1_PreauthorizeEnvelopeRequest` message.
+        ///   - context: Context providing information about the RPC.
+        /// - Throws: Any error which occurred during the processing of the request. Thrown errors
+        ///     of type `RPCError` are mapped to appropriate statuses. All other errors are converted
+        ///     to an internal error.
+        /// - Returns: A `Exactmac_V1_PreauthorizeEnvelopeResponse` to respond with.
+        func preauthorizeEnvelope(
+            request: Exactmac_V1_PreauthorizeEnvelopeRequest,
+            context: GRPCCore.ServerContext
+        ) async throws -> Exactmac_V1_PreauthorizeEnvelopeResponse
+
         /// Handle the "UpdateMacro" method.
         ///
         /// > Source IDL Documentation:
@@ -5379,6 +5616,39 @@ extension Exactmac_V1_ExactMac.StreamingServiceProtocol {
             }
         )
         router.registerHandler(
+            forMethod: Exactmac_V1_ExactMac.Method.GetGrant.descriptor,
+            deserializer: GRPCProtobuf.ProtobufDeserializer<Exactmac_V1_GetGrantRequest>(),
+            serializer: GRPCProtobuf.ProtobufSerializer<Exactmac_V1_Grant>(),
+            handler: { request, context in
+                try await self.getGrant(
+                    request: request,
+                    context: context
+                )
+            }
+        )
+        router.registerHandler(
+            forMethod: Exactmac_V1_ExactMac.Method.ListGrants.descriptor,
+            deserializer: GRPCProtobuf.ProtobufDeserializer<Exactmac_V1_ListGrantsRequest>(),
+            serializer: GRPCProtobuf.ProtobufSerializer<Exactmac_V1_ListGrantsResponse>(),
+            handler: { request, context in
+                try await self.listGrants(
+                    request: request,
+                    context: context
+                )
+            }
+        )
+        router.registerHandler(
+            forMethod: Exactmac_V1_ExactMac.Method.PreauthorizeEnvelope.descriptor,
+            deserializer: GRPCProtobuf.ProtobufDeserializer<Exactmac_V1_PreauthorizeEnvelopeRequest>(),
+            serializer: GRPCProtobuf.ProtobufSerializer<Exactmac_V1_PreauthorizeEnvelopeResponse>(),
+            handler: { request, context in
+                try await self.preauthorizeEnvelope(
+                    request: request,
+                    context: context
+                )
+            }
+        )
+        router.registerHandler(
             forMethod: Exactmac_V1_ExactMac.Method.UpdateMacro.descriptor,
             deserializer: GRPCProtobuf.ProtobufDeserializer<Exactmac_V1_UpdateMacroRequest>(),
             serializer: GRPCProtobuf.ProtobufSerializer<Exactmac_V1_Macro>(),
@@ -6126,6 +6396,39 @@ extension Exactmac_V1_ExactMac.ServiceProtocol {
         context: GRPCCore.ServerContext
     ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_ListMacrosResponse> {
         let response = try await self.listMacros(
+            request: GRPCCore.ServerRequest(stream: request),
+            context: context
+        )
+        return GRPCCore.StreamingServerResponse(single: response)
+    }
+
+    public func getGrant(
+        request: GRPCCore.StreamingServerRequest<Exactmac_V1_GetGrantRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_Grant> {
+        let response = try await self.getGrant(
+            request: GRPCCore.ServerRequest(stream: request),
+            context: context
+        )
+        return GRPCCore.StreamingServerResponse(single: response)
+    }
+
+    public func listGrants(
+        request: GRPCCore.StreamingServerRequest<Exactmac_V1_ListGrantsRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_ListGrantsResponse> {
+        let response = try await self.listGrants(
+            request: GRPCCore.ServerRequest(stream: request),
+            context: context
+        )
+        return GRPCCore.StreamingServerResponse(single: response)
+    }
+
+    public func preauthorizeEnvelope(
+        request: GRPCCore.StreamingServerRequest<Exactmac_V1_PreauthorizeEnvelopeRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.StreamingServerResponse<Exactmac_V1_PreauthorizeEnvelopeResponse> {
+        let response = try await self.preauthorizeEnvelope(
             request: GRPCCore.ServerRequest(stream: request),
             context: context
         )
@@ -7005,6 +7308,45 @@ extension Exactmac_V1_ExactMac.SimpleServiceProtocol {
     ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_ListMacrosResponse> {
         return GRPCCore.ServerResponse<Exactmac_V1_ListMacrosResponse>(
             message: try await self.listMacros(
+                request: request.message,
+                context: context
+            ),
+            metadata: [:]
+        )
+    }
+
+    public func getGrant(
+        request: GRPCCore.ServerRequest<Exactmac_V1_GetGrantRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_Grant> {
+        return GRPCCore.ServerResponse<Exactmac_V1_Grant>(
+            message: try await self.getGrant(
+                request: request.message,
+                context: context
+            ),
+            metadata: [:]
+        )
+    }
+
+    public func listGrants(
+        request: GRPCCore.ServerRequest<Exactmac_V1_ListGrantsRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_ListGrantsResponse> {
+        return GRPCCore.ServerResponse<Exactmac_V1_ListGrantsResponse>(
+            message: try await self.listGrants(
+                request: request.message,
+                context: context
+            ),
+            metadata: [:]
+        )
+    }
+
+    public func preauthorizeEnvelope(
+        request: GRPCCore.ServerRequest<Exactmac_V1_PreauthorizeEnvelopeRequest>,
+        context: GRPCCore.ServerContext
+    ) async throws -> GRPCCore.ServerResponse<Exactmac_V1_PreauthorizeEnvelopeResponse> {
+        return GRPCCore.ServerResponse<Exactmac_V1_PreauthorizeEnvelopeResponse>(
+            message: try await self.preauthorizeEnvelope(
                 request: request.message,
                 context: context
             ),

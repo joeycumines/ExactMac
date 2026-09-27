@@ -177,7 +177,7 @@ final class AuthorizationPolicyTests: XCTestCase {
             }
         }
         XCTAssertEqual(checked, Capability.allCases.count * scopes.count * 3)
-        XCTAssertEqual(Capability.allCases.count, 16)
+        XCTAssertEqual(Capability.allCases.count, 17)
     }
 
     /// The same table with a MATCHING grant, and then with the same grant expired. The

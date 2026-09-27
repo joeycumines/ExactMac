@@ -40,7 +40,7 @@ func TestToolSchemaCompleteness(t *testing.T) {
 	tools := getTestToolRegistry(t)
 
 	// Verify we have exactly 29 tools
-	if len(tools) != 29 {
+	if len(tools) != 31 {
 		t.Errorf("Expected 29 tools, got %d", len(tools))
 	}
 
@@ -482,18 +482,18 @@ func TestToolSchemaDescriptionQuality(t *testing.T) {
 	}
 }
 
-// TestToolSchemaToolCount validates that exactly 29 tools are registered.
+// TestToolSchemaToolCount validates that exactly 31 tools are registered.
 // This ensures no tools are accidentally removed or duplicated.
 func TestToolSchemaToolCount(t *testing.T) {
 	tools := getTestToolRegistry(t)
 
-	if len(tools) != 29 {
+	if len(tools) != 31 {
 		// List all tool names for debugging
 		var names []string
 		for name := range tools {
 			names = append(names, name)
 		}
-		t.Errorf("Expected 29 tools, got %d. Tools: %v", len(tools), names)
+		t.Errorf("Expected 31 tools, got %d. Tools: %v", len(tools), names)
 	}
 }
 
@@ -538,6 +538,8 @@ func TestToolSchemaToolCategories(t *testing.T) {
 		"Macro": {
 			"create_macro",
 			"get_macro",
+			"list_grants",
+			"preauthorize",
 			"list_macros",
 			"update_macro",
 			"delete_macro",

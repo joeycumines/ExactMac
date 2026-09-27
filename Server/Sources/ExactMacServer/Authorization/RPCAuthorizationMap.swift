@@ -68,6 +68,12 @@ enum RPCAuthorizationMap {
         case observationFilter
         /// The resource name alone, which is all a metadata read discloses.
         case resourceName
+        /// What the caller currently holds: capability, scope and remaining life. It says
+        /// nothing about the desktop, and the summary must not imply that it does.
+        case heldGrants
+        /// A pre-authorization DECLARATION, shown before the operator answers it, because
+        /// an envelope is judged on what it says it covers.
+        case envelopeRequest
     }
 
     struct Entry: Sendable {
@@ -216,6 +222,25 @@ enum RPCAuthorizationMap {
             "CreateSession", "ListSessions", "GetSession", "GetSessionSnapshot",
             "DeleteSession",
         ], summary: .none)
+        // The administrative RPCs. They are `authorization.manage` and NOT `localEcho`,
+        // which is the classification the review took away from GetInput for exactly this
+        // reason: the grants a caller may read are the OPERATOR's, not the caller's own
+        // submissions, so "returns only what the caller sent" is false of them. Reading and
+        // asking are one capability because the risk is the same and the lattice should not
+        // carry two names for it.
+        simple(.authorizationManage, .resourceName, [
+            "GetGrant",
+        ], summary: .heldGrants)
+        // GLOBAL, and the drift test is what says so: a top-level list declares no `name`
+        // field, so reading `name` here would find nothing and quietly produce the same
+        // global scope by accident rather than by decision.
+        simple(.authorizationManage, .global, [
+            "ListGrants",
+        ], summary: .heldGrants)
+        simple(.authorizationManage, .global, [
+            "PreauthorizeEnvelope",
+        ], summary: .envelopeRequest)
+
         add(.transactionManage, [
             ("BeginTransaction", .global, .unary, .transactionScope),
             ("CommitTransaction", .resourceName, .unary, .transactionScope),
@@ -1211,6 +1236,26 @@ enum AuthorizationRequestDeriver {
             }
             let target = facts.firstText(among: ["name", "session"])?.value ?? "this transaction"
             return "up to \(declared) operations, batched under \(target)"
+        case .heldGrants:
+            // The resource alone. The name carries the grant's identity and the caller
+            // fetches the rest by it, so repeating the scope here would be a second
+            // rendering of the same fact that could disagree with the one the server holds.
+            return describeReference(facts)
+        case .envelopeRequest:
+            // What was ASKED FOR, not what was granted: the prompt shows the ceiling beside
+            // it, and an operator comparing the two is the whole point of stating the
+            // duration twice.
+            let declared = facts.texts("capabilities")
+            let lifetime = facts.nested("requestedLifetime")
+                .map { "\($0.text("seconds") ?? "?")s" } ?? "unspecified"
+            var parts = [
+                "a batch of " + (declared.isEmpty ? "unspecified" : declared.joined(separator: ", ")),
+                "asked for " + lifetime,
+            ]
+            if let reason = facts.text("reason"), !reason.isEmpty {
+                parts.append("because " + reason)
+            }
+            return parts.joined(separator: "  ·  ")
         case .fileDialog:
             var parts: [String] = []
             if let application = facts.text("application") {

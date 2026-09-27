@@ -24,7 +24,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     func testEveryMethodInTheAPIReachesTheInterceptorAndNoMethodReachesItsHandler() async throws {
         let policy = try Self.loadPolicy()
         let methods = RPCAuthorizationMap.declaredMethods(using: policy)
-        XCTAssertEqual(methods.count, 68, "the API's method count moved; this proof must be re-derived")
+        XCTAssertEqual(methods.count, 71, "the API's method count moved; this proof must be re-derived")
 
         let counters = AuthorizationCounters()
         let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy)

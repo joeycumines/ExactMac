@@ -12,6 +12,20 @@ google.longrunning.Operations.WaitOperation:name|consumed
 google.longrunning.Operations.WaitOperation:timeout.nanos|consumed
 google.longrunning.Operations.WaitOperation:timeout.seconds|consumed
 google.longrunning.Operations.WaitOperation:timeout|consumed
+# The two administrative RPCs. `capabilities` and `reason` are CONSUMED because they
+# decide what is asked for; the pagination fields are DEFAULTED because the agent does not
+# compute offsets — it passes back a token it was given and does not look at it.
+exactmac.v1.ExactMac.GetGrant:name|consumed
+exactmac.v1.ExactMac.ListGrants:filter|consumed
+exactmac.v1.ExactMac.ListGrants:page_size|defaulted
+exactmac.v1.ExactMac.ListGrants:page_token|defaulted
+exactmac.v1.ExactMac.ListGrants:skip|defaulted
+exactmac.v1.ExactMac.PreauthorizeEnvelope:capabilities|consumed
+exactmac.v1.ExactMac.PreauthorizeEnvelope:reason|consumed
+exactmac.v1.ExactMac.PreauthorizeEnvelope:requested_lifetime|consumed
+exactmac.v1.ExactMac.PreauthorizeEnvelope:requested_lifetime.nanos|consumed
+exactmac.v1.ExactMac.PreauthorizeEnvelope:requested_lifetime.seconds|consumed
+exactmac.v1.ExactMac.PreauthorizeEnvelope:scopes|consumed
 exactmac.v1.ExactMac.ActivateApplication:name|consumed
 exactmac.v1.ExactMac.AutomateOpenFileDialog:multiple_selection|deliberately deferred
 exactmac.v1.ExactMac.AutomateOpenFileDialog:application|deliberately deferred

@@ -2171,6 +2171,212 @@ public nonisolated struct Exactmac_V1_ListMacrosResponse: Sendable {
   public init() {}
 }
 
+/// A request to read one grant.
+public nonisolated struct Exactmac_V1_GetGrantRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Resource name, in the format "grants/{grant}".
+  public var name: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A request to list the permissions currently held.
+public nonisolated struct Exactmac_V1_ListGrantsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Maximum number of grants to return.
+  public var pageSize: Int32 = 0
+
+  /// Page token from a previous call. The token is bound to the other semantic query
+  /// inputs, not page_size or skip; clients may change either when continuing.
+  /// Its structure is opaque and must not be relied upon by clients.
+  public var pageToken: String = String()
+
+  /// Number of grants to skip.
+  public var skip: Int32 = 0
+
+  /// Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.
+  public var filter: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Response from listing active grants.
+public nonisolated struct Exactmac_V1_ListGrantsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The grants currently held.
+  public var grants: [Exactmac_V1_Grant] = []
+
+  /// Token to retrieve the next page of results.
+  /// This token is opaque and its structure must not be relied upon by clients.
+  /// Only its presence or absence should be used to determine pagination state.
+  public var nextPageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One permission, and everything an agent needs to know it is inside it rather than beside
+/// it.
+///
+/// A RESOURCE, because the grants manager has to name a grant in order to revoke it, and a
+/// thing that can be named is a thing that can be reasoned about. The pattern's collection
+/// segment IS the plural, which is why there is no parent on the list: a grant is not owned
+/// by an application, and pretending otherwise would be a false claim about where a
+/// permission comes from.
+public nonisolated struct Exactmac_V1_Grant: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Resource name, in the format "grants/{grant}".
+  public var name: String = String()
+
+  /// The capability this grant covers.
+  public var capability: String = String()
+
+  /// The scope, in the API's own words.
+  public var scope: String = String()
+
+  /// Who holds it, by executable path.
+  public var holder: String = String()
+
+  /// The code identity the grant is bound to. A grant binds to a BINARY and never to a
+  /// process id, so a restart does not lose it and a different binary cannot inherit it.
+  public var holderDesignatedRequirement: String = String()
+
+  /// Whether the binding names a signature at all. An unsigned holder is bound by path
+  /// alone, which is a narrower guarantee and is reported rather than hidden.
+  public var holderIsSigned: Bool = false
+
+  /// How the grant came about: an operator answering a prompt, or an envelope.
+  public var basis: String = String()
+
+  /// The agent's stated reason, as the operator was shown it.
+  public var reason: String = String()
+
+  /// How long the grant has left to live. Zero means it has expired.
+  ///
+  /// A DURATION rather than a count of seconds, because an int64 whose name reads as a time
+  /// is taken for a timestamp, and the obvious name for one carries a preposition the naming
+  /// rules ban. Duration is the correct type either way.
+  public var lifetime: SwiftProtobuf.Google_Protobuf_Duration {
+    get {_lifetime ?? SwiftProtobuf.Google_Protobuf_Duration()}
+    set {_lifetime = newValue}
+  }
+  /// Returns true if `lifetime` has been explicitly set.
+  public var hasLifetime: Bool {self._lifetime != nil}
+  /// Clears the value of `lifetime`. Subsequent reads from it will return its default value.
+  public mutating func clearLifetime() {self._lifetime = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _lifetime: SwiftProtobuf.Google_Protobuf_Duration? = nil
+}
+
+/// A request to pre-authorize a set of capabilities for a bounded time.
+public nonisolated struct Exactmac_V1_PreauthorizeEnvelopeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// WHY the batch is being asked for, in the agent's own words. Required: an unexplained
+  /// pre-authorization is a standing permission nobody can account for.
+  public var reason: String = String()
+
+  /// The capabilities expected to be needed, named as the API's capability ids. An envelope
+  /// may not cover anything absent from this list, which is what makes it a declaration
+  /// rather than a blank cheque.
+  public var capabilities: [String] = []
+
+  /// The boundary each capability is wanted for. Absent means every application, which is
+  /// the broadest answer and the one that costs most.
+  public var scopes: [String] = []
+
+  /// How long the batch should live. The server applies its own ceiling regardless of what
+  /// is asked for, so this is a request and not a decision.
+  public var requestedLifetime: SwiftProtobuf.Google_Protobuf_Duration {
+    get {_requestedLifetime ?? SwiftProtobuf.Google_Protobuf_Duration()}
+    set {_requestedLifetime = newValue}
+  }
+  /// Returns true if `requestedLifetime` has been explicitly set.
+  public var hasRequestedLifetime: Bool {self._requestedLifetime != nil}
+  /// Clears the value of `requestedLifetime`. Subsequent reads from it will return its default value.
+  public mutating func clearRequestedLifetime() {self._requestedLifetime = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _requestedLifetime: SwiftProtobuf.Google_Protobuf_Duration? = nil
+}
+
+/// A granted pre-authorization: a declared set of capabilities for a bounded time.
+public nonisolated struct Exactmac_V1_PreauthorizeEnvelopeResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Identifier of this envelope.
+  public var id: String = String()
+
+  /// The capabilities it covers.
+  public var capabilities: [String] = []
+
+  /// The scope each capability is covered for.
+  public var scopes: [String] = []
+
+  /// The life GRANTED, which is the server's ceiling applied rather than the duration asked
+  /// for, so an agent that asked for eight hours and was given one is told it holds one.
+  public var lifetime: SwiftProtobuf.Google_Protobuf_Duration {
+    get {_lifetime ?? SwiftProtobuf.Google_Protobuf_Duration()}
+    set {_lifetime = newValue}
+  }
+  /// Returns true if `lifetime` has been explicitly set.
+  public var hasLifetime: Bool {self._lifetime != nil}
+  /// Clears the value of `lifetime`. Subsequent reads from it will return its default value.
+  public mutating func clearLifetime() {self._lifetime = nil}
+
+  /// When it expires.
+  public var expiryTime: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_expiryTime ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_expiryTime = newValue}
+  }
+  /// Returns true if `expiryTime` has been explicitly set.
+  public var hasExpiryTime: Bool {self._expiryTime != nil}
+  /// Clears the value of `expiryTime`. Subsequent reads from it will return its default value.
+  public mutating func clearExpiryTime() {self._expiryTime = nil}
+
+  /// Never true. An envelope that could become global would outlive the session it was
+  /// granted for, so the type says so where a client reads it.
+  public var globalPersistent: Bool = false
+
+  /// The agent's reason, as the operator was shown it.
+  public var reason: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _lifetime: SwiftProtobuf.Google_Protobuf_Duration? = nil
+  fileprivate var _expiryTime: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
 /// Request to update a macro.
 public nonisolated struct Exactmac_V1_UpdateMacroRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -6460,6 +6666,303 @@ nonisolated extension Exactmac_V1_ListMacrosResponse: SwiftProtobuf.Message, Swi
   public static func ==(lhs: Exactmac_V1_ListMacrosResponse, rhs: Exactmac_V1_ListMacrosResponse) -> Bool {
     if lhs.macros != rhs.macros {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_GetGrantRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetGrantRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_GetGrantRequest, rhs: Exactmac_V1_GetGrantRequest) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_ListGrantsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListGrantsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}page_size\0\u{3}page_token\0\u{1}skip\0\u{1}filter\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.skip) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.filter) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.pageSize != 0 {
+      try visitor.visitSingularInt32Field(value: self.pageSize, fieldNumber: 1)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 2)
+    }
+    if self.skip != 0 {
+      try visitor.visitSingularInt32Field(value: self.skip, fieldNumber: 3)
+    }
+    if !self.filter.isEmpty {
+      try visitor.visitSingularStringField(value: self.filter, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_ListGrantsRequest, rhs: Exactmac_V1_ListGrantsRequest) -> Bool {
+    if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.skip != rhs.skip {return false}
+    if lhs.filter != rhs.filter {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_ListGrantsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListGrantsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grants\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.grants) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.grants.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.grants, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_ListGrantsResponse, rhs: Exactmac_V1_ListGrantsResponse) -> Bool {
+    if lhs.grants != rhs.grants {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_Grant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Grant"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}capability\0\u{1}scope\0\u{1}holder\0\u{3}holder_designated_requirement\0\u{3}holder_is_signed\0\u{1}basis\0\u{1}reason\0\u{1}lifetime\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.capability) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.scope) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.holder) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.holderDesignatedRequirement) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.holderIsSigned) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.basis) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._lifetime) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if !self.capability.isEmpty {
+      try visitor.visitSingularStringField(value: self.capability, fieldNumber: 2)
+    }
+    if !self.scope.isEmpty {
+      try visitor.visitSingularStringField(value: self.scope, fieldNumber: 3)
+    }
+    if !self.holder.isEmpty {
+      try visitor.visitSingularStringField(value: self.holder, fieldNumber: 4)
+    }
+    if !self.holderDesignatedRequirement.isEmpty {
+      try visitor.visitSingularStringField(value: self.holderDesignatedRequirement, fieldNumber: 5)
+    }
+    if self.holderIsSigned != false {
+      try visitor.visitSingularBoolField(value: self.holderIsSigned, fieldNumber: 6)
+    }
+    if !self.basis.isEmpty {
+      try visitor.visitSingularStringField(value: self.basis, fieldNumber: 7)
+    }
+    if !self.reason.isEmpty {
+      try visitor.visitSingularStringField(value: self.reason, fieldNumber: 8)
+    }
+    try { if let v = self._lifetime {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_Grant, rhs: Exactmac_V1_Grant) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.capability != rhs.capability {return false}
+    if lhs.scope != rhs.scope {return false}
+    if lhs.holder != rhs.holder {return false}
+    if lhs.holderDesignatedRequirement != rhs.holderDesignatedRequirement {return false}
+    if lhs.holderIsSigned != rhs.holderIsSigned {return false}
+    if lhs.basis != rhs.basis {return false}
+    if lhs.reason != rhs.reason {return false}
+    if lhs._lifetime != rhs._lifetime {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_PreauthorizeEnvelopeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PreauthorizeEnvelopeRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0\u{1}capabilities\0\u{1}scopes\0\u{3}requested_lifetime\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.capabilities) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.scopes) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._requestedLifetime) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.reason.isEmpty {
+      try visitor.visitSingularStringField(value: self.reason, fieldNumber: 1)
+    }
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.capabilities, fieldNumber: 2)
+    }
+    if !self.scopes.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.scopes, fieldNumber: 3)
+    }
+    try { if let v = self._requestedLifetime {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_PreauthorizeEnvelopeRequest, rhs: Exactmac_V1_PreauthorizeEnvelopeRequest) -> Bool {
+    if lhs.reason != rhs.reason {return false}
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.scopes != rhs.scopes {return false}
+    if lhs._requestedLifetime != rhs._requestedLifetime {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Exactmac_V1_PreauthorizeEnvelopeResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PreauthorizeEnvelopeResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}capabilities\0\u{1}scopes\0\u{1}lifetime\0\u{3}expiry_time\0\u{3}global_persistent\0\u{1}reason\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.capabilities) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.scopes) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._lifetime) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._expiryTime) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.globalPersistent) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.capabilities, fieldNumber: 2)
+    }
+    if !self.scopes.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.scopes, fieldNumber: 3)
+    }
+    try { if let v = self._lifetime {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._expiryTime {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    if self.globalPersistent != false {
+      try visitor.visitSingularBoolField(value: self.globalPersistent, fieldNumber: 6)
+    }
+    if !self.reason.isEmpty {
+      try visitor.visitSingularStringField(value: self.reason, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Exactmac_V1_PreauthorizeEnvelopeResponse, rhs: Exactmac_V1_PreauthorizeEnvelopeResponse) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.scopes != rhs.scopes {return false}
+    if lhs._lifetime != rhs._lifetime {return false}
+    if lhs._expiryTime != rhs._expiryTime {return false}
+    if lhs.globalPersistent != rhs.globalPersistent {return false}
+    if lhs.reason != rhs.reason {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -158,6 +158,8 @@ func TestProductionTools_DeclareMutationPolicy(t *testing.T) {
 		"update_macro":  mutationPolicyExclusive,
 		"delete_macro":  mutationPolicyExclusive,
 		"execute_macro": mutationPolicyExclusive,
+		"preauthorize":  mutationPolicyExclusive,
+		"list_grants":   mutationPolicyReadOnly,
 	}
 	for name, tool := range server.tools {
 		if tool.MutationPolicy == mutationPolicyUnspecified {

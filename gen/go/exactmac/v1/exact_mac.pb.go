@@ -417,7 +417,7 @@ func (x BeginTransactionRequest_IsolationLevel) Number() protoreflect.EnumNumber
 
 // Deprecated: Use BeginTransactionRequest_IsolationLevel.Descriptor instead.
 func (BeginTransactionRequest_IsolationLevel) EnumDescriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{77, 0}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{83, 0}
 }
 
 // Request to get one installed application bundle.
@@ -5005,6 +5005,495 @@ func (x *ListMacrosResponse) GetNextPageToken() string {
 	return ""
 }
 
+// A request to read one grant.
+type GetGrantRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Resource name, in the format "grants/{grant}".
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetGrantRequest) Reset() {
+	*x = GetGrantRequest{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetGrantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetGrantRequest) ProtoMessage() {}
+
+func (x *GetGrantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetGrantRequest.ProtoReflect.Descriptor instead.
+func (*GetGrantRequest) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *GetGrantRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// A request to list the permissions currently held.
+type ListGrantsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Maximum number of grants to return.
+	PageSize int32 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Page token from a previous call. The token is bound to the other semantic query
+	// inputs, not page_size or skip; clients may change either when continuing.
+	// Its structure is opaque and must not be relied upon by clients.
+	PageToken string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Number of grants to skip.
+	Skip int32 `protobuf:"varint,3,opt,name=skip,proto3" json:"skip,omitempty"`
+	// Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.
+	Filter        string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListGrantsRequest) Reset() {
+	*x = ListGrantsRequest{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListGrantsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListGrantsRequest) ProtoMessage() {}
+
+func (x *ListGrantsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListGrantsRequest.ProtoReflect.Descriptor instead.
+func (*ListGrantsRequest) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *ListGrantsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListGrantsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+func (x *ListGrantsRequest) GetSkip() int32 {
+	if x != nil {
+		return x.Skip
+	}
+	return 0
+}
+
+func (x *ListGrantsRequest) GetFilter() string {
+	if x != nil {
+		return x.Filter
+	}
+	return ""
+}
+
+// Response from listing active grants.
+type ListGrantsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The grants currently held.
+	Grants []*Grant `protobuf:"bytes,1,rep,name=grants,proto3" json:"grants,omitempty"`
+	// Token to retrieve the next page of results.
+	// This token is opaque and its structure must not be relied upon by clients.
+	// Only its presence or absence should be used to determine pagination state.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListGrantsResponse) Reset() {
+	*x = ListGrantsResponse{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListGrantsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListGrantsResponse) ProtoMessage() {}
+
+func (x *ListGrantsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListGrantsResponse.ProtoReflect.Descriptor instead.
+func (*ListGrantsResponse) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *ListGrantsResponse) GetGrants() []*Grant {
+	if x != nil {
+		return x.Grants
+	}
+	return nil
+}
+
+func (x *ListGrantsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+// One permission, and everything an agent needs to know it is inside it rather than beside
+// it.
+//
+// A RESOURCE, because the grants manager has to name a grant in order to revoke it, and a
+// thing that can be named is a thing that can be reasoned about. The pattern's collection
+// segment IS the plural, which is why there is no parent on the list: a grant is not owned
+// by an application, and pretending otherwise would be a false claim about where a
+// permission comes from.
+type Grant struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Resource name, in the format "grants/{grant}".
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The capability this grant covers.
+	Capability string `protobuf:"bytes,2,opt,name=capability,proto3" json:"capability,omitempty"`
+	// The scope, in the API's own words.
+	Scope string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	// Who holds it, by executable path.
+	Holder string `protobuf:"bytes,4,opt,name=holder,proto3" json:"holder,omitempty"`
+	// The code identity the grant is bound to. A grant binds to a BINARY and never to a
+	// process id, so a restart does not lose it and a different binary cannot inherit it.
+	HolderDesignatedRequirement string `protobuf:"bytes,5,opt,name=holder_designated_requirement,json=holderDesignatedRequirement,proto3" json:"holder_designated_requirement,omitempty"`
+	// Whether the binding names a signature at all. An unsigned holder is bound by path
+	// alone, which is a narrower guarantee and is reported rather than hidden.
+	HolderIsSigned bool `protobuf:"varint,6,opt,name=holder_is_signed,json=holderIsSigned,proto3" json:"holder_is_signed,omitempty"`
+	// How the grant came about: an operator answering a prompt, or an envelope.
+	Basis string `protobuf:"bytes,7,opt,name=basis,proto3" json:"basis,omitempty"`
+	// The agent's stated reason, as the operator was shown it.
+	Reason string `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	// How long the grant has left to live. Zero means it has expired.
+	//
+	// A DURATION rather than a count of seconds, because an int64 whose name reads as a time
+	// is taken for a timestamp, and the obvious name for one carries a preposition the naming
+	// rules ban. Duration is the correct type either way.
+	Lifetime      *durationpb.Duration `protobuf:"bytes,9,opt,name=lifetime,proto3" json:"lifetime,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Grant) Reset() {
+	*x = Grant{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Grant) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Grant) ProtoMessage() {}
+
+func (x *Grant) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Grant.ProtoReflect.Descriptor instead.
+func (*Grant) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *Grant) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Grant) GetCapability() string {
+	if x != nil {
+		return x.Capability
+	}
+	return ""
+}
+
+func (x *Grant) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *Grant) GetHolder() string {
+	if x != nil {
+		return x.Holder
+	}
+	return ""
+}
+
+func (x *Grant) GetHolderDesignatedRequirement() string {
+	if x != nil {
+		return x.HolderDesignatedRequirement
+	}
+	return ""
+}
+
+func (x *Grant) GetHolderIsSigned() bool {
+	if x != nil {
+		return x.HolderIsSigned
+	}
+	return false
+}
+
+func (x *Grant) GetBasis() string {
+	if x != nil {
+		return x.Basis
+	}
+	return ""
+}
+
+func (x *Grant) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *Grant) GetLifetime() *durationpb.Duration {
+	if x != nil {
+		return x.Lifetime
+	}
+	return nil
+}
+
+// A request to pre-authorize a set of capabilities for a bounded time.
+type PreauthorizeEnvelopeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHY the batch is being asked for, in the agent's own words. Required: an unexplained
+	// pre-authorization is a standing permission nobody can account for.
+	Reason string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	// The capabilities expected to be needed, named as the API's capability ids. An envelope
+	// may not cover anything absent from this list, which is what makes it a declaration
+	// rather than a blank cheque.
+	Capabilities []string `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// The boundary each capability is wanted for. Absent means every application, which is
+	// the broadest answer and the one that costs most.
+	Scopes []string `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	// How long the batch should live. The server applies its own ceiling regardless of what
+	// is asked for, so this is a request and not a decision.
+	RequestedLifetime *durationpb.Duration `protobuf:"bytes,4,opt,name=requested_lifetime,json=requestedLifetime,proto3" json:"requested_lifetime,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *PreauthorizeEnvelopeRequest) Reset() {
+	*x = PreauthorizeEnvelopeRequest{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[75]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreauthorizeEnvelopeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreauthorizeEnvelopeRequest) ProtoMessage() {}
+
+func (x *PreauthorizeEnvelopeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[75]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreauthorizeEnvelopeRequest.ProtoReflect.Descriptor instead.
+func (*PreauthorizeEnvelopeRequest) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *PreauthorizeEnvelopeRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *PreauthorizeEnvelopeRequest) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeRequest) GetScopes() []string {
+	if x != nil {
+		return x.Scopes
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeRequest) GetRequestedLifetime() *durationpb.Duration {
+	if x != nil {
+		return x.RequestedLifetime
+	}
+	return nil
+}
+
+// A granted pre-authorization: a declared set of capabilities for a bounded time.
+type PreauthorizeEnvelopeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Identifier of this envelope.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The capabilities it covers.
+	Capabilities []string `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// The scope each capability is covered for.
+	Scopes []string `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	// The life GRANTED, which is the server's ceiling applied rather than the duration asked
+	// for, so an agent that asked for eight hours and was given one is told it holds one.
+	Lifetime *durationpb.Duration `protobuf:"bytes,4,opt,name=lifetime,proto3" json:"lifetime,omitempty"`
+	// When it expires.
+	ExpiryTime *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expiry_time,json=expiryTime,proto3" json:"expiry_time,omitempty"`
+	// Never true. An envelope that could become global would outlive the session it was
+	// granted for, so the type says so where a client reads it.
+	GlobalPersistent bool `protobuf:"varint,6,opt,name=global_persistent,json=globalPersistent,proto3" json:"global_persistent,omitempty"`
+	// The agent's reason, as the operator was shown it.
+	Reason        string `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreauthorizeEnvelopeResponse) Reset() {
+	*x = PreauthorizeEnvelopeResponse{}
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreauthorizeEnvelopeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreauthorizeEnvelopeResponse) ProtoMessage() {}
+
+func (x *PreauthorizeEnvelopeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreauthorizeEnvelopeResponse.ProtoReflect.Descriptor instead.
+func (*PreauthorizeEnvelopeResponse) Descriptor() ([]byte, []int) {
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetScopes() []string {
+	if x != nil {
+		return x.Scopes
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetLifetime() *durationpb.Duration {
+	if x != nil {
+		return x.Lifetime
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetExpiryTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiryTime
+	}
+	return nil
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetGlobalPersistent() bool {
+	if x != nil {
+		return x.GlobalPersistent
+	}
+	return false
+}
+
+func (x *PreauthorizeEnvelopeResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // Request to update a macro.
 type UpdateMacroRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5019,7 +5508,7 @@ type UpdateMacroRequest struct {
 
 func (x *UpdateMacroRequest) Reset() {
 	*x = UpdateMacroRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[71]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5031,7 +5520,7 @@ func (x *UpdateMacroRequest) String() string {
 func (*UpdateMacroRequest) ProtoMessage() {}
 
 func (x *UpdateMacroRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[71]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5044,7 +5533,7 @@ func (x *UpdateMacroRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMacroRequest.ProtoReflect.Descriptor instead.
 func (*UpdateMacroRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{71}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *UpdateMacroRequest) GetMacro() *Macro {
@@ -5074,7 +5563,7 @@ type DeleteMacroRequest struct {
 
 func (x *DeleteMacroRequest) Reset() {
 	*x = DeleteMacroRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[72]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5086,7 +5575,7 @@ func (x *DeleteMacroRequest) String() string {
 func (*DeleteMacroRequest) ProtoMessage() {}
 
 func (x *DeleteMacroRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[72]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5099,7 +5588,7 @@ func (x *DeleteMacroRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMacroRequest.ProtoReflect.Descriptor instead.
 func (*DeleteMacroRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{72}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *DeleteMacroRequest) GetName() string {
@@ -5135,7 +5624,7 @@ type ExecuteMacroRequest struct {
 
 func (x *ExecuteMacroRequest) Reset() {
 	*x = ExecuteMacroRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[73]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5147,7 +5636,7 @@ func (x *ExecuteMacroRequest) String() string {
 func (*ExecuteMacroRequest) ProtoMessage() {}
 
 func (x *ExecuteMacroRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[73]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5160,7 +5649,7 @@ func (x *ExecuteMacroRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteMacroRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteMacroRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{73}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *ExecuteMacroRequest) GetMacro() string {
@@ -5202,7 +5691,7 @@ type ExecutionOptions struct {
 
 func (x *ExecutionOptions) Reset() {
 	*x = ExecutionOptions{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[74]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5214,7 +5703,7 @@ func (x *ExecutionOptions) String() string {
 func (*ExecutionOptions) ProtoMessage() {}
 
 func (x *ExecutionOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[74]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5227,7 +5716,7 @@ func (x *ExecutionOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutionOptions.ProtoReflect.Descriptor instead.
 func (*ExecutionOptions) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{74}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *ExecutionOptions) GetTimeout() float64 {
@@ -5256,7 +5745,7 @@ type ExecuteMacroResponse struct {
 
 func (x *ExecuteMacroResponse) Reset() {
 	*x = ExecuteMacroResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[75]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5268,7 +5757,7 @@ func (x *ExecuteMacroResponse) String() string {
 func (*ExecuteMacroResponse) ProtoMessage() {}
 
 func (x *ExecuteMacroResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[75]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5281,7 +5770,7 @@ func (x *ExecuteMacroResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteMacroResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteMacroResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{75}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ExecuteMacroResponse) GetSuccess() bool {
@@ -5336,7 +5825,7 @@ type ExecuteMacroMetadata struct {
 
 func (x *ExecuteMacroMetadata) Reset() {
 	*x = ExecuteMacroMetadata{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[76]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5348,7 +5837,7 @@ func (x *ExecuteMacroMetadata) String() string {
 func (*ExecuteMacroMetadata) ProtoMessage() {}
 
 func (x *ExecuteMacroMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[76]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5361,7 +5850,7 @@ func (x *ExecuteMacroMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteMacroMetadata.ProtoReflect.Descriptor instead.
 func (*ExecuteMacroMetadata) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{76}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ExecuteMacroMetadata) GetMacro() string {
@@ -5407,7 +5896,7 @@ type BeginTransactionRequest struct {
 
 func (x *BeginTransactionRequest) Reset() {
 	*x = BeginTransactionRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[77]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5419,7 +5908,7 @@ func (x *BeginTransactionRequest) String() string {
 func (*BeginTransactionRequest) ProtoMessage() {}
 
 func (x *BeginTransactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[77]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5432,7 +5921,7 @@ func (x *BeginTransactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginTransactionRequest.ProtoReflect.Descriptor instead.
 func (*BeginTransactionRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{77}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *BeginTransactionRequest) GetSession() string {
@@ -5471,7 +5960,7 @@ type BeginTransactionResponse struct {
 
 func (x *BeginTransactionResponse) Reset() {
 	*x = BeginTransactionResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[78]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5483,7 +5972,7 @@ func (x *BeginTransactionResponse) String() string {
 func (*BeginTransactionResponse) ProtoMessage() {}
 
 func (x *BeginTransactionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[78]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5496,7 +5985,7 @@ func (x *BeginTransactionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginTransactionResponse.ProtoReflect.Descriptor instead.
 func (*BeginTransactionResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{78}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *BeginTransactionResponse) GetTransactionId() string {
@@ -5534,7 +6023,7 @@ type CommitTransactionRequest struct {
 
 func (x *CommitTransactionRequest) Reset() {
 	*x = CommitTransactionRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[79]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5546,7 +6035,7 @@ func (x *CommitTransactionRequest) String() string {
 func (*CommitTransactionRequest) ProtoMessage() {}
 
 func (x *CommitTransactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[79]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5559,7 +6048,7 @@ func (x *CommitTransactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitTransactionRequest.ProtoReflect.Descriptor instead.
 func (*CommitTransactionRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{79}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *CommitTransactionRequest) GetName() string {
@@ -5592,7 +6081,7 @@ type RollbackTransactionRequest struct {
 
 func (x *RollbackTransactionRequest) Reset() {
 	*x = RollbackTransactionRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[80]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5604,7 +6093,7 @@ func (x *RollbackTransactionRequest) String() string {
 func (*RollbackTransactionRequest) ProtoMessage() {}
 
 func (x *RollbackTransactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[80]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5617,7 +6106,7 @@ func (x *RollbackTransactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackTransactionRequest.ProtoReflect.Descriptor instead.
 func (*RollbackTransactionRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{80}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *RollbackTransactionRequest) GetName() string {
@@ -5653,7 +6142,7 @@ type GetSessionSnapshotRequest struct {
 
 func (x *GetSessionSnapshotRequest) Reset() {
 	*x = GetSessionSnapshotRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[81]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5665,7 +6154,7 @@ func (x *GetSessionSnapshotRequest) String() string {
 func (*GetSessionSnapshotRequest) ProtoMessage() {}
 
 func (x *GetSessionSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[81]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5678,7 +6167,7 @@ func (x *GetSessionSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{81}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *GetSessionSnapshotRequest) GetName() string {
@@ -5706,7 +6195,7 @@ type CaptureScreenshotRequest struct {
 
 func (x *CaptureScreenshotRequest) Reset() {
 	*x = CaptureScreenshotRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[82]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5718,7 +6207,7 @@ func (x *CaptureScreenshotRequest) String() string {
 func (*CaptureScreenshotRequest) ProtoMessage() {}
 
 func (x *CaptureScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[82]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5731,7 +6220,7 @@ func (x *CaptureScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*CaptureScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{82}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *CaptureScreenshotRequest) GetFormat() ImageFormat {
@@ -5794,7 +6283,7 @@ type CaptureScreenshotResponse struct {
 
 func (x *CaptureScreenshotResponse) Reset() {
 	*x = CaptureScreenshotResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[83]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5806,7 +6295,7 @@ func (x *CaptureScreenshotResponse) String() string {
 func (*CaptureScreenshotResponse) ProtoMessage() {}
 
 func (x *CaptureScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[83]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5819,7 +6308,7 @@ func (x *CaptureScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*CaptureScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{83}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *CaptureScreenshotResponse) GetImageData() []byte {
@@ -5934,7 +6423,7 @@ type CaptureWindowScreenshotRequest struct {
 
 func (x *CaptureWindowScreenshotRequest) Reset() {
 	*x = CaptureWindowScreenshotRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[84]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5946,7 +6435,7 @@ func (x *CaptureWindowScreenshotRequest) String() string {
 func (*CaptureWindowScreenshotRequest) ProtoMessage() {}
 
 func (x *CaptureWindowScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[84]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5959,7 +6448,7 @@ func (x *CaptureWindowScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureWindowScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*CaptureWindowScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{84}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *CaptureWindowScreenshotRequest) GetWindow() string {
@@ -6037,7 +6526,7 @@ type CaptureWindowScreenshotResponse struct {
 
 func (x *CaptureWindowScreenshotResponse) Reset() {
 	*x = CaptureWindowScreenshotResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[85]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6049,7 +6538,7 @@ func (x *CaptureWindowScreenshotResponse) String() string {
 func (*CaptureWindowScreenshotResponse) ProtoMessage() {}
 
 func (x *CaptureWindowScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[85]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6062,7 +6551,7 @@ func (x *CaptureWindowScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureWindowScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*CaptureWindowScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{85}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *CaptureWindowScreenshotResponse) GetImageData() []byte {
@@ -6200,7 +6689,7 @@ type CaptureElementScreenshotRequest struct {
 
 func (x *CaptureElementScreenshotRequest) Reset() {
 	*x = CaptureElementScreenshotRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[86]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6212,7 +6701,7 @@ func (x *CaptureElementScreenshotRequest) String() string {
 func (*CaptureElementScreenshotRequest) ProtoMessage() {}
 
 func (x *CaptureElementScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[86]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6225,7 +6714,7 @@ func (x *CaptureElementScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureElementScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*CaptureElementScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{86}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *CaptureElementScreenshotRequest) GetParent() string {
@@ -6313,7 +6802,7 @@ type CaptureElementScreenshotResponse struct {
 
 func (x *CaptureElementScreenshotResponse) Reset() {
 	*x = CaptureElementScreenshotResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[87]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6325,7 +6814,7 @@ func (x *CaptureElementScreenshotResponse) String() string {
 func (*CaptureElementScreenshotResponse) ProtoMessage() {}
 
 func (x *CaptureElementScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[87]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6338,7 +6827,7 @@ func (x *CaptureElementScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureElementScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*CaptureElementScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{87}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *CaptureElementScreenshotResponse) GetImageData() []byte {
@@ -6491,7 +6980,7 @@ type CaptureRegionScreenshotRequest struct {
 
 func (x *CaptureRegionScreenshotRequest) Reset() {
 	*x = CaptureRegionScreenshotRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[88]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6503,7 +6992,7 @@ func (x *CaptureRegionScreenshotRequest) String() string {
 func (*CaptureRegionScreenshotRequest) ProtoMessage() {}
 
 func (x *CaptureRegionScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[88]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6516,7 +7005,7 @@ func (x *CaptureRegionScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureRegionScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*CaptureRegionScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{88}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *CaptureRegionScreenshotRequest) GetRegion() *_type.Region {
@@ -6586,7 +7075,7 @@ type CaptureRegionScreenshotResponse struct {
 
 func (x *CaptureRegionScreenshotResponse) Reset() {
 	*x = CaptureRegionScreenshotResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[89]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6598,7 +7087,7 @@ func (x *CaptureRegionScreenshotResponse) String() string {
 func (*CaptureRegionScreenshotResponse) ProtoMessage() {}
 
 func (x *CaptureRegionScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[89]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6611,7 +7100,7 @@ func (x *CaptureRegionScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureRegionScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*CaptureRegionScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{89}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *CaptureRegionScreenshotResponse) GetImageData() []byte {
@@ -6718,7 +7207,7 @@ type GetClipboardRequest struct {
 
 func (x *GetClipboardRequest) Reset() {
 	*x = GetClipboardRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[90]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6730,7 +7219,7 @@ func (x *GetClipboardRequest) String() string {
 func (*GetClipboardRequest) ProtoMessage() {}
 
 func (x *GetClipboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[90]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6743,7 +7232,7 @@ func (x *GetClipboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClipboardRequest.ProtoReflect.Descriptor instead.
 func (*GetClipboardRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{90}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *GetClipboardRequest) GetName() string {
@@ -6764,7 +7253,7 @@ type WriteClipboardRequest struct {
 
 func (x *WriteClipboardRequest) Reset() {
 	*x = WriteClipboardRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[91]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6776,7 +7265,7 @@ func (x *WriteClipboardRequest) String() string {
 func (*WriteClipboardRequest) ProtoMessage() {}
 
 func (x *WriteClipboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[91]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6789,7 +7278,7 @@ func (x *WriteClipboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteClipboardRequest.ProtoReflect.Descriptor instead.
 func (*WriteClipboardRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{91}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *WriteClipboardRequest) GetContent() *ClipboardContent {
@@ -6810,7 +7299,7 @@ type WriteClipboardResponse struct {
 
 func (x *WriteClipboardResponse) Reset() {
 	*x = WriteClipboardResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[92]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6822,7 +7311,7 @@ func (x *WriteClipboardResponse) String() string {
 func (*WriteClipboardResponse) ProtoMessage() {}
 
 func (x *WriteClipboardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[92]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6835,7 +7324,7 @@ func (x *WriteClipboardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteClipboardResponse.ProtoReflect.Descriptor instead.
 func (*WriteClipboardResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{92}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *WriteClipboardResponse) GetClipboard() *Clipboard {
@@ -6854,7 +7343,7 @@ type ClearClipboardRequest struct {
 
 func (x *ClearClipboardRequest) Reset() {
 	*x = ClearClipboardRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[93]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6866,7 +7355,7 @@ func (x *ClearClipboardRequest) String() string {
 func (*ClearClipboardRequest) ProtoMessage() {}
 
 func (x *ClearClipboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[93]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6879,7 +7368,7 @@ func (x *ClearClipboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClearClipboardRequest.ProtoReflect.Descriptor instead.
 func (*ClearClipboardRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{93}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{99}
 }
 
 // Response from clearing clipboard contents.
@@ -6893,7 +7382,7 @@ type ClearClipboardResponse struct {
 
 func (x *ClearClipboardResponse) Reset() {
 	*x = ClearClipboardResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[94]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6905,7 +7394,7 @@ func (x *ClearClipboardResponse) String() string {
 func (*ClearClipboardResponse) ProtoMessage() {}
 
 func (x *ClearClipboardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[94]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6918,7 +7407,7 @@ func (x *ClearClipboardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClearClipboardResponse.ProtoReflect.Descriptor instead.
 func (*ClearClipboardResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{94}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *ClearClipboardResponse) GetClipboard() *Clipboard {
@@ -6940,7 +7429,7 @@ type GetClipboardHistoryRequest struct {
 
 func (x *GetClipboardHistoryRequest) Reset() {
 	*x = GetClipboardHistoryRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[95]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6952,7 +7441,7 @@ func (x *GetClipboardHistoryRequest) String() string {
 func (*GetClipboardHistoryRequest) ProtoMessage() {}
 
 func (x *GetClipboardHistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[95]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6965,7 +7454,7 @@ func (x *GetClipboardHistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClipboardHistoryRequest.ProtoReflect.Descriptor instead.
 func (*GetClipboardHistoryRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{95}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *GetClipboardHistoryRequest) GetName() string {
@@ -6996,7 +7485,7 @@ type AutomateOpenFileDialogRequest struct {
 
 func (x *AutomateOpenFileDialogRequest) Reset() {
 	*x = AutomateOpenFileDialogRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[96]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7008,7 +7497,7 @@ func (x *AutomateOpenFileDialogRequest) String() string {
 func (*AutomateOpenFileDialogRequest) ProtoMessage() {}
 
 func (x *AutomateOpenFileDialogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[96]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7021,7 +7510,7 @@ func (x *AutomateOpenFileDialogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomateOpenFileDialogRequest.ProtoReflect.Descriptor instead.
 func (*AutomateOpenFileDialogRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{96}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *AutomateOpenFileDialogRequest) GetApplication() string {
@@ -7081,7 +7570,7 @@ type AutomateOpenFileDialogResponse struct {
 
 func (x *AutomateOpenFileDialogResponse) Reset() {
 	*x = AutomateOpenFileDialogResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[97]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7093,7 +7582,7 @@ func (x *AutomateOpenFileDialogResponse) String() string {
 func (*AutomateOpenFileDialogResponse) ProtoMessage() {}
 
 func (x *AutomateOpenFileDialogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[97]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7106,7 +7595,7 @@ func (x *AutomateOpenFileDialogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomateOpenFileDialogResponse.ProtoReflect.Descriptor instead.
 func (*AutomateOpenFileDialogResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{97}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *AutomateOpenFileDialogResponse) GetSuccess() bool {
@@ -7151,7 +7640,7 @@ type AutomateSaveFileDialogRequest struct {
 
 func (x *AutomateSaveFileDialogRequest) Reset() {
 	*x = AutomateSaveFileDialogRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[98]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7163,7 +7652,7 @@ func (x *AutomateSaveFileDialogRequest) String() string {
 func (*AutomateSaveFileDialogRequest) ProtoMessage() {}
 
 func (x *AutomateSaveFileDialogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[98]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7176,7 +7665,7 @@ func (x *AutomateSaveFileDialogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomateSaveFileDialogRequest.ProtoReflect.Descriptor instead.
 func (*AutomateSaveFileDialogRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{98}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *AutomateSaveFileDialogRequest) GetApplication() string {
@@ -7236,7 +7725,7 @@ type AutomateSaveFileDialogResponse struct {
 
 func (x *AutomateSaveFileDialogResponse) Reset() {
 	*x = AutomateSaveFileDialogResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[99]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7248,7 +7737,7 @@ func (x *AutomateSaveFileDialogResponse) String() string {
 func (*AutomateSaveFileDialogResponse) ProtoMessage() {}
 
 func (x *AutomateSaveFileDialogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[99]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7261,7 +7750,7 @@ func (x *AutomateSaveFileDialogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomateSaveFileDialogResponse.ProtoReflect.Descriptor instead.
 func (*AutomateSaveFileDialogResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{99}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *AutomateSaveFileDialogResponse) GetSuccess() bool {
@@ -7300,7 +7789,7 @@ type ExecuteAppleScriptRequest struct {
 
 func (x *ExecuteAppleScriptRequest) Reset() {
 	*x = ExecuteAppleScriptRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[100]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7312,7 +7801,7 @@ func (x *ExecuteAppleScriptRequest) String() string {
 func (*ExecuteAppleScriptRequest) ProtoMessage() {}
 
 func (x *ExecuteAppleScriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[100]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7325,7 +7814,7 @@ func (x *ExecuteAppleScriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteAppleScriptRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteAppleScriptRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{100}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *ExecuteAppleScriptRequest) GetScript() string {
@@ -7366,7 +7855,7 @@ type ExecuteAppleScriptResponse struct {
 
 func (x *ExecuteAppleScriptResponse) Reset() {
 	*x = ExecuteAppleScriptResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[101]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7378,7 +7867,7 @@ func (x *ExecuteAppleScriptResponse) String() string {
 func (*ExecuteAppleScriptResponse) ProtoMessage() {}
 
 func (x *ExecuteAppleScriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[101]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7391,7 +7880,7 @@ func (x *ExecuteAppleScriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteAppleScriptResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteAppleScriptResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{101}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *ExecuteAppleScriptResponse) GetSuccess() bool {
@@ -7437,7 +7926,7 @@ type ExecuteJavaScriptRequest struct {
 
 func (x *ExecuteJavaScriptRequest) Reset() {
 	*x = ExecuteJavaScriptRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[102]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7449,7 +7938,7 @@ func (x *ExecuteJavaScriptRequest) String() string {
 func (*ExecuteJavaScriptRequest) ProtoMessage() {}
 
 func (x *ExecuteJavaScriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[102]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7462,7 +7951,7 @@ func (x *ExecuteJavaScriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteJavaScriptRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteJavaScriptRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{102}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *ExecuteJavaScriptRequest) GetScript() string {
@@ -7503,7 +7992,7 @@ type ExecuteJavaScriptResponse struct {
 
 func (x *ExecuteJavaScriptResponse) Reset() {
 	*x = ExecuteJavaScriptResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[103]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7515,7 +8004,7 @@ func (x *ExecuteJavaScriptResponse) String() string {
 func (*ExecuteJavaScriptResponse) ProtoMessage() {}
 
 func (x *ExecuteJavaScriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[103]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7528,7 +8017,7 @@ func (x *ExecuteJavaScriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteJavaScriptResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteJavaScriptResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{103}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *ExecuteJavaScriptResponse) GetSuccess() bool {
@@ -7582,7 +8071,7 @@ type ExecuteShellCommandRequest struct {
 
 func (x *ExecuteShellCommandRequest) Reset() {
 	*x = ExecuteShellCommandRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[104]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7594,7 +8083,7 @@ func (x *ExecuteShellCommandRequest) String() string {
 func (*ExecuteShellCommandRequest) ProtoMessage() {}
 
 func (x *ExecuteShellCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[104]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7607,7 +8096,7 @@ func (x *ExecuteShellCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteShellCommandRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteShellCommandRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{104}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *ExecuteShellCommandRequest) GetCommand() string {
@@ -7680,7 +8169,7 @@ type ExecuteShellCommandResponse struct {
 
 func (x *ExecuteShellCommandResponse) Reset() {
 	*x = ExecuteShellCommandResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[105]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7692,7 +8181,7 @@ func (x *ExecuteShellCommandResponse) String() string {
 func (*ExecuteShellCommandResponse) ProtoMessage() {}
 
 func (x *ExecuteShellCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[105]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7705,7 +8194,7 @@ func (x *ExecuteShellCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteShellCommandResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteShellCommandResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{105}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *ExecuteShellCommandResponse) GetSuccess() bool {
@@ -7763,7 +8252,7 @@ type ValidateScriptRequest struct {
 
 func (x *ValidateScriptRequest) Reset() {
 	*x = ValidateScriptRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[106]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7775,7 +8264,7 @@ func (x *ValidateScriptRequest) String() string {
 func (*ValidateScriptRequest) ProtoMessage() {}
 
 func (x *ValidateScriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[106]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7788,7 +8277,7 @@ func (x *ValidateScriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateScriptRequest.ProtoReflect.Descriptor instead.
 func (*ValidateScriptRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{106}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *ValidateScriptRequest) GetType() ScriptType {
@@ -7820,7 +8309,7 @@ type ValidateScriptResponse struct {
 
 func (x *ValidateScriptResponse) Reset() {
 	*x = ValidateScriptResponse{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[107]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7832,7 +8321,7 @@ func (x *ValidateScriptResponse) String() string {
 func (*ValidateScriptResponse) ProtoMessage() {}
 
 func (x *ValidateScriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[107]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7845,7 +8334,7 @@ func (x *ValidateScriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateScriptResponse.ProtoReflect.Descriptor instead.
 func (*ValidateScriptResponse) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{107}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *ValidateScriptResponse) GetValid() bool {
@@ -7881,7 +8370,7 @@ type GetScriptingDictionaryCatalogRequest struct {
 
 func (x *GetScriptingDictionaryCatalogRequest) Reset() {
 	*x = GetScriptingDictionaryCatalogRequest{}
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[108]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7893,7 +8382,7 @@ func (x *GetScriptingDictionaryCatalogRequest) String() string {
 func (*GetScriptingDictionaryCatalogRequest) ProtoMessage() {}
 
 func (x *GetScriptingDictionaryCatalogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[108]
+	mi := &file_exactmac_v1_exact_mac_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7906,7 +8395,7 @@ func (x *GetScriptingDictionaryCatalogRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use GetScriptingDictionaryCatalogRequest.ProtoReflect.Descriptor instead.
 func (*GetScriptingDictionaryCatalogRequest) Descriptor() ([]byte, []int) {
-	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{108}
+	return file_exactmac_v1_exact_mac_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *GetScriptingDictionaryCatalogRequest) GetName() string {
@@ -8251,7 +8740,46 @@ const file_exactmac_v1_exact_mac_proto_rawDesc = "" +
 	"\x04skip\x18\x03 \x01(\x05B\x03\xe0A\x01R\x04skip\"r\n" +
 	"\x12ListMacrosResponse\x12/\n" +
 	"\x06macros\x18\x01 \x03(\v2\x12.exactmac.v1.MacroB\x03\xe0A\x03R\x06macros\x12+\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tB\x03\xe0A\x03R\rnextPageToken\"\x85\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tB\x03\xe0A\x03R\rnextPageToken\"=\n" +
+	"\x0fGetGrantRequest\x12*\n" +
+	"\x04name\x18\x01 \x01(\tB\x16\xe0A\x02\xfaA\x10\n" +
+	"\x0eexactmac/GrantR\x04name\"\x8f\x01\n" +
+	"\x11ListGrantsRequest\x12 \n" +
+	"\tpage_size\x18\x01 \x01(\x05B\x03\xe0A\x01R\bpageSize\x12\"\n" +
+	"\n" +
+	"page_token\x18\x02 \x01(\tB\x03\xe0A\x01R\tpageToken\x12\x17\n" +
+	"\x04skip\x18\x03 \x01(\x05B\x03\xe0A\x01R\x04skip\x12\x1b\n" +
+	"\x06filter\x18\x04 \x01(\tB\x03\xe0A\x01R\x06filter\"r\n" +
+	"\x12ListGrantsResponse\x12/\n" +
+	"\x06grants\x18\x01 \x03(\v2\x12.exactmac.v1.GrantB\x03\xe0A\x03R\x06grants\x12+\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tB\x03\xe0A\x03R\rnextPageToken\"\x9d\x03\n" +
+	"\x05Grant\x12\x17\n" +
+	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12#\n" +
+	"\n" +
+	"capability\x18\x02 \x01(\tB\x03\xe0A\x03R\n" +
+	"capability\x12\x19\n" +
+	"\x05scope\x18\x03 \x01(\tB\x03\xe0A\x03R\x05scope\x12\x1b\n" +
+	"\x06holder\x18\x04 \x01(\tB\x03\xe0A\x03R\x06holder\x12G\n" +
+	"\x1dholder_designated_requirement\x18\x05 \x01(\tB\x03\xe0A\x03R\x1bholderDesignatedRequirement\x12-\n" +
+	"\x10holder_is_signed\x18\x06 \x01(\bB\x03\xe0A\x03R\x0eholderIsSigned\x12\x19\n" +
+	"\x05basis\x18\a \x01(\tB\x03\xe0A\x03R\x05basis\x12\x1b\n" +
+	"\x06reason\x18\b \x01(\tB\x03\xe0A\x03R\x06reason\x12:\n" +
+	"\blifetime\x18\t \x01(\v2\x19.google.protobuf.DurationB\x03\xe0A\x03R\blifetime:2\xeaA/\n" +
+	"\x0eexactmac/Grant\x12\x0egrants/{grant}*\x06grants2\x05grant\"\xcf\x01\n" +
+	"\x1bPreauthorizeEnvelopeRequest\x12\x1b\n" +
+	"\x06reason\x18\x01 \x01(\tB\x03\xe0A\x02R\x06reason\x12'\n" +
+	"\fcapabilities\x18\x02 \x03(\tB\x03\xe0A\x02R\fcapabilities\x12\x1b\n" +
+	"\x06scopes\x18\x03 \x03(\tB\x03\xe0A\x01R\x06scopes\x12M\n" +
+	"\x12requested_lifetime\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\x03\xe0A\x02R\x11requestedLifetime\"\xc6\x02\n" +
+	"\x1cPreauthorizeEnvelopeResponse\x12\x13\n" +
+	"\x02id\x18\x01 \x01(\tB\x03\xe0A\x03R\x02id\x12'\n" +
+	"\fcapabilities\x18\x02 \x03(\tB\x03\xe0A\x03R\fcapabilities\x12\x1b\n" +
+	"\x06scopes\x18\x03 \x03(\tB\x03\xe0A\x03R\x06scopes\x12:\n" +
+	"\blifetime\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\x03\xe0A\x03R\blifetime\x12@\n" +
+	"\vexpiry_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
+	"expiryTime\x120\n" +
+	"\x11global_persistent\x18\x06 \x01(\bB\x03\xe0A\x03R\x10globalPersistent\x12\x1b\n" +
+	"\x06reason\x18\a \x01(\tB\x03\xe0A\x03R\x06reason\"\x85\x01\n" +
 	"\x12UpdateMacroRequest\x12-\n" +
 	"\x05macro\x18\x01 \x01(\v2\x12.exactmac.v1.MacroB\x03\xe0A\x02R\x05macro\x12@\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskB\x03\xe0A\x01R\n" +
@@ -8514,7 +9042,7 @@ const file_exactmac_v1_exact_mac_proto_rawDesc = "" +
 	" ApplicationActivationDisposition\x122\n" +
 	".APPLICATION_ACTIVATION_DISPOSITION_UNSPECIFIED\x10\x00\x120\n" +
 	",APPLICATION_ACTIVATION_DISPOSITION_ACTIVATED\x10\x01\x125\n" +
-	"1APPLICATION_ACTIVATION_DISPOSITION_ALREADY_ACTIVE\x10\x022\xb8R\n" +
+	"1APPLICATION_ACTIVATION_DISPOSITION_ALREADY_ACTIVE\x10\x022\xc3U\n" +
 	"\bExactMac\x12\x90\x01\n" +
 	"\x14GetApplicationBundle\x12(.exactmac.v1.GetApplicationBundleRequest\x1a\x1e.exactmac.v1.ApplicationBundle\".\xdaA\x04name\x82\xd3\xe4\x93\x02!\x12\x1f/v1/{name=applicationBundles/*}\x12\x91\x01\n" +
 	"\x16ListApplicationBundles\x12*.exactmac.v1.ListApplicationBundlesRequest\x1a+.exactmac.v1.ListApplicationBundlesResponse\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/v1/applicationBundles\x12\x94\x01\n" +
@@ -8586,7 +9114,12 @@ const file_exactmac_v1_exact_mac_proto_rawDesc = "" +
 	"\bGetMacro\x12\x1c.exactmac.v1.GetMacroRequest\x1a\x12.exactmac.v1.Macro\"\"\xdaA\x04name\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/{name=macros/*}\x12a\n" +
 	"\n" +
 	"ListMacros\x12\x1e.exactmac.v1.ListMacrosRequest\x1a\x1f.exactmac.v1.ListMacrosResponse\"\x12\x82\xd3\xe4\x93\x02\f\x12\n" +
-	"/v1/macros\x12\x80\x01\n" +
+	"/v1/macros\x12`\n" +
+	"\bGetGrant\x12\x1c.exactmac.v1.GetGrantRequest\x1a\x12.exactmac.v1.Grant\"\"\xdaA\x04name\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/{name=grants/*}\x12a\n" +
+	"\n" +
+	"ListGrants\x12\x1e.exactmac.v1.ListGrantsRequest\x1a\x1f.exactmac.v1.ListGrantsResponse\"\x12\x82\xd3\xe4\x93\x02\f\x12\n" +
+	"/v1/grants\x12\xc3\x01\n" +
+	"\x14PreauthorizeEnvelope\x12(.exactmac.v1.PreauthorizeEnvelopeRequest\x1a).exactmac.v1.PreauthorizeEnvelopeResponse\"V\xdaA&reason,capabilities,requested_lifetime\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/envelopes:preauthorizeEnvelope\x12\x80\x01\n" +
 	"\vUpdateMacro\x12\x1f.exactmac.v1.UpdateMacroRequest\x1a\x12.exactmac.v1.Macro\"<\xdaA\x11macro,update_mask\x82\xd3\xe4\x93\x02\":\x05macro2\x19/v1/{macro.name=macros/*}\x12j\n" +
 	"\vDeleteMacro\x12\x1f.exactmac.v1.DeleteMacroRequest\x1a\x16.google.protobuf.Empty\"\"\xdaA\x04name\x82\xd3\xe4\x93\x02\x15*\x13/v1/{name=macros/*}\x12\xb4\x01\n" +
 	"\fExecuteMacro\x12 .exactmac.v1.ExecuteMacroRequest\x1a\x1d.google.longrunning.Operation\"c\xcaA,\n" +
@@ -8611,7 +9144,7 @@ func file_exactmac_v1_exact_mac_proto_rawDescGZIP() []byte {
 }
 
 var file_exactmac_v1_exact_mac_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_exactmac_v1_exact_mac_proto_msgTypes = make([]protoimpl.MessageInfo, 111)
+var file_exactmac_v1_exact_mac_proto_msgTypes = make([]protoimpl.MessageInfo, 117)
 var file_exactmac_v1_exact_mac_proto_goTypes = []any{
 	(ApplicationCloseDisposition)(0),             // 0: exactmac.v1.ApplicationCloseDisposition
 	(ApplicationOpenMode)(0),                     // 1: exactmac.v1.ApplicationOpenMode
@@ -8691,322 +9224,339 @@ var file_exactmac_v1_exact_mac_proto_goTypes = []any{
 	(*GetMacroRequest)(nil),                      // 75: exactmac.v1.GetMacroRequest
 	(*ListMacrosRequest)(nil),                    // 76: exactmac.v1.ListMacrosRequest
 	(*ListMacrosResponse)(nil),                   // 77: exactmac.v1.ListMacrosResponse
-	(*UpdateMacroRequest)(nil),                   // 78: exactmac.v1.UpdateMacroRequest
-	(*DeleteMacroRequest)(nil),                   // 79: exactmac.v1.DeleteMacroRequest
-	(*ExecuteMacroRequest)(nil),                  // 80: exactmac.v1.ExecuteMacroRequest
-	(*ExecutionOptions)(nil),                     // 81: exactmac.v1.ExecutionOptions
-	(*ExecuteMacroResponse)(nil),                 // 82: exactmac.v1.ExecuteMacroResponse
-	(*ExecuteMacroMetadata)(nil),                 // 83: exactmac.v1.ExecuteMacroMetadata
-	(*BeginTransactionRequest)(nil),              // 84: exactmac.v1.BeginTransactionRequest
-	(*BeginTransactionResponse)(nil),             // 85: exactmac.v1.BeginTransactionResponse
-	(*CommitTransactionRequest)(nil),             // 86: exactmac.v1.CommitTransactionRequest
-	(*RollbackTransactionRequest)(nil),           // 87: exactmac.v1.RollbackTransactionRequest
-	(*GetSessionSnapshotRequest)(nil),            // 88: exactmac.v1.GetSessionSnapshotRequest
-	(*CaptureScreenshotRequest)(nil),             // 89: exactmac.v1.CaptureScreenshotRequest
-	(*CaptureScreenshotResponse)(nil),            // 90: exactmac.v1.CaptureScreenshotResponse
-	(*CaptureWindowScreenshotRequest)(nil),       // 91: exactmac.v1.CaptureWindowScreenshotRequest
-	(*CaptureWindowScreenshotResponse)(nil),      // 92: exactmac.v1.CaptureWindowScreenshotResponse
-	(*CaptureElementScreenshotRequest)(nil),      // 93: exactmac.v1.CaptureElementScreenshotRequest
-	(*CaptureElementScreenshotResponse)(nil),     // 94: exactmac.v1.CaptureElementScreenshotResponse
-	(*CaptureRegionScreenshotRequest)(nil),       // 95: exactmac.v1.CaptureRegionScreenshotRequest
-	(*CaptureRegionScreenshotResponse)(nil),      // 96: exactmac.v1.CaptureRegionScreenshotResponse
-	(*GetClipboardRequest)(nil),                  // 97: exactmac.v1.GetClipboardRequest
-	(*WriteClipboardRequest)(nil),                // 98: exactmac.v1.WriteClipboardRequest
-	(*WriteClipboardResponse)(nil),               // 99: exactmac.v1.WriteClipboardResponse
-	(*ClearClipboardRequest)(nil),                // 100: exactmac.v1.ClearClipboardRequest
-	(*ClearClipboardResponse)(nil),               // 101: exactmac.v1.ClearClipboardResponse
-	(*GetClipboardHistoryRequest)(nil),           // 102: exactmac.v1.GetClipboardHistoryRequest
-	(*AutomateOpenFileDialogRequest)(nil),        // 103: exactmac.v1.AutomateOpenFileDialogRequest
-	(*AutomateOpenFileDialogResponse)(nil),       // 104: exactmac.v1.AutomateOpenFileDialogResponse
-	(*AutomateSaveFileDialogRequest)(nil),        // 105: exactmac.v1.AutomateSaveFileDialogRequest
-	(*AutomateSaveFileDialogResponse)(nil),       // 106: exactmac.v1.AutomateSaveFileDialogResponse
-	(*ExecuteAppleScriptRequest)(nil),            // 107: exactmac.v1.ExecuteAppleScriptRequest
-	(*ExecuteAppleScriptResponse)(nil),           // 108: exactmac.v1.ExecuteAppleScriptResponse
-	(*ExecuteJavaScriptRequest)(nil),             // 109: exactmac.v1.ExecuteJavaScriptRequest
-	(*ExecuteJavaScriptResponse)(nil),            // 110: exactmac.v1.ExecuteJavaScriptResponse
-	(*ExecuteShellCommandRequest)(nil),           // 111: exactmac.v1.ExecuteShellCommandRequest
-	(*ExecuteShellCommandResponse)(nil),          // 112: exactmac.v1.ExecuteShellCommandResponse
-	(*ValidateScriptRequest)(nil),                // 113: exactmac.v1.ValidateScriptRequest
-	(*ValidateScriptResponse)(nil),               // 114: exactmac.v1.ValidateScriptResponse
-	(*GetScriptingDictionaryCatalogRequest)(nil), // 115: exactmac.v1.GetScriptingDictionaryCatalogRequest
-	nil,                                   // 116: exactmac.v1.ExecuteMacroRequest.ParameterValuesEntry
-	nil,                                   // 117: exactmac.v1.ExecuteShellCommandRequest.EnvironmentVariablesEntry
-	(ApplicationView)(0),                  // 118: exactmac.v1.ApplicationView
-	(*ApplicationBundle)(nil),             // 119: exactmac.v1.ApplicationBundle
-	(*Application)(nil),                   // 120: exactmac.v1.Application
-	(*Input)(nil),                         // 121: exactmac.v1.Input
-	(*Element)(nil),                       // 122: exactmac.v1.Element
-	(*_type.TraversalStats)(nil),          // 123: exactmac.type.TraversalStats
-	(*timestamppb.Timestamp)(nil),         // 124: google.protobuf.Timestamp
-	(*AttributeChange)(nil),               // 125: exactmac.v1.AttributeChange
-	(*_type.ElementSelector)(nil),         // 126: exactmac.type.ElementSelector
-	(*_type.Region)(nil),                  // 127: exactmac.type.Region
-	(*AttributeCondition)(nil),            // 128: exactmac.v1.AttributeCondition
-	(*fieldmaskpb.FieldMask)(nil),         // 129: google.protobuf.FieldMask
-	(*Window)(nil),                        // 130: exactmac.v1.Window
-	(*Observation)(nil),                   // 131: exactmac.v1.Observation
-	(ObservationType)(0),                  // 132: exactmac.v1.ObservationType
-	(*ObservationEvent)(nil),              // 133: exactmac.v1.ObservationEvent
-	(*Session)(nil),                       // 134: exactmac.v1.Session
-	(*Macro)(nil),                         // 135: exactmac.v1.Macro
-	(*durationpb.Duration)(nil),           // 136: google.protobuf.Duration
-	(*ExecutionLogEntry)(nil),             // 137: exactmac.v1.ExecutionLogEntry
-	(ImageFormat)(0),                      // 138: exactmac.v1.ImageFormat
-	(*status.Status)(nil),                 // 139: google.rpc.Status
-	(*ClipboardContent)(nil),              // 140: exactmac.v1.ClipboardContent
-	(*Clipboard)(nil),                     // 141: exactmac.v1.Clipboard
-	(ScriptType)(0),                       // 142: exactmac.v1.ScriptType
-	(*ListDisplaysRequest)(nil),           // 143: exactmac.v1.ListDisplaysRequest
-	(*GetDisplayRequest)(nil),             // 144: exactmac.v1.GetDisplayRequest
-	(*CaptureCursorPositionRequest)(nil),  // 145: exactmac.v1.CaptureCursorPositionRequest
-	(*WindowState)(nil),                   // 146: exactmac.v1.WindowState
-	(*longrunningpb.Operation)(nil),       // 147: google.longrunning.Operation
-	(*emptypb.Empty)(nil),                 // 148: google.protobuf.Empty
-	(*Transaction)(nil),                   // 149: exactmac.v1.Transaction
-	(*SessionSnapshot)(nil),               // 150: exactmac.v1.SessionSnapshot
-	(*ListDisplaysResponse)(nil),          // 151: exactmac.v1.ListDisplaysResponse
-	(*Display)(nil),                       // 152: exactmac.v1.Display
-	(*CaptureCursorPositionResponse)(nil), // 153: exactmac.v1.CaptureCursorPositionResponse
-	(*ClipboardHistory)(nil),              // 154: exactmac.v1.ClipboardHistory
-	(*ScriptingDictionaryCatalog)(nil),    // 155: exactmac.v1.ScriptingDictionaryCatalog
+	(*GetGrantRequest)(nil),                      // 78: exactmac.v1.GetGrantRequest
+	(*ListGrantsRequest)(nil),                    // 79: exactmac.v1.ListGrantsRequest
+	(*ListGrantsResponse)(nil),                   // 80: exactmac.v1.ListGrantsResponse
+	(*Grant)(nil),                                // 81: exactmac.v1.Grant
+	(*PreauthorizeEnvelopeRequest)(nil),          // 82: exactmac.v1.PreauthorizeEnvelopeRequest
+	(*PreauthorizeEnvelopeResponse)(nil),         // 83: exactmac.v1.PreauthorizeEnvelopeResponse
+	(*UpdateMacroRequest)(nil),                   // 84: exactmac.v1.UpdateMacroRequest
+	(*DeleteMacroRequest)(nil),                   // 85: exactmac.v1.DeleteMacroRequest
+	(*ExecuteMacroRequest)(nil),                  // 86: exactmac.v1.ExecuteMacroRequest
+	(*ExecutionOptions)(nil),                     // 87: exactmac.v1.ExecutionOptions
+	(*ExecuteMacroResponse)(nil),                 // 88: exactmac.v1.ExecuteMacroResponse
+	(*ExecuteMacroMetadata)(nil),                 // 89: exactmac.v1.ExecuteMacroMetadata
+	(*BeginTransactionRequest)(nil),              // 90: exactmac.v1.BeginTransactionRequest
+	(*BeginTransactionResponse)(nil),             // 91: exactmac.v1.BeginTransactionResponse
+	(*CommitTransactionRequest)(nil),             // 92: exactmac.v1.CommitTransactionRequest
+	(*RollbackTransactionRequest)(nil),           // 93: exactmac.v1.RollbackTransactionRequest
+	(*GetSessionSnapshotRequest)(nil),            // 94: exactmac.v1.GetSessionSnapshotRequest
+	(*CaptureScreenshotRequest)(nil),             // 95: exactmac.v1.CaptureScreenshotRequest
+	(*CaptureScreenshotResponse)(nil),            // 96: exactmac.v1.CaptureScreenshotResponse
+	(*CaptureWindowScreenshotRequest)(nil),       // 97: exactmac.v1.CaptureWindowScreenshotRequest
+	(*CaptureWindowScreenshotResponse)(nil),      // 98: exactmac.v1.CaptureWindowScreenshotResponse
+	(*CaptureElementScreenshotRequest)(nil),      // 99: exactmac.v1.CaptureElementScreenshotRequest
+	(*CaptureElementScreenshotResponse)(nil),     // 100: exactmac.v1.CaptureElementScreenshotResponse
+	(*CaptureRegionScreenshotRequest)(nil),       // 101: exactmac.v1.CaptureRegionScreenshotRequest
+	(*CaptureRegionScreenshotResponse)(nil),      // 102: exactmac.v1.CaptureRegionScreenshotResponse
+	(*GetClipboardRequest)(nil),                  // 103: exactmac.v1.GetClipboardRequest
+	(*WriteClipboardRequest)(nil),                // 104: exactmac.v1.WriteClipboardRequest
+	(*WriteClipboardResponse)(nil),               // 105: exactmac.v1.WriteClipboardResponse
+	(*ClearClipboardRequest)(nil),                // 106: exactmac.v1.ClearClipboardRequest
+	(*ClearClipboardResponse)(nil),               // 107: exactmac.v1.ClearClipboardResponse
+	(*GetClipboardHistoryRequest)(nil),           // 108: exactmac.v1.GetClipboardHistoryRequest
+	(*AutomateOpenFileDialogRequest)(nil),        // 109: exactmac.v1.AutomateOpenFileDialogRequest
+	(*AutomateOpenFileDialogResponse)(nil),       // 110: exactmac.v1.AutomateOpenFileDialogResponse
+	(*AutomateSaveFileDialogRequest)(nil),        // 111: exactmac.v1.AutomateSaveFileDialogRequest
+	(*AutomateSaveFileDialogResponse)(nil),       // 112: exactmac.v1.AutomateSaveFileDialogResponse
+	(*ExecuteAppleScriptRequest)(nil),            // 113: exactmac.v1.ExecuteAppleScriptRequest
+	(*ExecuteAppleScriptResponse)(nil),           // 114: exactmac.v1.ExecuteAppleScriptResponse
+	(*ExecuteJavaScriptRequest)(nil),             // 115: exactmac.v1.ExecuteJavaScriptRequest
+	(*ExecuteJavaScriptResponse)(nil),            // 116: exactmac.v1.ExecuteJavaScriptResponse
+	(*ExecuteShellCommandRequest)(nil),           // 117: exactmac.v1.ExecuteShellCommandRequest
+	(*ExecuteShellCommandResponse)(nil),          // 118: exactmac.v1.ExecuteShellCommandResponse
+	(*ValidateScriptRequest)(nil),                // 119: exactmac.v1.ValidateScriptRequest
+	(*ValidateScriptResponse)(nil),               // 120: exactmac.v1.ValidateScriptResponse
+	(*GetScriptingDictionaryCatalogRequest)(nil), // 121: exactmac.v1.GetScriptingDictionaryCatalogRequest
+	nil,                                   // 122: exactmac.v1.ExecuteMacroRequest.ParameterValuesEntry
+	nil,                                   // 123: exactmac.v1.ExecuteShellCommandRequest.EnvironmentVariablesEntry
+	(ApplicationView)(0),                  // 124: exactmac.v1.ApplicationView
+	(*ApplicationBundle)(nil),             // 125: exactmac.v1.ApplicationBundle
+	(*Application)(nil),                   // 126: exactmac.v1.Application
+	(*Input)(nil),                         // 127: exactmac.v1.Input
+	(*Element)(nil),                       // 128: exactmac.v1.Element
+	(*_type.TraversalStats)(nil),          // 129: exactmac.type.TraversalStats
+	(*timestamppb.Timestamp)(nil),         // 130: google.protobuf.Timestamp
+	(*AttributeChange)(nil),               // 131: exactmac.v1.AttributeChange
+	(*_type.ElementSelector)(nil),         // 132: exactmac.type.ElementSelector
+	(*_type.Region)(nil),                  // 133: exactmac.type.Region
+	(*AttributeCondition)(nil),            // 134: exactmac.v1.AttributeCondition
+	(*fieldmaskpb.FieldMask)(nil),         // 135: google.protobuf.FieldMask
+	(*Window)(nil),                        // 136: exactmac.v1.Window
+	(*Observation)(nil),                   // 137: exactmac.v1.Observation
+	(ObservationType)(0),                  // 138: exactmac.v1.ObservationType
+	(*ObservationEvent)(nil),              // 139: exactmac.v1.ObservationEvent
+	(*Session)(nil),                       // 140: exactmac.v1.Session
+	(*Macro)(nil),                         // 141: exactmac.v1.Macro
+	(*durationpb.Duration)(nil),           // 142: google.protobuf.Duration
+	(*ExecutionLogEntry)(nil),             // 143: exactmac.v1.ExecutionLogEntry
+	(ImageFormat)(0),                      // 144: exactmac.v1.ImageFormat
+	(*status.Status)(nil),                 // 145: google.rpc.Status
+	(*ClipboardContent)(nil),              // 146: exactmac.v1.ClipboardContent
+	(*Clipboard)(nil),                     // 147: exactmac.v1.Clipboard
+	(ScriptType)(0),                       // 148: exactmac.v1.ScriptType
+	(*ListDisplaysRequest)(nil),           // 149: exactmac.v1.ListDisplaysRequest
+	(*GetDisplayRequest)(nil),             // 150: exactmac.v1.GetDisplayRequest
+	(*CaptureCursorPositionRequest)(nil),  // 151: exactmac.v1.CaptureCursorPositionRequest
+	(*WindowState)(nil),                   // 152: exactmac.v1.WindowState
+	(*longrunningpb.Operation)(nil),       // 153: google.longrunning.Operation
+	(*emptypb.Empty)(nil),                 // 154: google.protobuf.Empty
+	(*Transaction)(nil),                   // 155: exactmac.v1.Transaction
+	(*SessionSnapshot)(nil),               // 156: exactmac.v1.SessionSnapshot
+	(*ListDisplaysResponse)(nil),          // 157: exactmac.v1.ListDisplaysResponse
+	(*Display)(nil),                       // 158: exactmac.v1.Display
+	(*CaptureCursorPositionResponse)(nil), // 159: exactmac.v1.CaptureCursorPositionResponse
+	(*ClipboardHistory)(nil),              // 160: exactmac.v1.ClipboardHistory
+	(*ScriptingDictionaryCatalog)(nil),    // 161: exactmac.v1.ScriptingDictionaryCatalog
 }
 var file_exactmac_v1_exact_mac_proto_depIdxs = []int32{
-	118, // 0: exactmac.v1.GetApplicationBundleRequest.view:type_name -> exactmac.v1.ApplicationView
-	118, // 1: exactmac.v1.ListApplicationBundlesRequest.view:type_name -> exactmac.v1.ApplicationView
-	119, // 2: exactmac.v1.ListApplicationBundlesResponse.application_bundles:type_name -> exactmac.v1.ApplicationBundle
+	124, // 0: exactmac.v1.GetApplicationBundleRequest.view:type_name -> exactmac.v1.ApplicationView
+	124, // 1: exactmac.v1.ListApplicationBundlesRequest.view:type_name -> exactmac.v1.ApplicationView
+	125, // 2: exactmac.v1.ListApplicationBundlesResponse.application_bundles:type_name -> exactmac.v1.ApplicationBundle
 	1,   // 3: exactmac.v1.OpenApplicationRequest.mode:type_name -> exactmac.v1.ApplicationOpenMode
-	120, // 4: exactmac.v1.OpenApplicationResponse.application:type_name -> exactmac.v1.Application
+	126, // 4: exactmac.v1.OpenApplicationResponse.application:type_name -> exactmac.v1.Application
 	2,   // 5: exactmac.v1.OpenApplicationResponse.disposition:type_name -> exactmac.v1.ApplicationOpenDisposition
-	118, // 6: exactmac.v1.GetApplicationRequest.view:type_name -> exactmac.v1.ApplicationView
-	118, // 7: exactmac.v1.ListApplicationsRequest.view:type_name -> exactmac.v1.ApplicationView
-	120, // 8: exactmac.v1.ListApplicationsResponse.applications:type_name -> exactmac.v1.Application
-	120, // 9: exactmac.v1.ActivateApplicationResponse.application:type_name -> exactmac.v1.Application
+	124, // 6: exactmac.v1.GetApplicationRequest.view:type_name -> exactmac.v1.ApplicationView
+	124, // 7: exactmac.v1.ListApplicationsRequest.view:type_name -> exactmac.v1.ApplicationView
+	126, // 8: exactmac.v1.ListApplicationsResponse.applications:type_name -> exactmac.v1.Application
+	126, // 9: exactmac.v1.ActivateApplicationResponse.application:type_name -> exactmac.v1.Application
 	3,   // 10: exactmac.v1.ActivateApplicationResponse.disposition:type_name -> exactmac.v1.ApplicationActivationDisposition
-	120, // 11: exactmac.v1.CloseApplicationResponse.application:type_name -> exactmac.v1.Application
+	126, // 11: exactmac.v1.CloseApplicationResponse.application:type_name -> exactmac.v1.Application
 	0,   // 12: exactmac.v1.CloseApplicationResponse.disposition:type_name -> exactmac.v1.ApplicationCloseDisposition
-	121, // 13: exactmac.v1.CreateInputRequest.input:type_name -> exactmac.v1.Input
-	121, // 14: exactmac.v1.ListInputsResponse.inputs:type_name -> exactmac.v1.Input
-	122, // 15: exactmac.v1.TraverseAccessibilityResponse.elements:type_name -> exactmac.v1.Element
-	123, // 16: exactmac.v1.TraverseAccessibilityResponse.stats:type_name -> exactmac.type.TraversalStats
-	124, // 17: exactmac.v1.TraverseAccessibilityResponse.processing_time:type_name -> google.protobuf.Timestamp
-	122, // 18: exactmac.v1.WatchAccessibilityResponse.added_elements:type_name -> exactmac.v1.Element
-	122, // 19: exactmac.v1.WatchAccessibilityResponse.removed_elements:type_name -> exactmac.v1.Element
+	127, // 13: exactmac.v1.CreateInputRequest.input:type_name -> exactmac.v1.Input
+	127, // 14: exactmac.v1.ListInputsResponse.inputs:type_name -> exactmac.v1.Input
+	128, // 15: exactmac.v1.TraverseAccessibilityResponse.elements:type_name -> exactmac.v1.Element
+	129, // 16: exactmac.v1.TraverseAccessibilityResponse.stats:type_name -> exactmac.type.TraversalStats
+	130, // 17: exactmac.v1.TraverseAccessibilityResponse.processing_time:type_name -> google.protobuf.Timestamp
+	128, // 18: exactmac.v1.WatchAccessibilityResponse.added_elements:type_name -> exactmac.v1.Element
+	128, // 19: exactmac.v1.WatchAccessibilityResponse.removed_elements:type_name -> exactmac.v1.Element
 	27,  // 20: exactmac.v1.WatchAccessibilityResponse.modified_elements:type_name -> exactmac.v1.ModifiedElement
-	122, // 21: exactmac.v1.ModifiedElement.old_element:type_name -> exactmac.v1.Element
-	122, // 22: exactmac.v1.ModifiedElement.new_element:type_name -> exactmac.v1.Element
-	125, // 23: exactmac.v1.ModifiedElement.changes:type_name -> exactmac.v1.AttributeChange
-	126, // 24: exactmac.v1.FindElementsRequest.selector:type_name -> exactmac.type.ElementSelector
-	122, // 25: exactmac.v1.FindElementsResponse.elements:type_name -> exactmac.v1.Element
-	127, // 26: exactmac.v1.FindRegionElementsRequest.region:type_name -> exactmac.type.Region
-	126, // 27: exactmac.v1.FindRegionElementsRequest.selector:type_name -> exactmac.type.ElementSelector
-	122, // 28: exactmac.v1.FindRegionElementsResponse.elements:type_name -> exactmac.v1.Element
-	122, // 29: exactmac.v1.ListElementsResponse.elements:type_name -> exactmac.v1.Element
-	126, // 30: exactmac.v1.ClickElementRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 21: exactmac.v1.ModifiedElement.old_element:type_name -> exactmac.v1.Element
+	128, // 22: exactmac.v1.ModifiedElement.new_element:type_name -> exactmac.v1.Element
+	131, // 23: exactmac.v1.ModifiedElement.changes:type_name -> exactmac.v1.AttributeChange
+	132, // 24: exactmac.v1.FindElementsRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 25: exactmac.v1.FindElementsResponse.elements:type_name -> exactmac.v1.Element
+	133, // 26: exactmac.v1.FindRegionElementsRequest.region:type_name -> exactmac.type.Region
+	132, // 27: exactmac.v1.FindRegionElementsRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 28: exactmac.v1.FindRegionElementsResponse.elements:type_name -> exactmac.v1.Element
+	128, // 29: exactmac.v1.ListElementsResponse.elements:type_name -> exactmac.v1.Element
+	132, // 30: exactmac.v1.ClickElementRequest.selector:type_name -> exactmac.type.ElementSelector
 	4,   // 31: exactmac.v1.ClickElementRequest.click_type:type_name -> exactmac.v1.ClickElementRequest.ClickType
-	122, // 32: exactmac.v1.ClickElementResponse.element:type_name -> exactmac.v1.Element
-	126, // 33: exactmac.v1.WriteElementValueRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 32: exactmac.v1.ClickElementResponse.element:type_name -> exactmac.v1.Element
+	132, // 33: exactmac.v1.WriteElementValueRequest.selector:type_name -> exactmac.type.ElementSelector
 	5,   // 34: exactmac.v1.WriteElementValueRequest.write_mode:type_name -> exactmac.v1.WriteElementValueRequest.WriteMode
-	122, // 35: exactmac.v1.WriteElementValueResponse.element:type_name -> exactmac.v1.Element
-	126, // 36: exactmac.v1.PerformElementActionRequest.selector:type_name -> exactmac.type.ElementSelector
-	122, // 37: exactmac.v1.PerformElementActionResponse.element:type_name -> exactmac.v1.Element
-	126, // 38: exactmac.v1.WaitElementRequest.selector:type_name -> exactmac.type.ElementSelector
-	122, // 39: exactmac.v1.WaitElementResponse.element:type_name -> exactmac.v1.Element
-	126, // 40: exactmac.v1.WaitElementMetadata.selector:type_name -> exactmac.type.ElementSelector
-	126, // 41: exactmac.v1.WaitElementStateRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 35: exactmac.v1.WriteElementValueResponse.element:type_name -> exactmac.v1.Element
+	132, // 36: exactmac.v1.PerformElementActionRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 37: exactmac.v1.PerformElementActionResponse.element:type_name -> exactmac.v1.Element
+	132, // 38: exactmac.v1.WaitElementRequest.selector:type_name -> exactmac.type.ElementSelector
+	128, // 39: exactmac.v1.WaitElementResponse.element:type_name -> exactmac.v1.Element
+	132, // 40: exactmac.v1.WaitElementMetadata.selector:type_name -> exactmac.type.ElementSelector
+	132, // 41: exactmac.v1.WaitElementStateRequest.selector:type_name -> exactmac.type.ElementSelector
 	47,  // 42: exactmac.v1.WaitElementStateRequest.condition:type_name -> exactmac.v1.StateCondition
-	128, // 43: exactmac.v1.StateCondition.attribute:type_name -> exactmac.v1.AttributeCondition
-	122, // 44: exactmac.v1.WaitElementStateResponse.element:type_name -> exactmac.v1.Element
+	134, // 43: exactmac.v1.StateCondition.attribute:type_name -> exactmac.v1.AttributeCondition
+	128, // 44: exactmac.v1.WaitElementStateResponse.element:type_name -> exactmac.v1.Element
 	47,  // 45: exactmac.v1.WaitElementStateMetadata.condition:type_name -> exactmac.v1.StateCondition
-	129, // 46: exactmac.v1.GetWindowRequest.read_mask:type_name -> google.protobuf.FieldMask
-	130, // 47: exactmac.v1.ListWindowsResponse.windows:type_name -> exactmac.v1.Window
-	131, // 48: exactmac.v1.CreateObservationRequest.observation:type_name -> exactmac.v1.Observation
-	132, // 49: exactmac.v1.CreateObservationMetadata.type:type_name -> exactmac.v1.ObservationType
-	131, // 50: exactmac.v1.ListObservationsResponse.observations:type_name -> exactmac.v1.Observation
-	133, // 51: exactmac.v1.StreamObservationsResponse.event:type_name -> exactmac.v1.ObservationEvent
-	134, // 52: exactmac.v1.CreateSessionRequest.session:type_name -> exactmac.v1.Session
-	134, // 53: exactmac.v1.ListSessionsResponse.sessions:type_name -> exactmac.v1.Session
-	135, // 54: exactmac.v1.CreateMacroRequest.macro:type_name -> exactmac.v1.Macro
-	135, // 55: exactmac.v1.ListMacrosResponse.macros:type_name -> exactmac.v1.Macro
-	135, // 56: exactmac.v1.UpdateMacroRequest.macro:type_name -> exactmac.v1.Macro
-	129, // 57: exactmac.v1.UpdateMacroRequest.update_mask:type_name -> google.protobuf.FieldMask
-	116, // 58: exactmac.v1.ExecuteMacroRequest.parameter_values:type_name -> exactmac.v1.ExecuteMacroRequest.ParameterValuesEntry
-	81,  // 59: exactmac.v1.ExecuteMacroRequest.options:type_name -> exactmac.v1.ExecutionOptions
-	136, // 60: exactmac.v1.ExecuteMacroResponse.execution_duration:type_name -> google.protobuf.Duration
-	137, // 61: exactmac.v1.ExecuteMacroResponse.log_entries:type_name -> exactmac.v1.ExecutionLogEntry
-	136, // 62: exactmac.v1.ExecuteMacroMetadata.elapsed_duration:type_name -> google.protobuf.Duration
-	6,   // 63: exactmac.v1.BeginTransactionRequest.isolation_level:type_name -> exactmac.v1.BeginTransactionRequest.IsolationLevel
-	134, // 64: exactmac.v1.BeginTransactionResponse.session:type_name -> exactmac.v1.Session
-	138, // 65: exactmac.v1.CaptureScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
-	138, // 66: exactmac.v1.CaptureScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
-	139, // 67: exactmac.v1.CaptureScreenshotResponse.ocr_error:type_name -> google.rpc.Status
-	127, // 68: exactmac.v1.CaptureScreenshotResponse.region:type_name -> exactmac.type.Region
-	138, // 69: exactmac.v1.CaptureWindowScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
-	138, // 70: exactmac.v1.CaptureWindowScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
-	139, // 71: exactmac.v1.CaptureWindowScreenshotResponse.ocr_error:type_name -> google.rpc.Status
-	127, // 72: exactmac.v1.CaptureWindowScreenshotResponse.window_frame:type_name -> exactmac.type.Region
-	127, // 73: exactmac.v1.CaptureWindowScreenshotResponse.region:type_name -> exactmac.type.Region
-	138, // 74: exactmac.v1.CaptureElementScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
-	138, // 75: exactmac.v1.CaptureElementScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
-	139, // 76: exactmac.v1.CaptureElementScreenshotResponse.ocr_error:type_name -> google.rpc.Status
-	127, // 77: exactmac.v1.CaptureElementScreenshotResponse.element_frame:type_name -> exactmac.type.Region
-	127, // 78: exactmac.v1.CaptureElementScreenshotResponse.region:type_name -> exactmac.type.Region
-	127, // 79: exactmac.v1.CaptureRegionScreenshotRequest.region:type_name -> exactmac.type.Region
-	138, // 80: exactmac.v1.CaptureRegionScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
-	138, // 81: exactmac.v1.CaptureRegionScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
-	127, // 82: exactmac.v1.CaptureRegionScreenshotResponse.region:type_name -> exactmac.type.Region
-	139, // 83: exactmac.v1.CaptureRegionScreenshotResponse.ocr_error:type_name -> google.rpc.Status
-	140, // 84: exactmac.v1.WriteClipboardRequest.content:type_name -> exactmac.v1.ClipboardContent
-	141, // 85: exactmac.v1.WriteClipboardResponse.clipboard:type_name -> exactmac.v1.Clipboard
-	141, // 86: exactmac.v1.ClearClipboardResponse.clipboard:type_name -> exactmac.v1.Clipboard
-	136, // 87: exactmac.v1.ExecuteAppleScriptRequest.timeout:type_name -> google.protobuf.Duration
-	136, // 88: exactmac.v1.ExecuteAppleScriptResponse.execution_duration:type_name -> google.protobuf.Duration
-	136, // 89: exactmac.v1.ExecuteJavaScriptRequest.timeout:type_name -> google.protobuf.Duration
-	136, // 90: exactmac.v1.ExecuteJavaScriptResponse.execution_duration:type_name -> google.protobuf.Duration
-	117, // 91: exactmac.v1.ExecuteShellCommandRequest.environment_variables:type_name -> exactmac.v1.ExecuteShellCommandRequest.EnvironmentVariablesEntry
-	136, // 92: exactmac.v1.ExecuteShellCommandRequest.timeout:type_name -> google.protobuf.Duration
-	136, // 93: exactmac.v1.ExecuteShellCommandResponse.execution_duration:type_name -> google.protobuf.Duration
-	142, // 94: exactmac.v1.ValidateScriptRequest.type:type_name -> exactmac.v1.ScriptType
-	7,   // 95: exactmac.v1.ExactMac.GetApplicationBundle:input_type -> exactmac.v1.GetApplicationBundleRequest
-	8,   // 96: exactmac.v1.ExactMac.ListApplicationBundles:input_type -> exactmac.v1.ListApplicationBundlesRequest
-	10,  // 97: exactmac.v1.ExactMac.OpenApplication:input_type -> exactmac.v1.OpenApplicationRequest
-	12,  // 98: exactmac.v1.ExactMac.GetApplication:input_type -> exactmac.v1.GetApplicationRequest
-	13,  // 99: exactmac.v1.ExactMac.ListApplications:input_type -> exactmac.v1.ListApplicationsRequest
-	15,  // 100: exactmac.v1.ExactMac.ActivateApplication:input_type -> exactmac.v1.ActivateApplicationRequest
-	17,  // 101: exactmac.v1.ExactMac.CloseApplication:input_type -> exactmac.v1.CloseApplicationRequest
-	19,  // 102: exactmac.v1.ExactMac.CreateInput:input_type -> exactmac.v1.CreateInputRequest
-	20,  // 103: exactmac.v1.ExactMac.GetInput:input_type -> exactmac.v1.GetInputRequest
-	21,  // 104: exactmac.v1.ExactMac.ListInputs:input_type -> exactmac.v1.ListInputsRequest
-	23,  // 105: exactmac.v1.ExactMac.TraverseAccessibility:input_type -> exactmac.v1.TraverseAccessibilityRequest
-	25,  // 106: exactmac.v1.ExactMac.WatchAccessibility:input_type -> exactmac.v1.WatchAccessibilityRequest
-	50,  // 107: exactmac.v1.ExactMac.GetWindow:input_type -> exactmac.v1.GetWindowRequest
-	51,  // 108: exactmac.v1.ExactMac.ListWindows:input_type -> exactmac.v1.ListWindowsRequest
-	52,  // 109: exactmac.v1.ExactMac.GetWindowState:input_type -> exactmac.v1.GetWindowStateRequest
-	54,  // 110: exactmac.v1.ExactMac.FocusWindow:input_type -> exactmac.v1.FocusWindowRequest
-	55,  // 111: exactmac.v1.ExactMac.MoveWindow:input_type -> exactmac.v1.MoveWindowRequest
-	56,  // 112: exactmac.v1.ExactMac.ResizeWindow:input_type -> exactmac.v1.ResizeWindowRequest
-	57,  // 113: exactmac.v1.ExactMac.MinimizeWindow:input_type -> exactmac.v1.MinimizeWindowRequest
-	58,  // 114: exactmac.v1.ExactMac.RestoreWindow:input_type -> exactmac.v1.RestoreWindowRequest
-	59,  // 115: exactmac.v1.ExactMac.CloseWindow:input_type -> exactmac.v1.CloseWindowRequest
-	28,  // 116: exactmac.v1.ExactMac.FindElements:input_type -> exactmac.v1.FindElementsRequest
-	30,  // 117: exactmac.v1.ExactMac.FindRegionElements:input_type -> exactmac.v1.FindRegionElementsRequest
-	32,  // 118: exactmac.v1.ExactMac.GetElement:input_type -> exactmac.v1.GetElementRequest
-	33,  // 119: exactmac.v1.ExactMac.ListElements:input_type -> exactmac.v1.ListElementsRequest
-	35,  // 120: exactmac.v1.ExactMac.ClickElement:input_type -> exactmac.v1.ClickElementRequest
-	37,  // 121: exactmac.v1.ExactMac.WriteElementValue:input_type -> exactmac.v1.WriteElementValueRequest
-	39,  // 122: exactmac.v1.ExactMac.GetElementActions:input_type -> exactmac.v1.GetElementActionsRequest
-	41,  // 123: exactmac.v1.ExactMac.PerformElementAction:input_type -> exactmac.v1.PerformElementActionRequest
-	43,  // 124: exactmac.v1.ExactMac.WaitElement:input_type -> exactmac.v1.WaitElementRequest
-	46,  // 125: exactmac.v1.ExactMac.WaitElementState:input_type -> exactmac.v1.WaitElementStateRequest
-	61,  // 126: exactmac.v1.ExactMac.CreateObservation:input_type -> exactmac.v1.CreateObservationRequest
-	63,  // 127: exactmac.v1.ExactMac.GetObservation:input_type -> exactmac.v1.GetObservationRequest
-	64,  // 128: exactmac.v1.ExactMac.ListObservations:input_type -> exactmac.v1.ListObservationsRequest
-	66,  // 129: exactmac.v1.ExactMac.CancelObservation:input_type -> exactmac.v1.CancelObservationRequest
-	67,  // 130: exactmac.v1.ExactMac.StreamObservations:input_type -> exactmac.v1.StreamObservationsRequest
-	69,  // 131: exactmac.v1.ExactMac.CreateSession:input_type -> exactmac.v1.CreateSessionRequest
-	70,  // 132: exactmac.v1.ExactMac.GetSession:input_type -> exactmac.v1.GetSessionRequest
-	71,  // 133: exactmac.v1.ExactMac.ListSessions:input_type -> exactmac.v1.ListSessionsRequest
-	73,  // 134: exactmac.v1.ExactMac.DeleteSession:input_type -> exactmac.v1.DeleteSessionRequest
-	84,  // 135: exactmac.v1.ExactMac.BeginTransaction:input_type -> exactmac.v1.BeginTransactionRequest
-	86,  // 136: exactmac.v1.ExactMac.CommitTransaction:input_type -> exactmac.v1.CommitTransactionRequest
-	87,  // 137: exactmac.v1.ExactMac.RollbackTransaction:input_type -> exactmac.v1.RollbackTransactionRequest
-	88,  // 138: exactmac.v1.ExactMac.GetSessionSnapshot:input_type -> exactmac.v1.GetSessionSnapshotRequest
-	89,  // 139: exactmac.v1.ExactMac.CaptureScreenshot:input_type -> exactmac.v1.CaptureScreenshotRequest
-	91,  // 140: exactmac.v1.ExactMac.CaptureWindowScreenshot:input_type -> exactmac.v1.CaptureWindowScreenshotRequest
-	93,  // 141: exactmac.v1.ExactMac.CaptureElementScreenshot:input_type -> exactmac.v1.CaptureElementScreenshotRequest
-	95,  // 142: exactmac.v1.ExactMac.CaptureRegionScreenshot:input_type -> exactmac.v1.CaptureRegionScreenshotRequest
-	143, // 143: exactmac.v1.ExactMac.ListDisplays:input_type -> exactmac.v1.ListDisplaysRequest
-	144, // 144: exactmac.v1.ExactMac.GetDisplay:input_type -> exactmac.v1.GetDisplayRequest
-	145, // 145: exactmac.v1.ExactMac.CaptureCursorPosition:input_type -> exactmac.v1.CaptureCursorPositionRequest
-	97,  // 146: exactmac.v1.ExactMac.GetClipboard:input_type -> exactmac.v1.GetClipboardRequest
-	98,  // 147: exactmac.v1.ExactMac.WriteClipboard:input_type -> exactmac.v1.WriteClipboardRequest
-	100, // 148: exactmac.v1.ExactMac.ClearClipboard:input_type -> exactmac.v1.ClearClipboardRequest
-	102, // 149: exactmac.v1.ExactMac.GetClipboardHistory:input_type -> exactmac.v1.GetClipboardHistoryRequest
-	103, // 150: exactmac.v1.ExactMac.AutomateOpenFileDialog:input_type -> exactmac.v1.AutomateOpenFileDialogRequest
-	105, // 151: exactmac.v1.ExactMac.AutomateSaveFileDialog:input_type -> exactmac.v1.AutomateSaveFileDialogRequest
-	74,  // 152: exactmac.v1.ExactMac.CreateMacro:input_type -> exactmac.v1.CreateMacroRequest
-	75,  // 153: exactmac.v1.ExactMac.GetMacro:input_type -> exactmac.v1.GetMacroRequest
-	76,  // 154: exactmac.v1.ExactMac.ListMacros:input_type -> exactmac.v1.ListMacrosRequest
-	78,  // 155: exactmac.v1.ExactMac.UpdateMacro:input_type -> exactmac.v1.UpdateMacroRequest
-	79,  // 156: exactmac.v1.ExactMac.DeleteMacro:input_type -> exactmac.v1.DeleteMacroRequest
-	80,  // 157: exactmac.v1.ExactMac.ExecuteMacro:input_type -> exactmac.v1.ExecuteMacroRequest
-	107, // 158: exactmac.v1.ExactMac.ExecuteAppleScript:input_type -> exactmac.v1.ExecuteAppleScriptRequest
-	109, // 159: exactmac.v1.ExactMac.ExecuteJavaScript:input_type -> exactmac.v1.ExecuteJavaScriptRequest
-	111, // 160: exactmac.v1.ExactMac.ExecuteShellCommand:input_type -> exactmac.v1.ExecuteShellCommandRequest
-	113, // 161: exactmac.v1.ExactMac.ValidateScript:input_type -> exactmac.v1.ValidateScriptRequest
-	115, // 162: exactmac.v1.ExactMac.GetScriptingDictionaryCatalog:input_type -> exactmac.v1.GetScriptingDictionaryCatalogRequest
-	119, // 163: exactmac.v1.ExactMac.GetApplicationBundle:output_type -> exactmac.v1.ApplicationBundle
-	9,   // 164: exactmac.v1.ExactMac.ListApplicationBundles:output_type -> exactmac.v1.ListApplicationBundlesResponse
-	11,  // 165: exactmac.v1.ExactMac.OpenApplication:output_type -> exactmac.v1.OpenApplicationResponse
-	120, // 166: exactmac.v1.ExactMac.GetApplication:output_type -> exactmac.v1.Application
-	14,  // 167: exactmac.v1.ExactMac.ListApplications:output_type -> exactmac.v1.ListApplicationsResponse
-	16,  // 168: exactmac.v1.ExactMac.ActivateApplication:output_type -> exactmac.v1.ActivateApplicationResponse
-	18,  // 169: exactmac.v1.ExactMac.CloseApplication:output_type -> exactmac.v1.CloseApplicationResponse
-	121, // 170: exactmac.v1.ExactMac.CreateInput:output_type -> exactmac.v1.Input
-	121, // 171: exactmac.v1.ExactMac.GetInput:output_type -> exactmac.v1.Input
-	22,  // 172: exactmac.v1.ExactMac.ListInputs:output_type -> exactmac.v1.ListInputsResponse
-	24,  // 173: exactmac.v1.ExactMac.TraverseAccessibility:output_type -> exactmac.v1.TraverseAccessibilityResponse
-	26,  // 174: exactmac.v1.ExactMac.WatchAccessibility:output_type -> exactmac.v1.WatchAccessibilityResponse
-	130, // 175: exactmac.v1.ExactMac.GetWindow:output_type -> exactmac.v1.Window
-	53,  // 176: exactmac.v1.ExactMac.ListWindows:output_type -> exactmac.v1.ListWindowsResponse
-	146, // 177: exactmac.v1.ExactMac.GetWindowState:output_type -> exactmac.v1.WindowState
-	130, // 178: exactmac.v1.ExactMac.FocusWindow:output_type -> exactmac.v1.Window
-	130, // 179: exactmac.v1.ExactMac.MoveWindow:output_type -> exactmac.v1.Window
-	130, // 180: exactmac.v1.ExactMac.ResizeWindow:output_type -> exactmac.v1.Window
-	130, // 181: exactmac.v1.ExactMac.MinimizeWindow:output_type -> exactmac.v1.Window
-	130, // 182: exactmac.v1.ExactMac.RestoreWindow:output_type -> exactmac.v1.Window
-	60,  // 183: exactmac.v1.ExactMac.CloseWindow:output_type -> exactmac.v1.CloseWindowResponse
-	29,  // 184: exactmac.v1.ExactMac.FindElements:output_type -> exactmac.v1.FindElementsResponse
-	31,  // 185: exactmac.v1.ExactMac.FindRegionElements:output_type -> exactmac.v1.FindRegionElementsResponse
-	122, // 186: exactmac.v1.ExactMac.GetElement:output_type -> exactmac.v1.Element
-	34,  // 187: exactmac.v1.ExactMac.ListElements:output_type -> exactmac.v1.ListElementsResponse
-	36,  // 188: exactmac.v1.ExactMac.ClickElement:output_type -> exactmac.v1.ClickElementResponse
-	38,  // 189: exactmac.v1.ExactMac.WriteElementValue:output_type -> exactmac.v1.WriteElementValueResponse
-	40,  // 190: exactmac.v1.ExactMac.GetElementActions:output_type -> exactmac.v1.ElementActions
-	42,  // 191: exactmac.v1.ExactMac.PerformElementAction:output_type -> exactmac.v1.PerformElementActionResponse
-	147, // 192: exactmac.v1.ExactMac.WaitElement:output_type -> google.longrunning.Operation
-	147, // 193: exactmac.v1.ExactMac.WaitElementState:output_type -> google.longrunning.Operation
-	147, // 194: exactmac.v1.ExactMac.CreateObservation:output_type -> google.longrunning.Operation
-	131, // 195: exactmac.v1.ExactMac.GetObservation:output_type -> exactmac.v1.Observation
-	65,  // 196: exactmac.v1.ExactMac.ListObservations:output_type -> exactmac.v1.ListObservationsResponse
-	131, // 197: exactmac.v1.ExactMac.CancelObservation:output_type -> exactmac.v1.Observation
-	68,  // 198: exactmac.v1.ExactMac.StreamObservations:output_type -> exactmac.v1.StreamObservationsResponse
-	134, // 199: exactmac.v1.ExactMac.CreateSession:output_type -> exactmac.v1.Session
-	134, // 200: exactmac.v1.ExactMac.GetSession:output_type -> exactmac.v1.Session
-	72,  // 201: exactmac.v1.ExactMac.ListSessions:output_type -> exactmac.v1.ListSessionsResponse
-	148, // 202: exactmac.v1.ExactMac.DeleteSession:output_type -> google.protobuf.Empty
-	85,  // 203: exactmac.v1.ExactMac.BeginTransaction:output_type -> exactmac.v1.BeginTransactionResponse
-	149, // 204: exactmac.v1.ExactMac.CommitTransaction:output_type -> exactmac.v1.Transaction
-	149, // 205: exactmac.v1.ExactMac.RollbackTransaction:output_type -> exactmac.v1.Transaction
-	150, // 206: exactmac.v1.ExactMac.GetSessionSnapshot:output_type -> exactmac.v1.SessionSnapshot
-	90,  // 207: exactmac.v1.ExactMac.CaptureScreenshot:output_type -> exactmac.v1.CaptureScreenshotResponse
-	92,  // 208: exactmac.v1.ExactMac.CaptureWindowScreenshot:output_type -> exactmac.v1.CaptureWindowScreenshotResponse
-	94,  // 209: exactmac.v1.ExactMac.CaptureElementScreenshot:output_type -> exactmac.v1.CaptureElementScreenshotResponse
-	96,  // 210: exactmac.v1.ExactMac.CaptureRegionScreenshot:output_type -> exactmac.v1.CaptureRegionScreenshotResponse
-	151, // 211: exactmac.v1.ExactMac.ListDisplays:output_type -> exactmac.v1.ListDisplaysResponse
-	152, // 212: exactmac.v1.ExactMac.GetDisplay:output_type -> exactmac.v1.Display
-	153, // 213: exactmac.v1.ExactMac.CaptureCursorPosition:output_type -> exactmac.v1.CaptureCursorPositionResponse
-	141, // 214: exactmac.v1.ExactMac.GetClipboard:output_type -> exactmac.v1.Clipboard
-	99,  // 215: exactmac.v1.ExactMac.WriteClipboard:output_type -> exactmac.v1.WriteClipboardResponse
-	101, // 216: exactmac.v1.ExactMac.ClearClipboard:output_type -> exactmac.v1.ClearClipboardResponse
-	154, // 217: exactmac.v1.ExactMac.GetClipboardHistory:output_type -> exactmac.v1.ClipboardHistory
-	104, // 218: exactmac.v1.ExactMac.AutomateOpenFileDialog:output_type -> exactmac.v1.AutomateOpenFileDialogResponse
-	106, // 219: exactmac.v1.ExactMac.AutomateSaveFileDialog:output_type -> exactmac.v1.AutomateSaveFileDialogResponse
-	135, // 220: exactmac.v1.ExactMac.CreateMacro:output_type -> exactmac.v1.Macro
-	135, // 221: exactmac.v1.ExactMac.GetMacro:output_type -> exactmac.v1.Macro
-	77,  // 222: exactmac.v1.ExactMac.ListMacros:output_type -> exactmac.v1.ListMacrosResponse
-	135, // 223: exactmac.v1.ExactMac.UpdateMacro:output_type -> exactmac.v1.Macro
-	148, // 224: exactmac.v1.ExactMac.DeleteMacro:output_type -> google.protobuf.Empty
-	147, // 225: exactmac.v1.ExactMac.ExecuteMacro:output_type -> google.longrunning.Operation
-	108, // 226: exactmac.v1.ExactMac.ExecuteAppleScript:output_type -> exactmac.v1.ExecuteAppleScriptResponse
-	110, // 227: exactmac.v1.ExactMac.ExecuteJavaScript:output_type -> exactmac.v1.ExecuteJavaScriptResponse
-	112, // 228: exactmac.v1.ExactMac.ExecuteShellCommand:output_type -> exactmac.v1.ExecuteShellCommandResponse
-	114, // 229: exactmac.v1.ExactMac.ValidateScript:output_type -> exactmac.v1.ValidateScriptResponse
-	155, // 230: exactmac.v1.ExactMac.GetScriptingDictionaryCatalog:output_type -> exactmac.v1.ScriptingDictionaryCatalog
-	163, // [163:231] is the sub-list for method output_type
-	95,  // [95:163] is the sub-list for method input_type
-	95,  // [95:95] is the sub-list for extension type_name
-	95,  // [95:95] is the sub-list for extension extendee
-	0,   // [0:95] is the sub-list for field type_name
+	135, // 46: exactmac.v1.GetWindowRequest.read_mask:type_name -> google.protobuf.FieldMask
+	136, // 47: exactmac.v1.ListWindowsResponse.windows:type_name -> exactmac.v1.Window
+	137, // 48: exactmac.v1.CreateObservationRequest.observation:type_name -> exactmac.v1.Observation
+	138, // 49: exactmac.v1.CreateObservationMetadata.type:type_name -> exactmac.v1.ObservationType
+	137, // 50: exactmac.v1.ListObservationsResponse.observations:type_name -> exactmac.v1.Observation
+	139, // 51: exactmac.v1.StreamObservationsResponse.event:type_name -> exactmac.v1.ObservationEvent
+	140, // 52: exactmac.v1.CreateSessionRequest.session:type_name -> exactmac.v1.Session
+	140, // 53: exactmac.v1.ListSessionsResponse.sessions:type_name -> exactmac.v1.Session
+	141, // 54: exactmac.v1.CreateMacroRequest.macro:type_name -> exactmac.v1.Macro
+	141, // 55: exactmac.v1.ListMacrosResponse.macros:type_name -> exactmac.v1.Macro
+	81,  // 56: exactmac.v1.ListGrantsResponse.grants:type_name -> exactmac.v1.Grant
+	142, // 57: exactmac.v1.Grant.lifetime:type_name -> google.protobuf.Duration
+	142, // 58: exactmac.v1.PreauthorizeEnvelopeRequest.requested_lifetime:type_name -> google.protobuf.Duration
+	142, // 59: exactmac.v1.PreauthorizeEnvelopeResponse.lifetime:type_name -> google.protobuf.Duration
+	130, // 60: exactmac.v1.PreauthorizeEnvelopeResponse.expiry_time:type_name -> google.protobuf.Timestamp
+	141, // 61: exactmac.v1.UpdateMacroRequest.macro:type_name -> exactmac.v1.Macro
+	135, // 62: exactmac.v1.UpdateMacroRequest.update_mask:type_name -> google.protobuf.FieldMask
+	122, // 63: exactmac.v1.ExecuteMacroRequest.parameter_values:type_name -> exactmac.v1.ExecuteMacroRequest.ParameterValuesEntry
+	87,  // 64: exactmac.v1.ExecuteMacroRequest.options:type_name -> exactmac.v1.ExecutionOptions
+	142, // 65: exactmac.v1.ExecuteMacroResponse.execution_duration:type_name -> google.protobuf.Duration
+	143, // 66: exactmac.v1.ExecuteMacroResponse.log_entries:type_name -> exactmac.v1.ExecutionLogEntry
+	142, // 67: exactmac.v1.ExecuteMacroMetadata.elapsed_duration:type_name -> google.protobuf.Duration
+	6,   // 68: exactmac.v1.BeginTransactionRequest.isolation_level:type_name -> exactmac.v1.BeginTransactionRequest.IsolationLevel
+	140, // 69: exactmac.v1.BeginTransactionResponse.session:type_name -> exactmac.v1.Session
+	144, // 70: exactmac.v1.CaptureScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
+	144, // 71: exactmac.v1.CaptureScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
+	145, // 72: exactmac.v1.CaptureScreenshotResponse.ocr_error:type_name -> google.rpc.Status
+	133, // 73: exactmac.v1.CaptureScreenshotResponse.region:type_name -> exactmac.type.Region
+	144, // 74: exactmac.v1.CaptureWindowScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
+	144, // 75: exactmac.v1.CaptureWindowScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
+	145, // 76: exactmac.v1.CaptureWindowScreenshotResponse.ocr_error:type_name -> google.rpc.Status
+	133, // 77: exactmac.v1.CaptureWindowScreenshotResponse.window_frame:type_name -> exactmac.type.Region
+	133, // 78: exactmac.v1.CaptureWindowScreenshotResponse.region:type_name -> exactmac.type.Region
+	144, // 79: exactmac.v1.CaptureElementScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
+	144, // 80: exactmac.v1.CaptureElementScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
+	145, // 81: exactmac.v1.CaptureElementScreenshotResponse.ocr_error:type_name -> google.rpc.Status
+	133, // 82: exactmac.v1.CaptureElementScreenshotResponse.element_frame:type_name -> exactmac.type.Region
+	133, // 83: exactmac.v1.CaptureElementScreenshotResponse.region:type_name -> exactmac.type.Region
+	133, // 84: exactmac.v1.CaptureRegionScreenshotRequest.region:type_name -> exactmac.type.Region
+	144, // 85: exactmac.v1.CaptureRegionScreenshotRequest.format:type_name -> exactmac.v1.ImageFormat
+	144, // 86: exactmac.v1.CaptureRegionScreenshotResponse.format:type_name -> exactmac.v1.ImageFormat
+	133, // 87: exactmac.v1.CaptureRegionScreenshotResponse.region:type_name -> exactmac.type.Region
+	145, // 88: exactmac.v1.CaptureRegionScreenshotResponse.ocr_error:type_name -> google.rpc.Status
+	146, // 89: exactmac.v1.WriteClipboardRequest.content:type_name -> exactmac.v1.ClipboardContent
+	147, // 90: exactmac.v1.WriteClipboardResponse.clipboard:type_name -> exactmac.v1.Clipboard
+	147, // 91: exactmac.v1.ClearClipboardResponse.clipboard:type_name -> exactmac.v1.Clipboard
+	142, // 92: exactmac.v1.ExecuteAppleScriptRequest.timeout:type_name -> google.protobuf.Duration
+	142, // 93: exactmac.v1.ExecuteAppleScriptResponse.execution_duration:type_name -> google.protobuf.Duration
+	142, // 94: exactmac.v1.ExecuteJavaScriptRequest.timeout:type_name -> google.protobuf.Duration
+	142, // 95: exactmac.v1.ExecuteJavaScriptResponse.execution_duration:type_name -> google.protobuf.Duration
+	123, // 96: exactmac.v1.ExecuteShellCommandRequest.environment_variables:type_name -> exactmac.v1.ExecuteShellCommandRequest.EnvironmentVariablesEntry
+	142, // 97: exactmac.v1.ExecuteShellCommandRequest.timeout:type_name -> google.protobuf.Duration
+	142, // 98: exactmac.v1.ExecuteShellCommandResponse.execution_duration:type_name -> google.protobuf.Duration
+	148, // 99: exactmac.v1.ValidateScriptRequest.type:type_name -> exactmac.v1.ScriptType
+	7,   // 100: exactmac.v1.ExactMac.GetApplicationBundle:input_type -> exactmac.v1.GetApplicationBundleRequest
+	8,   // 101: exactmac.v1.ExactMac.ListApplicationBundles:input_type -> exactmac.v1.ListApplicationBundlesRequest
+	10,  // 102: exactmac.v1.ExactMac.OpenApplication:input_type -> exactmac.v1.OpenApplicationRequest
+	12,  // 103: exactmac.v1.ExactMac.GetApplication:input_type -> exactmac.v1.GetApplicationRequest
+	13,  // 104: exactmac.v1.ExactMac.ListApplications:input_type -> exactmac.v1.ListApplicationsRequest
+	15,  // 105: exactmac.v1.ExactMac.ActivateApplication:input_type -> exactmac.v1.ActivateApplicationRequest
+	17,  // 106: exactmac.v1.ExactMac.CloseApplication:input_type -> exactmac.v1.CloseApplicationRequest
+	19,  // 107: exactmac.v1.ExactMac.CreateInput:input_type -> exactmac.v1.CreateInputRequest
+	20,  // 108: exactmac.v1.ExactMac.GetInput:input_type -> exactmac.v1.GetInputRequest
+	21,  // 109: exactmac.v1.ExactMac.ListInputs:input_type -> exactmac.v1.ListInputsRequest
+	23,  // 110: exactmac.v1.ExactMac.TraverseAccessibility:input_type -> exactmac.v1.TraverseAccessibilityRequest
+	25,  // 111: exactmac.v1.ExactMac.WatchAccessibility:input_type -> exactmac.v1.WatchAccessibilityRequest
+	50,  // 112: exactmac.v1.ExactMac.GetWindow:input_type -> exactmac.v1.GetWindowRequest
+	51,  // 113: exactmac.v1.ExactMac.ListWindows:input_type -> exactmac.v1.ListWindowsRequest
+	52,  // 114: exactmac.v1.ExactMac.GetWindowState:input_type -> exactmac.v1.GetWindowStateRequest
+	54,  // 115: exactmac.v1.ExactMac.FocusWindow:input_type -> exactmac.v1.FocusWindowRequest
+	55,  // 116: exactmac.v1.ExactMac.MoveWindow:input_type -> exactmac.v1.MoveWindowRequest
+	56,  // 117: exactmac.v1.ExactMac.ResizeWindow:input_type -> exactmac.v1.ResizeWindowRequest
+	57,  // 118: exactmac.v1.ExactMac.MinimizeWindow:input_type -> exactmac.v1.MinimizeWindowRequest
+	58,  // 119: exactmac.v1.ExactMac.RestoreWindow:input_type -> exactmac.v1.RestoreWindowRequest
+	59,  // 120: exactmac.v1.ExactMac.CloseWindow:input_type -> exactmac.v1.CloseWindowRequest
+	28,  // 121: exactmac.v1.ExactMac.FindElements:input_type -> exactmac.v1.FindElementsRequest
+	30,  // 122: exactmac.v1.ExactMac.FindRegionElements:input_type -> exactmac.v1.FindRegionElementsRequest
+	32,  // 123: exactmac.v1.ExactMac.GetElement:input_type -> exactmac.v1.GetElementRequest
+	33,  // 124: exactmac.v1.ExactMac.ListElements:input_type -> exactmac.v1.ListElementsRequest
+	35,  // 125: exactmac.v1.ExactMac.ClickElement:input_type -> exactmac.v1.ClickElementRequest
+	37,  // 126: exactmac.v1.ExactMac.WriteElementValue:input_type -> exactmac.v1.WriteElementValueRequest
+	39,  // 127: exactmac.v1.ExactMac.GetElementActions:input_type -> exactmac.v1.GetElementActionsRequest
+	41,  // 128: exactmac.v1.ExactMac.PerformElementAction:input_type -> exactmac.v1.PerformElementActionRequest
+	43,  // 129: exactmac.v1.ExactMac.WaitElement:input_type -> exactmac.v1.WaitElementRequest
+	46,  // 130: exactmac.v1.ExactMac.WaitElementState:input_type -> exactmac.v1.WaitElementStateRequest
+	61,  // 131: exactmac.v1.ExactMac.CreateObservation:input_type -> exactmac.v1.CreateObservationRequest
+	63,  // 132: exactmac.v1.ExactMac.GetObservation:input_type -> exactmac.v1.GetObservationRequest
+	64,  // 133: exactmac.v1.ExactMac.ListObservations:input_type -> exactmac.v1.ListObservationsRequest
+	66,  // 134: exactmac.v1.ExactMac.CancelObservation:input_type -> exactmac.v1.CancelObservationRequest
+	67,  // 135: exactmac.v1.ExactMac.StreamObservations:input_type -> exactmac.v1.StreamObservationsRequest
+	69,  // 136: exactmac.v1.ExactMac.CreateSession:input_type -> exactmac.v1.CreateSessionRequest
+	70,  // 137: exactmac.v1.ExactMac.GetSession:input_type -> exactmac.v1.GetSessionRequest
+	71,  // 138: exactmac.v1.ExactMac.ListSessions:input_type -> exactmac.v1.ListSessionsRequest
+	73,  // 139: exactmac.v1.ExactMac.DeleteSession:input_type -> exactmac.v1.DeleteSessionRequest
+	90,  // 140: exactmac.v1.ExactMac.BeginTransaction:input_type -> exactmac.v1.BeginTransactionRequest
+	92,  // 141: exactmac.v1.ExactMac.CommitTransaction:input_type -> exactmac.v1.CommitTransactionRequest
+	93,  // 142: exactmac.v1.ExactMac.RollbackTransaction:input_type -> exactmac.v1.RollbackTransactionRequest
+	94,  // 143: exactmac.v1.ExactMac.GetSessionSnapshot:input_type -> exactmac.v1.GetSessionSnapshotRequest
+	95,  // 144: exactmac.v1.ExactMac.CaptureScreenshot:input_type -> exactmac.v1.CaptureScreenshotRequest
+	97,  // 145: exactmac.v1.ExactMac.CaptureWindowScreenshot:input_type -> exactmac.v1.CaptureWindowScreenshotRequest
+	99,  // 146: exactmac.v1.ExactMac.CaptureElementScreenshot:input_type -> exactmac.v1.CaptureElementScreenshotRequest
+	101, // 147: exactmac.v1.ExactMac.CaptureRegionScreenshot:input_type -> exactmac.v1.CaptureRegionScreenshotRequest
+	149, // 148: exactmac.v1.ExactMac.ListDisplays:input_type -> exactmac.v1.ListDisplaysRequest
+	150, // 149: exactmac.v1.ExactMac.GetDisplay:input_type -> exactmac.v1.GetDisplayRequest
+	151, // 150: exactmac.v1.ExactMac.CaptureCursorPosition:input_type -> exactmac.v1.CaptureCursorPositionRequest
+	103, // 151: exactmac.v1.ExactMac.GetClipboard:input_type -> exactmac.v1.GetClipboardRequest
+	104, // 152: exactmac.v1.ExactMac.WriteClipboard:input_type -> exactmac.v1.WriteClipboardRequest
+	106, // 153: exactmac.v1.ExactMac.ClearClipboard:input_type -> exactmac.v1.ClearClipboardRequest
+	108, // 154: exactmac.v1.ExactMac.GetClipboardHistory:input_type -> exactmac.v1.GetClipboardHistoryRequest
+	109, // 155: exactmac.v1.ExactMac.AutomateOpenFileDialog:input_type -> exactmac.v1.AutomateOpenFileDialogRequest
+	111, // 156: exactmac.v1.ExactMac.AutomateSaveFileDialog:input_type -> exactmac.v1.AutomateSaveFileDialogRequest
+	74,  // 157: exactmac.v1.ExactMac.CreateMacro:input_type -> exactmac.v1.CreateMacroRequest
+	75,  // 158: exactmac.v1.ExactMac.GetMacro:input_type -> exactmac.v1.GetMacroRequest
+	76,  // 159: exactmac.v1.ExactMac.ListMacros:input_type -> exactmac.v1.ListMacrosRequest
+	78,  // 160: exactmac.v1.ExactMac.GetGrant:input_type -> exactmac.v1.GetGrantRequest
+	79,  // 161: exactmac.v1.ExactMac.ListGrants:input_type -> exactmac.v1.ListGrantsRequest
+	82,  // 162: exactmac.v1.ExactMac.PreauthorizeEnvelope:input_type -> exactmac.v1.PreauthorizeEnvelopeRequest
+	84,  // 163: exactmac.v1.ExactMac.UpdateMacro:input_type -> exactmac.v1.UpdateMacroRequest
+	85,  // 164: exactmac.v1.ExactMac.DeleteMacro:input_type -> exactmac.v1.DeleteMacroRequest
+	86,  // 165: exactmac.v1.ExactMac.ExecuteMacro:input_type -> exactmac.v1.ExecuteMacroRequest
+	113, // 166: exactmac.v1.ExactMac.ExecuteAppleScript:input_type -> exactmac.v1.ExecuteAppleScriptRequest
+	115, // 167: exactmac.v1.ExactMac.ExecuteJavaScript:input_type -> exactmac.v1.ExecuteJavaScriptRequest
+	117, // 168: exactmac.v1.ExactMac.ExecuteShellCommand:input_type -> exactmac.v1.ExecuteShellCommandRequest
+	119, // 169: exactmac.v1.ExactMac.ValidateScript:input_type -> exactmac.v1.ValidateScriptRequest
+	121, // 170: exactmac.v1.ExactMac.GetScriptingDictionaryCatalog:input_type -> exactmac.v1.GetScriptingDictionaryCatalogRequest
+	125, // 171: exactmac.v1.ExactMac.GetApplicationBundle:output_type -> exactmac.v1.ApplicationBundle
+	9,   // 172: exactmac.v1.ExactMac.ListApplicationBundles:output_type -> exactmac.v1.ListApplicationBundlesResponse
+	11,  // 173: exactmac.v1.ExactMac.OpenApplication:output_type -> exactmac.v1.OpenApplicationResponse
+	126, // 174: exactmac.v1.ExactMac.GetApplication:output_type -> exactmac.v1.Application
+	14,  // 175: exactmac.v1.ExactMac.ListApplications:output_type -> exactmac.v1.ListApplicationsResponse
+	16,  // 176: exactmac.v1.ExactMac.ActivateApplication:output_type -> exactmac.v1.ActivateApplicationResponse
+	18,  // 177: exactmac.v1.ExactMac.CloseApplication:output_type -> exactmac.v1.CloseApplicationResponse
+	127, // 178: exactmac.v1.ExactMac.CreateInput:output_type -> exactmac.v1.Input
+	127, // 179: exactmac.v1.ExactMac.GetInput:output_type -> exactmac.v1.Input
+	22,  // 180: exactmac.v1.ExactMac.ListInputs:output_type -> exactmac.v1.ListInputsResponse
+	24,  // 181: exactmac.v1.ExactMac.TraverseAccessibility:output_type -> exactmac.v1.TraverseAccessibilityResponse
+	26,  // 182: exactmac.v1.ExactMac.WatchAccessibility:output_type -> exactmac.v1.WatchAccessibilityResponse
+	136, // 183: exactmac.v1.ExactMac.GetWindow:output_type -> exactmac.v1.Window
+	53,  // 184: exactmac.v1.ExactMac.ListWindows:output_type -> exactmac.v1.ListWindowsResponse
+	152, // 185: exactmac.v1.ExactMac.GetWindowState:output_type -> exactmac.v1.WindowState
+	136, // 186: exactmac.v1.ExactMac.FocusWindow:output_type -> exactmac.v1.Window
+	136, // 187: exactmac.v1.ExactMac.MoveWindow:output_type -> exactmac.v1.Window
+	136, // 188: exactmac.v1.ExactMac.ResizeWindow:output_type -> exactmac.v1.Window
+	136, // 189: exactmac.v1.ExactMac.MinimizeWindow:output_type -> exactmac.v1.Window
+	136, // 190: exactmac.v1.ExactMac.RestoreWindow:output_type -> exactmac.v1.Window
+	60,  // 191: exactmac.v1.ExactMac.CloseWindow:output_type -> exactmac.v1.CloseWindowResponse
+	29,  // 192: exactmac.v1.ExactMac.FindElements:output_type -> exactmac.v1.FindElementsResponse
+	31,  // 193: exactmac.v1.ExactMac.FindRegionElements:output_type -> exactmac.v1.FindRegionElementsResponse
+	128, // 194: exactmac.v1.ExactMac.GetElement:output_type -> exactmac.v1.Element
+	34,  // 195: exactmac.v1.ExactMac.ListElements:output_type -> exactmac.v1.ListElementsResponse
+	36,  // 196: exactmac.v1.ExactMac.ClickElement:output_type -> exactmac.v1.ClickElementResponse
+	38,  // 197: exactmac.v1.ExactMac.WriteElementValue:output_type -> exactmac.v1.WriteElementValueResponse
+	40,  // 198: exactmac.v1.ExactMac.GetElementActions:output_type -> exactmac.v1.ElementActions
+	42,  // 199: exactmac.v1.ExactMac.PerformElementAction:output_type -> exactmac.v1.PerformElementActionResponse
+	153, // 200: exactmac.v1.ExactMac.WaitElement:output_type -> google.longrunning.Operation
+	153, // 201: exactmac.v1.ExactMac.WaitElementState:output_type -> google.longrunning.Operation
+	153, // 202: exactmac.v1.ExactMac.CreateObservation:output_type -> google.longrunning.Operation
+	137, // 203: exactmac.v1.ExactMac.GetObservation:output_type -> exactmac.v1.Observation
+	65,  // 204: exactmac.v1.ExactMac.ListObservations:output_type -> exactmac.v1.ListObservationsResponse
+	137, // 205: exactmac.v1.ExactMac.CancelObservation:output_type -> exactmac.v1.Observation
+	68,  // 206: exactmac.v1.ExactMac.StreamObservations:output_type -> exactmac.v1.StreamObservationsResponse
+	140, // 207: exactmac.v1.ExactMac.CreateSession:output_type -> exactmac.v1.Session
+	140, // 208: exactmac.v1.ExactMac.GetSession:output_type -> exactmac.v1.Session
+	72,  // 209: exactmac.v1.ExactMac.ListSessions:output_type -> exactmac.v1.ListSessionsResponse
+	154, // 210: exactmac.v1.ExactMac.DeleteSession:output_type -> google.protobuf.Empty
+	91,  // 211: exactmac.v1.ExactMac.BeginTransaction:output_type -> exactmac.v1.BeginTransactionResponse
+	155, // 212: exactmac.v1.ExactMac.CommitTransaction:output_type -> exactmac.v1.Transaction
+	155, // 213: exactmac.v1.ExactMac.RollbackTransaction:output_type -> exactmac.v1.Transaction
+	156, // 214: exactmac.v1.ExactMac.GetSessionSnapshot:output_type -> exactmac.v1.SessionSnapshot
+	96,  // 215: exactmac.v1.ExactMac.CaptureScreenshot:output_type -> exactmac.v1.CaptureScreenshotResponse
+	98,  // 216: exactmac.v1.ExactMac.CaptureWindowScreenshot:output_type -> exactmac.v1.CaptureWindowScreenshotResponse
+	100, // 217: exactmac.v1.ExactMac.CaptureElementScreenshot:output_type -> exactmac.v1.CaptureElementScreenshotResponse
+	102, // 218: exactmac.v1.ExactMac.CaptureRegionScreenshot:output_type -> exactmac.v1.CaptureRegionScreenshotResponse
+	157, // 219: exactmac.v1.ExactMac.ListDisplays:output_type -> exactmac.v1.ListDisplaysResponse
+	158, // 220: exactmac.v1.ExactMac.GetDisplay:output_type -> exactmac.v1.Display
+	159, // 221: exactmac.v1.ExactMac.CaptureCursorPosition:output_type -> exactmac.v1.CaptureCursorPositionResponse
+	147, // 222: exactmac.v1.ExactMac.GetClipboard:output_type -> exactmac.v1.Clipboard
+	105, // 223: exactmac.v1.ExactMac.WriteClipboard:output_type -> exactmac.v1.WriteClipboardResponse
+	107, // 224: exactmac.v1.ExactMac.ClearClipboard:output_type -> exactmac.v1.ClearClipboardResponse
+	160, // 225: exactmac.v1.ExactMac.GetClipboardHistory:output_type -> exactmac.v1.ClipboardHistory
+	110, // 226: exactmac.v1.ExactMac.AutomateOpenFileDialog:output_type -> exactmac.v1.AutomateOpenFileDialogResponse
+	112, // 227: exactmac.v1.ExactMac.AutomateSaveFileDialog:output_type -> exactmac.v1.AutomateSaveFileDialogResponse
+	141, // 228: exactmac.v1.ExactMac.CreateMacro:output_type -> exactmac.v1.Macro
+	141, // 229: exactmac.v1.ExactMac.GetMacro:output_type -> exactmac.v1.Macro
+	77,  // 230: exactmac.v1.ExactMac.ListMacros:output_type -> exactmac.v1.ListMacrosResponse
+	81,  // 231: exactmac.v1.ExactMac.GetGrant:output_type -> exactmac.v1.Grant
+	80,  // 232: exactmac.v1.ExactMac.ListGrants:output_type -> exactmac.v1.ListGrantsResponse
+	83,  // 233: exactmac.v1.ExactMac.PreauthorizeEnvelope:output_type -> exactmac.v1.PreauthorizeEnvelopeResponse
+	141, // 234: exactmac.v1.ExactMac.UpdateMacro:output_type -> exactmac.v1.Macro
+	154, // 235: exactmac.v1.ExactMac.DeleteMacro:output_type -> google.protobuf.Empty
+	153, // 236: exactmac.v1.ExactMac.ExecuteMacro:output_type -> google.longrunning.Operation
+	114, // 237: exactmac.v1.ExactMac.ExecuteAppleScript:output_type -> exactmac.v1.ExecuteAppleScriptResponse
+	116, // 238: exactmac.v1.ExactMac.ExecuteJavaScript:output_type -> exactmac.v1.ExecuteJavaScriptResponse
+	118, // 239: exactmac.v1.ExactMac.ExecuteShellCommand:output_type -> exactmac.v1.ExecuteShellCommandResponse
+	120, // 240: exactmac.v1.ExactMac.ValidateScript:output_type -> exactmac.v1.ValidateScriptResponse
+	161, // 241: exactmac.v1.ExactMac.GetScriptingDictionaryCatalog:output_type -> exactmac.v1.ScriptingDictionaryCatalog
+	171, // [171:242] is the sub-list for method output_type
+	100, // [100:171] is the sub-list for method input_type
+	100, // [100:100] is the sub-list for extension type_name
+	100, // [100:100] is the sub-list for extension extendee
+	0,   // [0:100] is the sub-list for field type_name
 }
 
 func init() { file_exactmac_v1_exact_mac_proto_init() }
@@ -9050,19 +9600,19 @@ func file_exactmac_v1_exact_mac_proto_init() {
 		(*StateCondition_Attribute)(nil),
 	}
 	file_exactmac_v1_exact_mac_proto_msgTypes[48].OneofWrappers = []any{}
-	file_exactmac_v1_exact_mac_proto_msgTypes[83].OneofWrappers = []any{
+	file_exactmac_v1_exact_mac_proto_msgTypes[89].OneofWrappers = []any{
 		(*CaptureScreenshotResponse_OcrText)(nil),
 		(*CaptureScreenshotResponse_OcrError)(nil),
 	}
-	file_exactmac_v1_exact_mac_proto_msgTypes[85].OneofWrappers = []any{
+	file_exactmac_v1_exact_mac_proto_msgTypes[91].OneofWrappers = []any{
 		(*CaptureWindowScreenshotResponse_OcrText)(nil),
 		(*CaptureWindowScreenshotResponse_OcrError)(nil),
 	}
-	file_exactmac_v1_exact_mac_proto_msgTypes[87].OneofWrappers = []any{
+	file_exactmac_v1_exact_mac_proto_msgTypes[93].OneofWrappers = []any{
 		(*CaptureElementScreenshotResponse_OcrText)(nil),
 		(*CaptureElementScreenshotResponse_OcrError)(nil),
 	}
-	file_exactmac_v1_exact_mac_proto_msgTypes[89].OneofWrappers = []any{
+	file_exactmac_v1_exact_mac_proto_msgTypes[95].OneofWrappers = []any{
 		(*CaptureRegionScreenshotResponse_OcrText)(nil),
 		(*CaptureRegionScreenshotResponse_OcrError)(nil),
 	}
@@ -9072,7 +9622,7 @@ func file_exactmac_v1_exact_mac_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exactmac_v1_exact_mac_proto_rawDesc), len(file_exactmac_v1_exact_mac_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   111,
+			NumMessages:   117,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
