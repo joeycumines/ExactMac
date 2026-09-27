@@ -80,208 +80,42 @@ struct ServerLifecycleTests {
         signals.continuation.finish()
     }
 
-    @Test
-    @MainActor
-    func `preexisting Unix path is rejected without mutation`() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("server.sock")
-        let marker = Data("preserve-me".utf8)
-        try marker.write(to: path)
+    // MARK: - The socket node the server owns
 
-        let owner = UnixSocketPathOwner(path: path.path)
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
-        }
-        #expect(try Data(contentsOf: path) == marker)
-    }
+    // The server binds its own Unix socket, so the node at that pathname is the server's to
+    // manage, and the policy below is the opposite of the one that applied while launchd
+    // created it: a node left behind by a crash is RECLAIMED, because a server that cannot
+    // restart after a crash needs an operator, and a node that something is still serving is
+    // REFUSED, because unlinking it would leave two listeners on one name.
 
     @Test
-    @MainActor
-    func `overlong Unix path is rejected before bind`() {
-        let owner = UnixSocketPathOwner(path: "/tmp/" + String(repeating: "x", count: 200))
-
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
-        }
-    }
-
-    @Test
-    @MainActor
-    func `absent Unix path passes unmanaged-path validation`() throws {
+    func `an absent Unix path needs no reclamation`() throws {
         let directory = try makeShortSocketDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("s.sock").path
 
-        let owner = UnixSocketPathOwner(path: path)
-        #expect(try owner.prepareForBind() == false)
+        try UnixSocketNode.reclaimStaleNode(at: path)
+        #expect(!FileManager.default.fileExists(atPath: path))
     }
 
     @Test
-    @MainActor
-    func `direct Unix pathname binding creates an owned listener`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-
-        let owner = UnixSocketPathOwner(path: path)
-        let descriptor = try owner.makeListeningSocket()
-        defer {
-            _ = Darwin.close(descriptor)
-            _ = path.withCString { unlink($0) }
-        }
-        #expect(FileManager.default.fileExists(atPath: path))
-        #expect(canConnect(to: path) == true)
-    }
-
-    @Test
-    @MainActor
-    func `activated node validation accepts owner-private socket node`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-
-        let listener = try bindListeningSocket(at: path)
-        defer {
-            _ = Darwin.close(listener)
-            _ = path.withCString { unlink($0) }
-        }
-        // launchd creates the node with SockPathMode 0600; the test fixture
-        // must set the same mode since the test process umask is 022.
-        #expect(path.withCString { chmod($0, 0o600) } == 0)
-        var nodeStatus = stat()
-        #expect(path.withCString { lstat($0, &nodeStatus) } == 0)
-        #expect(nodeStatus.st_uid == geteuid())
-        #expect(nodeStatus.st_mode & mode_t(0o777) == mode_t(0o600))
-
-        let probe = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        #expect(probe >= 0)
-        defer { _ = Darwin.close(probe) }
-        // Must not throw for a node owned by the current user with 0600 mode,
-        // even though fstat on a bare descriptor reports synthetic metadata.
-        try UnixSocketPathOwner.validateActivatedNode(
-            nodeStatus,
-            path: path,
-            descriptorForCleanup: probe,
-        )
-    }
-
-    @Test
-    @MainActor
-    func `activated node validation rejects wrong-mode node`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-
-        let listener = try bindListeningSocket(at: path)
-        defer {
-            _ = Darwin.close(listener)
-            _ = path.withCString { unlink($0) }
-        }
-        #expect(path.withCString { chmod($0, 0o644) } == 0)
-        var nodeStatus = stat()
-        #expect(path.withCString { lstat($0, &nodeStatus) } == 0)
-
-        let probe = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        #expect(probe >= 0)
-        guard probe >= 0 else { return }
-        // Validation owns and closes the descriptor on rejection. Do not probe
-        // the raw descriptor number afterward: concurrent tests may reuse it.
-        #expect(throws: UnixSocketPathError.self) {
-            try UnixSocketPathOwner.validateActivatedNode(
-                nodeStatus,
-                path: path,
-                descriptorForCleanup: probe,
-            )
-        }
-    }
-
-    @Test
-    @MainActor
-    func `launchd activation failure leaves configured pathname untouched`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-        let owner = UnixSocketPathOwner(path: path)
-
-        #expect(throws: UnixSocketPathError.self) {
-            _ = try owner.activateLaunchdSocket(name: "missing-listener")
-        }
-        #expect(FileManager.default.fileExists(atPath: path) == false)
-    }
-
-    @Test
-    @MainActor
-    func `missing launchd activation maps to actionable fail-closed error`() {
-        let error = UnixSocketPathError.activationFailure(path: "/tmp/exactmac.sock", code: ENOENT)
-        #expect(error == .launchdActivationRequired("/tmp/exactmac.sock"))
-        #expect(error.localizedDescription.contains("must be activated by launchd"))
-        #expect(error.localizedDescription.contains("loopback TCP"))
-
-        let other = UnixSocketPathError.activationFailure(path: "/tmp/exactmac.sock", code: EACCES)
-        #expect(other == .activatedSocketUnavailable(path: "/tmp/exactmac.sock", code: EACCES))
-    }
-
-    @Test
-    @MainActor
-    func `cleanup never mutates configured Unix pathname`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-        let marker = Data("preserve-me".utf8)
-        try marker.write(to: URL(fileURLWithPath: path))
-        let owner = UnixSocketPathOwner(path: path)
-
-        #expect(owner.cleanup() == false)
-        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == marker)
-    }
-
-    @Test
-    @MainActor
-    func `prebound Unix socket refuses an existing pathname without mutation`() throws {
-        let directory = try makeShortSocketDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let path = directory.appendingPathComponent("s.sock").path
-        let marker = Data("preserve-me".utf8)
-        try marker.write(to: URL(fileURLWithPath: path))
-
-        let owner = UnixSocketPathOwner(path: path)
-        #expect(throws: UnixSocketPathError.self) {
-            _ = try owner.makeListeningSocket()
-        }
-        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == marker)
-    }
-
-    @Test
-    @MainActor
-    func `stale Unix socket is refused without mutation`() throws {
+    func `a stale Unix socket is reclaimed`() throws {
         let directory = try makeShortSocketDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("s.sock").path
 
         let staleDescriptor = try bindListeningSocket(at: path)
-        // Simulate a crash or reboot: the listener is gone but the pathname remains.
+        // A crash or a reboot: the listener is gone, the pathname is not.
         _ = Darwin.close(staleDescriptor)
         #expect(FileManager.default.fileExists(atPath: path))
         #expect(canConnect(to: path) == false)
 
-        let owner = UnixSocketPathOwner(path: path)
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
-        }
-        // A later owner must not delete a path it did not create; deployment
-        // cleanup or an operator can remove the stale pathname explicitly.
-        #expect(FileManager.default.fileExists(atPath: path))
+        try UnixSocketNode.reclaimStaleNode(at: path)
+        #expect(!FileManager.default.fileExists(atPath: path))
     }
 
     @Test
-    @MainActor
-    func `live Unix socket is refused without mutation`() throws {
+    func `a live Unix socket is refused and its node is left alone`() throws {
         let directory = try makeShortSocketDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("s.sock").path
@@ -293,9 +127,8 @@ struct ServerLifecycleTests {
         }
         #expect(canConnect(to: path))
 
-        let owner = UnixSocketPathOwner(path: path)
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
+        #expect(throws: UnixSocketNodeError.pathAlreadyExistsAndIsLive(path)) {
+            try UnixSocketNode.reclaimStaleNode(at: path)
         }
         // The live listener still owns the path: no unlink, still connectable.
         #expect(FileManager.default.fileExists(atPath: path))
@@ -303,8 +136,21 @@ struct ServerLifecycleTests {
     }
 
     @Test
-    @MainActor
-    func `symlink Unix path is refused without following`() throws {
+    func `a non-socket at the Unix path is refused without mutation`() throws {
+        let directory = try makeShortSocketDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("s.sock").path
+        let marker = Data("preserve-me".utf8)
+        try marker.write(to: URL(fileURLWithPath: path))
+
+        #expect(throws: UnixSocketNodeError.pathIsNotASocket(path)) {
+            try UnixSocketNode.reclaimStaleNode(at: path)
+        }
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == marker)
+    }
+
+    @Test
+    func `a symlink at the Unix path is refused without following`() throws {
         let directory = try makeShortSocketDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let target = directory.appendingPathComponent("target")
@@ -313,30 +159,71 @@ struct ServerLifecycleTests {
         let link = directory.appendingPathComponent("s.sock")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
 
-        let owner = UnixSocketPathOwner(path: link.path)
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
+        // `lstat` never follows a symlink, so the link itself is what is found, and a link
+        // is not a socket: nothing beyond the link is read and nothing is removed.
+        #expect(throws: UnixSocketNodeError.pathIsNotASocket(link.path)) {
+            try UnixSocketNode.reclaimStaleNode(at: link.path)
         }
         #expect(try Data(contentsOf: target) == marker)
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == target.path)
     }
 
     @Test
-    @MainActor
-    func `directory Unix path is refused without mutation`() throws {
+    func `a directory at the Unix path is refused without mutation`() throws {
         let directory = try makeShortSocketDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let subdir = directory.appendingPathComponent("s.sock", isDirectory: true)
         try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: false)
 
-        let owner = UnixSocketPathOwner(path: subdir.path)
-        #expect(throws: UnixSocketPathError.self) {
-            try owner.prepareForBind()
+        #expect(throws: UnixSocketNodeError.pathIsNotASocket(subdir.path)) {
+            try UnixSocketNode.reclaimStaleNode(at: subdir.path)
         }
         var isDirectory: ObjCBool = false
         #expect(FileManager.default.fileExists(atPath: subdir.path, isDirectory: &isDirectory))
         #expect(isDirectory.boolValue)
     }
+
+    @Test
+    func `a bound node is made owner-only and released only while it still is`() throws {
+        let directory = try makeShortSocketDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("s.sock").path
+
+        let descriptor = try bindListeningSocket(at: path)
+        defer { _ = Darwin.close(descriptor) }
+
+        // Whatever umask the test process inherited, the node ends up owner-only.
+        try UnixSocketNode.hardenBoundNode(at: path)
+        #expect(try nodeMode(at: path) == 0o600)
+
+        // A node that is no longer owner-only is REPORTED rather than removed. The pathname
+        // is mutable, so mode 0600 is the evidence that this is still the node the process
+        // bound; without it, releasing is deleting whatever is at a path.
+        #expect(throws: UnixSocketNodeError.self) {
+            _ = path.withCString { chmod($0, 0o666) }
+            try UnixSocketNode.releaseBoundNode(at: path)
+        }
+        #expect(FileManager.default.fileExists(atPath: path))
+
+        _ = path.withCString { unlink($0) }
+        try UnixSocketNode.releaseBoundNode(at: path)
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test
+    func `releasing an absent node is not an error`() throws {
+        let directory = try makeShortSocketDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try UnixSocketNode.releaseBoundNode(at: directory.appendingPathComponent("gone.sock").path)
+    }
+}
+
+private func nodeMode(at path: String) throws -> mode_t {
+    var status = stat()
+    guard path.withCString({ lstat($0, &status) }) == 0 else {
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: nil)
+    }
+    return status.st_mode & 0o777
 }
 
 private func makeShortSocketDirectory() throws -> URL {

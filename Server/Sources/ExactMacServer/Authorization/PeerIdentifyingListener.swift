@@ -252,6 +252,27 @@ enum UnixSocketNode {
         }
     }
 
+    /// Removes the node this process bound, on a clean shutdown.
+    ///
+    /// AFTER the transport has closed, so nothing is still accepting through it, and CHECKED
+    /// the same way `reclaimStaleNode` checks, because a pathname is mutable and unlinking
+    /// whatever sits at it is how a symlink there becomes a way to remove somebody else's
+    /// file. A node that has been replaced since the bind is reported rather than deleted.
+    static func releaseBoundNode(at path: String) throws {
+        var status = stat()
+        guard path.withCString({ lstat($0, &status) }) == 0 else {
+            if errno == ENOENT { return }
+            throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
+        }
+        try requireOwnerOnlySocket(status, path: path)
+        guard status.st_mode & 0o777 == 0o600 else {
+            throw UnixSocketNodeError.pathIsNotOwnerOnly(path, actual: status.st_mode & 0o777)
+        }
+        guard unlink(path) == 0 else {
+            throw UnixSocketNodeError.systemCall(operation: "unlink", path: path, code: errno)
+        }
+    }
+
     /// Whether anything is currently accepting on `path`.
     ///
     /// A refused connection is the answer a stale node gives: the socket file outlived the

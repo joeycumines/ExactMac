@@ -8,6 +8,7 @@ import GRPCHealthService
 import GRPCNIOTransportHTTP2
 import GRPCReflectionService
 import NIOCore
+import NIOPosix
 import OSLog
 
 private let logger = ExactMac.sdkLogger(category: "Main")
@@ -24,14 +25,19 @@ private func setServerProcessUmask() -> mode_t {
 ///
 /// This function ensures all resources are properly cleaned up in the correct order:
 /// 1. Await the composition-owned service lifetime drain started with transport shutdown
-/// 2. Leave the launchd-owned Unix socket pathname untouched
+/// 2. Remove the socket node this process created, and only that one
 ///
 /// - Parameters:
-///   - socketOwner: Optional launchd-owned Unix socket path left untouched during cleanup.
+///   - socketPathToRelease: The Unix socket path this process bound, or nil for a TCP
+///     listener. It is REMOVED rather than left behind, because the node outlives the
+///     descriptor and a node with no listener behind it is what the next start has to
+///     recognise as stale. It is unlinked by pathname only after the transport has closed,
+///     and only when the node is still the owner-only socket this user is entitled to
+///     remove, so a node replaced in the meantime is never deleted.
 ///   - serviceLifetime: The composition-owned producer and mutation lifetime.
 @MainActor
 private func performGracefulShutdown(
-    socketOwner: UnixSocketPathOwner?,
+    socketPathToRelease: String?,
     serviceLifetime: ServiceLifetime,
 ) async throws {
     logger.info("Initiating graceful shutdown...")
@@ -39,10 +45,9 @@ private func performGracefulShutdown(
     await serviceLifetime.shutdown()
     logger.info("Composition-owned service work drained")
 
-    // launchd owns the socket pathname. Never unlink it during shutdown.
-    if let socketOwner {
-        _ = socketOwner.cleanup()
-        logger.info("Left launchd-owned Unix socket pathname untouched: \(socketOwner.path, privacy: .private)")
+    if let socketPathToRelease {
+        try UnixSocketNode.releaseBoundNode(at: socketPathToRelease)
+        logger.info("Released Unix socket node: \(socketPathToRelease, privacy: .private)")
     }
 
     logger.info("Graceful shutdown complete")
@@ -114,16 +119,19 @@ private func performGracefulShutdown(
 /// 3. **WindowRegistry sharing**: ObservationManager, MacroExecutor, and ExactMacService
 ///    all share the SAME WindowRegistry instance for consistent window state.
 ///    This avoids cache inconsistencies and duplicate CG queries.
+///
+/// GENERIC OVER THE TRANSPORT, and the generic parameter is the only thing that is not
+/// spelled out twice. `GRPCServer` is generic over its transport type, so the Unix-socket
+/// and TCP variants cannot share one binding — and duplicating the whole lifecycle to
+/// accommodate that would put two copies of the shutdown ordering on this file. The
+/// transport is therefore chosen by `main()` before anything is built.
 @MainActor
-func main() async throws {
-    // Set the owner-only umask before AppKit, Vision, CoreImage, or Metal can
-    // create cache files and directories. Directories must retain owner execute
-    // permission for framework cache trees to be traversable.
-    _ = setServerProcessUmask()
-    logger.info("Set server process umask: \(ServerProcessPolicy.umask, privacy: .public)")
-
-    logger.info("ExactMacServer starting...")
-
+func serve<Transport: ServerTransport>(
+    config: ServerConfig,
+    transport: Transport,
+    authorizationRuntime: AuthorizationRuntime,
+    socketPathToRelease: String?,
+) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 1: NSApplication.shared
     // CRITICAL: Must be initialized FIRST before any SDK or AccessibilityAPI calls
@@ -131,42 +139,6 @@ func main() async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     _ = NSApplication.shared
     logger.info("NSApplication initialized")
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // STEP 2: ServerConfig
-    // Load configuration from environment variables for socket paths, ports
-    // ═══════════════════════════════════════════════════════════════════════════
-    let config = ServerConfig.fromEnvironment()
-    logger.info("Configuration loaded")
-    if let socketPath = config.unixSocketPath {
-        logger.info("Will listen on Unix socket: \(socketPath, privacy: .private)")
-    } else {
-        logger.info("Will listen on \(config.listenAddress, privacy: .public):\(config.port, privacy: .public)")
-    }
-    let socketOwner = config.unixSocketPath.map(UnixSocketPathOwner.init(path:))
-    var preboundSocketDescriptor: Int32?
-    var descriptorOwnershipTransferred = false
-    defer {
-        // The Posix transport takes ownership only after successful construction.
-        // Close any descriptor still owned by this function on a pre-transport
-        // failure; never unlink the pathname during that failure path.
-        if let descriptor = preboundSocketDescriptor, !descriptorOwnershipTransferred {
-            _ = Darwin.close(descriptor)
-        }
-    }
-    if let socketOwner {
-        // launchd creates and owns the pathname, then hands this process the
-        // already-bound descriptor. Direct pathname binding is disabled because
-        // Darwin does not provide a persistent pathname-to-descriptor identity
-        // primitive for a mutable AF_UNIX pathname.
-        // When activation is unavailable, startup fails closed; manual execution
-        // must omit GRPC_UNIX_SOCKET and use the documented loopback TCP settings.
-        preboundSocketDescriptor = try socketOwner.activateLaunchdSocket(name: "Listener")
-        logger.info("Activated launchd Unix socket listener: \(socketOwner.path, privacy: .private)")
-    }
-
-    // The descriptor is consumed by the transport below. If any initialization
-    // step throws first, the defer above closes it without touching the path.
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 3: AppStateStore
@@ -243,50 +215,11 @@ func main() async throws {
         }
     }
 
-    // Set up and start gRPC server using the HTTP/2 NIO transport. Unix
-    // listeners are pre-bound so the descriptor, not a later pathname lookup,
-    // is the ownership boundary.
-    let grpcTransport: HTTP2ServerTransport.Posix
-    if let descriptor = preboundSocketDescriptor {
-        grpcTransport = HTTP2ServerTransport.Posix(
-            listeningSocketDescriptor: Int(descriptor),
-            transportSecurity: .plaintext,
-        )
-        descriptorOwnershipTransferred = true
-        logger.info("Using pre-bound Unix Domain Socket transport")
-    } else {
-        let address = GRPCNIOTransportCore.SocketAddress.ipv4(
-            host: config.listenAddress,
-            port: config.port,
-        )
-        logger.info("Binding to TCP: \(config.listenAddress, privacy: .public):\(config.port, privacy: .public)")
-        grpcTransport = .http2NIOPosix(
-            address: address,
-            transportSecurity: .plaintext,
-        )
-    }
-
-    preboundSocketDescriptor = nil
-
-    // Authorization is built HERE, from the listener, because whether the server can say
-    // who is calling is a property of the LISTENER and not of a flag. A Unix-socket
-    // listener has an owning user and therefore a resolver; a TCP listener has no
-    // principal, so the reduced posture is constructed rather than inferred from a nil.
-    let authorizationPolicy = try PublicRequestDescriptorPolicy.load()
-    let authorizationRuntime: AuthorizationRuntime
-    if preboundSocketDescriptor != nil || config.unixSocketPath != nil {
-        logger.info("Authorization: unix-socket variant; the owning user is the principal.")
-        authorizationRuntime = .unixSocket(descriptorPolicy: authorizationPolicy)
-    } else {
-        logger.warning(
-            "Authorization: reduced unauthenticated posture. This listener has no owning user, so every consent-requiring capability is denied and no approval can be given. Do not expose this port beyond the loopback interface.",
-        )
-
-        authorizationRuntime = .tcp(descriptorPolicy: authorizationPolicy)
-    }
-
+    // The transport arrives already built, and so does the authorization posture it implies.
+    // Both are decided in `main()` from the LISTENER, because whether the server can say who
+    // is calling is a property of the listener and not of a flag.
     let server = GRPCServer(
-        transport: productionServerTransport(grpcTransport),
+        transport: productionServerTransport(transport),
         services: services,
         interceptors: productionServerInterceptors(AuthorizationInterceptor(runtime: authorizationRuntime)),
     )
@@ -335,7 +268,7 @@ func main() async throws {
     var cleanupError: (any Error)?
     do {
         try await performGracefulShutdown(
-            socketOwner: socketOwner,
+            socketPathToRelease: socketPathToRelease,
             serviceLifetime: composition.serviceLifetime,
         )
     } catch {
@@ -355,6 +288,74 @@ func main() async throws {
     if let cleanupError {
         throw cleanupError
     }
+}
+
+// MARK: - Entry point
+
+/// Chooses the listener, and with it the authorization posture, before anything is built.
+///
+/// THE VARIANT IS CHOSEN HERE AND NOWHERE ELSE, because the two differ in a security
+/// property rather than in a preference. A Unix-socket listener has an owning user and
+/// therefore a caller it can name, and it runs its own accept so it can name it: the accept
+/// is the only place `LOCAL_PEERPID` and `LOCAL_PEERCRED` can be read, and no
+/// `ServerInterceptor` in the pinned gRPC/NIO can reach the accepted socket. A TCP listener
+/// has no principal at all, so it never enters the consent or verification path and every
+/// consent-requiring capability is denied.
+///
+/// The Unix-socket variant binds its OWN pathname rather than adopting one launchd created
+/// for it, because `ServerBootstrap` — the only way to hand SwiftNIO a connected socket —
+/// cannot adopt an existing listening descriptor, and the accept is worth more than the
+/// descriptor handoff. launchd still supervises the process through the LaunchAgent; the
+/// node's permissions are established by `UnixSocketNode` around the bind.
+@MainActor
+func main() async throws {
+    // Set the owner-only umask before AppKit, Vision, CoreImage, or Metal can
+    // create cache files and directories. Directories must retain owner execute
+    // permission for framework cache trees to be traversable.
+    _ = setServerProcessUmask()
+    logger.info("Set server process umask: \(ServerProcessPolicy.umask, privacy: .public)")
+
+    logger.info("ExactMacServer starting...")
+
+    let config = ServerConfig.fromEnvironment()
+    logger.info("Configuration loaded")
+    let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
+
+    if let socketPath = config.unixSocketPath {
+        logger.info("Will listen on Unix socket: \(socketPath, privacy: .private)")
+        logger.info("Authorization: unix-socket variant; the owning user is the principal.")
+        let registry = ConnectionPeerRegistry()
+        try await serve(
+            config: config,
+            transport: HTTP2ServerTransport.Custom(
+                listenerFactory: PeerIdentifyingListenerFactory(
+                    eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
+                    socketPath: socketPath,
+                    registry: registry,
+                ),
+            ),
+            authorizationRuntime: .unixSocket(
+                descriptorPolicy: descriptorPolicy,
+                peerEvidence: .registry(registry),
+            ),
+            socketPathToRelease: socketPath,
+        )
+        return
+    }
+
+    logger.warning(
+        "Authorization: reduced unauthenticated posture. This listener has no owning user, so every consent-requiring capability is denied and no approval can be given. Do not expose this port beyond the loopback interface.",
+    )
+    logger.info("Will listen on \(config.listenAddress, privacy: .public):\(config.port, privacy: .public)")
+    try await serve(
+        config: config,
+        transport: HTTP2ServerTransport.Posix(
+            address: .ipv4(host: config.listenAddress, port: config.port),
+            transportSecurity: .plaintext,
+        ),
+        authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
+        socketPathToRelease: nil,
+    )
 }
 
 try await main()

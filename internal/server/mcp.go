@@ -377,6 +377,17 @@ func grpcClientDialOptions(cfg *config.Config) ([]grpc.DialOption, error) {
 	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxGRPCReceiveMessageBytes)),
 	}
+	if cfg.ServerSocketPath != "" {
+		// A Unix-socket client that does not name its own socket is unattributable, and the
+		// server refuses every capability on an unattributable connection. Naming it here
+		// rather than in a transport-specific branch means there is one code path and no
+		// configuration in which the client silently loses the ability to ask for anything.
+		identity, err := newPeerIdentityDialer(cfg.ServerSocketPath)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, grpc.WithContextDialer(identity.dial))
+	}
 	if cfg.ServerTLS {
 		creds := credentials.NewTLS(nil)
 		if cfg.ServerCertFile != "" {
