@@ -519,3 +519,119 @@ private struct ApprovingBroker: ConsentBroker {
         )
     }
 }
+
+/// C10: the agent's reason, and what it is worth.
+///
+/// THE PROPERTY IS NOT "the reason is read". It is that a request WITHOUT one is treated
+/// as less routine than the same request with one, because an unexplained request is one
+/// the operator should decline — and a mechanism that recorded the reason without acting on
+/// that would be a field on a form.
+extension AuthorizationInterceptorTests {
+    private static var reasonFixture: AuthorizationRequest {
+        AuthorizationRequest(
+            id: AuthorizationRequestID(rawValue: "req-reason"),
+            rpcName: "exactmac.v1.ExactMac/GetClipboard",
+            capability: .clipboardRead,
+            scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+            argumentSummary: "the clipboard",
+            agentReason: "summarising the notes you asked about",
+            origin: .mcpProxy,
+        )
+    }
+
+    private static var identityFixture: CallerIdentity {
+        CallerIdentity(
+            processIdentifier: 4242,
+            effectiveUserIdentifier: 0,
+            parentProcessIdentifier: nil,
+            code: CodeIdentity(
+                executablePath: "/usr/local/bin/exactmac",
+                bundleIdentifier: "io.github.joeycumines.exactmac",
+                designatedRequirement: #"identifier "io.github.joeycumines.exactmac" and anchor apple"#,
+                signature: .signedAndValid,
+            ),
+            isFullyResolved: true,
+        )
+    }
+
+    func testAReasonlessRequestIsEscalatedAboveTheSameRequestWithOne() {
+        let request = Self.reasonFixture
+        func options(agentGaveReason: Bool) -> [OfferedDecision] {
+            AuthorizationPolicy.offeredDecisions(
+                for: request,
+                posture: .balanced,
+                riskClass: .elevated,
+                targetIsHighConsequence: false,
+                signature: .signedAndValid,
+                agentGaveReason: agentGaveReason,
+                originIsKnown: true,
+            )
+        }
+        let withReason = options(agentGaveReason: true)
+        let withoutReason = options(agentGaveReason: false)
+        XCTAssertEqual(withReason.count, withoutReason.count, "the option list changed shape")
+        // THE MECHANISM IS THE CEREMONY, NOT THE RISK CLASS, and asserting the risk class
+        // was my error: the engine passes the escalated class into the BIOMETRIC
+        // REQUIREMENT, so a reasonless request costs the operator a fingerprint rather than
+        // being labelled more dangerous. That is the right place for it — the operator
+        // feels the cost — and it is what has to be asserted.
+        XCTAssertTrue(
+            withReason.allSatisfy { !$0.biometric.isRequired },
+            "a reasoned narrow ask should cost nothing",
+        )
+        XCTAssertTrue(
+            withoutReason.allSatisfy(\.biometric.isRequired),
+            "a request with no reason should cost a ceremony on every option",
+        )
+        // The ceremony line does NOT repeat that the reason is missing, and asserting that
+        // it should was my second error here: the design puts the absence in the PROMPT,
+        // which is a different surface with the state "THE AGENT GAVE NO REASON", and the
+        // ceremony line is the generic risk wording. Duplicating it would say the same
+        // thing twice in two registers.
+        XCTAssertTrue(
+            withoutReason.allSatisfy { $0.biometric.reason != nil },
+            "a ceremony that is required must say what it is protecting against",
+        )
+
+        // And the reason escalates friction, it does not DENY: refusing every request an
+        // agent forgot to explain would make the reason optional in practice.
+        let decision = AuthorizationPolicy.evaluate(
+            request: AuthorizationRequest(
+                id: request.id, rpcName: request.rpcName, capability: request.capability,
+                scope: request.scope, argumentSummary: request.argumentSummary,
+                agentReason: nil, origin: .unknown,
+            ),
+            identity: Self.identityFixture,
+            grants: [],
+            envelopes: [],
+            posture: .balanced,
+            context: .unixSocket(),
+            now: MonotonicInstant(nanoseconds: 0),
+        )
+        XCTAssertEqual(decision.basis, .promptRequired, "a reasonless request was not asked about")
+    }
+
+    /// The reason travels as METADATA, and a blank one is ABSENT rather than satisfying the
+    /// requirement — because a header set to "" would otherwise be a way to comply with
+    /// saying nothing.
+    func testTheReasonIsReadFromMetadataAndABlankOneIsAbsent() {
+        var withReason = Metadata()
+        withReason.addString("summarising the notes", forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        XCTAssertEqual(
+            AuthorizationInterceptor.agentReason(from: withReason),
+            "summarising the notes",
+        )
+        var blank = Metadata()
+        blank.addString("", forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        XCTAssertNil(AuthorizationInterceptor.agentReason(from: blank), "a blank reason counted")
+        XCTAssertNil(AuthorizationInterceptor.agentReason(from: Metadata()))
+        XCTAssertEqual(AuthorizationInterceptor.origin(of: Metadata()), .directSocket)
+        var viaMCP = Metadata()
+        viaMCP.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
+        XCTAssertEqual(AuthorizationInterceptor.origin(of: viaMCP), .mcpProxy)
+        // The key is shared with the Go layer, so a rename on one side is a silent loss of
+        // every reason. Pinned here so the coupling is visible from both files.
+        XCTAssertEqual(AuthorizationInterceptor.agentReasonMetadataKey, "exactmac-agent-reason")
+        XCTAssertEqual(AuthorizationInterceptor.mcpProxyMetadataKey, "exactmac-origin")
+    }
+}

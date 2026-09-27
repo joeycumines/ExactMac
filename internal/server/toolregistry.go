@@ -604,7 +604,33 @@ func (s *MCPServer) registerTools() {
 			Handler: s.handleExecuteMacro,
 		},
 	}
+	// Every tool gains the `reason` property and the consent guidance, applied here rather
+	// than written twenty-odd times, because an agent cannot know in advance which of its
+	// calls will need consent — the SERVER derives the capability from the request bytes —
+	// and a property that appears on only some tools is one an agent learns to omit.
+	//
+	// The guidance goes on every description rather than only on the tools that obviously
+	// reach the desktop, because a clipboard write and an accessibility read are exactly as
+	// sensitive to a reader who does not know they are asking.
 	for _, tool := range s.tools {
+		addAgentReason(tool)
 		closeToolObjectSchemas(tool.InputSchema)
 	}
+}
+
+// addAgentReason adds the `reason` property and appends the consent guidance.
+//
+// It tolerates a tool whose schema has no `properties` object, because a tool with no
+// arguments is a legitimate shape and refusing to give it a reason would be a bug in the
+// registry rather than in the tool.
+func addAgentReason(tool *Tool) {
+	properties, ok := tool.InputSchema["properties"].(map[string]any)
+	if !ok {
+		properties = map[string]any{}
+		tool.InputSchema["properties"] = properties
+	}
+	if _, alreadyThere := properties["reason"]; !alreadyThere {
+		properties["reason"] = agentReasonSchema
+	}
+	tool.Description += AgentGuidance
 }

@@ -183,7 +183,18 @@ func (s *MCPServer) newToolCallContext(requestCtx context.Context) (context.Cont
 	}
 }
 
+// toolCallContext is the ONE place every handler's context comes from, which is why the
+// agent's reason is attached here rather than in twenty handlers.
+//
+// One seam means no tool can forget the reason, and it means the reason travels on the wire
+// the server reads it from rather than on a field some handler remembered to set. A handler
+// that built its own context from s.ctx would silently lose it.
 func (s *MCPServer) toolCallContext(call *ToolCall) context.Context {
+	base := s.baseCallContext(call)
+	return withAgentReason(base, call)
+}
+
+func (s *MCPServer) baseCallContext(call *ToolCall) context.Context {
 	if call != nil && call.Context != nil {
 		return call.Context
 	}

@@ -1,6 +1,6 @@
 import Darwin
-import Foundation
 @testable import ExactMacServer
+import Foundation
 import XCTest
 
 /// C8's acceptance suite.
@@ -29,9 +29,9 @@ final class DecisionAuditTests: XCTestCase {
     }
 
     private static let identity = CallerIdentity(
-        processIdentifier: 4_242,
+        processIdentifier: 4242,
         effectiveUserIdentifier: 0,
-        parentProcessIdentifier: 4_240,
+        parentProcessIdentifier: 4240,
         code: CodeIdentity(
             executablePath: "/usr/local/bin/exactmac",
             bundleIdentifier: "io.github.joeycumines.exactmac",
@@ -41,7 +41,7 @@ final class DecisionAuditTests: XCTestCase {
         isFullyResolved: true,
         ancestors: [
             ResolvedProcess(
-                processIdentifier: 4_240,
+                processIdentifier: 4240,
                 parentProcessIdentifier: nil,
                 code: CodeIdentity(
                     executablePath: "/bin/zsh",
@@ -77,7 +77,7 @@ final class DecisionAuditTests: XCTestCase {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("exactmac-audit-\(name).jsonl").path
         try? FileManager.default.removeItem(atPath: path)
-        return (try DecisionAudit(path: path, clock: clock, birth: "test-birth"), path)
+        return try (DecisionAudit(path: path, clock: clock, birth: "test-birth"), path)
     }
 
     // MARK: - The record
@@ -100,7 +100,7 @@ final class DecisionAuditTests: XCTestCase {
             decision: Self.ceremonyDecision(),
             operatorNote: "the agent is summarising my clipboard, and I know why",
             biometricObtained: true,
-            grantExpiresAtNanoseconds: UInt64(9_999),
+            grantExpiresAtNanoseconds: UInt64(9999),
         ))
 
         XCTAssertEqual(entry.sequence, 1)
@@ -115,7 +115,7 @@ final class DecisionAuditTests: XCTestCase {
         XCTAssertEqual(entry.identity.ancestors.count, 1)
         XCTAssertTrue(entry.biometricRequired)
         XCTAssertTrue(entry.biometricObtained)
-        XCTAssertEqual(entry.grantExpiresAtNanoseconds, 9_999)
+        XCTAssertEqual(entry.grantExpiresAtNanoseconds, 9999)
         XCTAssertFalse(entry.hash.isEmpty)
     }
 

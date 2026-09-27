@@ -28,6 +28,7 @@ struct AuditEntry: Codable, Equatable, Sendable {
     var hash: String
 
     // MARK: What was asked
+
     var requestID: String
     var rpcName: String
     var capability: String
@@ -38,9 +39,11 @@ struct AuditEntry: Codable, Equatable, Sendable {
     var agentReason: String?
 
     // MARK: Who asked, as resolved AT DECISION TIME
+
     var identity: WireIdentity
 
     // MARK: What was decided, and WHY
+
     /// `allow`, `deny`, or `prompt`.
     var decision: String
     /// WHICH GRANT MATCHED, or that it came from an interactive prompt, or from an
@@ -154,7 +157,9 @@ final class DecisionAudit: @unchecked Sendable {
     }
 
     deinit {
-        if descriptor >= 0 { _ = Darwin.close(descriptor) }
+        if descriptor >= 0 {
+            _ = Darwin.close(descriptor)
+        }
     }
 
     /// Opens the log and reads far enough to continue the chain where it left off.
@@ -241,12 +246,12 @@ final class DecisionAudit: @unchecked Sendable {
         decision: AuthorizationDecision,
         operatorNote: String? = nil,
         biometricObtained: Bool = false,
-        /// The expiry of the grant that authorized this, recorded IN THE ENTRY at the moment
-        /// the entry is written. There is deliberately no way to add it later: a hash-chained
-        /// record whose entries can be edited after the fact is not a chain.
+        // The expiry of the grant that authorized this, recorded IN THE ENTRY at the moment
+        // the entry is written. There is deliberately no way to add it later: a hash-chained
+        // record whose entries can be edited after the fact is not a chain.
         grantExpiresAtNanoseconds: UInt64? = nil,
     ) -> AuditEntry? {
-        let payload = lock.withLock { () -> AuditEntry? in
+        lock.withLock { () -> AuditEntry? in
             let previous = lastHash
             let sequence = nextSequence
             var entry = AuditEntry(
@@ -315,7 +320,6 @@ final class DecisionAudit: @unchecked Sendable {
             lastHash = entry.hash
             return entry
         }
-        return payload
     }
 
     /// Reads the whole log and says what is wrong with it.
@@ -409,7 +413,9 @@ extension AuditEntry {
                     offset += written
                     continue
                 }
-                if written < 0, errno == EINTR { continue }
+                if written < 0, errno == EINTR {
+                    continue
+                }
                 throw AuditError.unreadable(reason: "write failed with errno \(errno)")
             }
         }

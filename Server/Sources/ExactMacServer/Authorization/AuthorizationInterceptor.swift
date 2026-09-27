@@ -307,7 +307,11 @@ struct AuthorizationInterceptor: ServerInterceptor {
 
         let decision: AuthorizationDecision
         do {
-            decision = try await authorize(method: context.descriptor.fullyQualifiedMethod, message: first)
+            decision = try await authorize(
+                method: context.descriptor.fullyQualifiedMethod,
+                message: first,
+                metadata: request.metadata,
+            )
         } catch let error as AuthorizationDenial {
             counters.record(error.reason)
             logger.info(
@@ -358,7 +362,11 @@ struct AuthorizationInterceptor: ServerInterceptor {
         )
     }
 
-    private func authorize(method: String, message: any Sendable) async throws -> AuthorizationDecision {
+    private func authorize(
+        method: String,
+        message: any Sendable,
+        metadata: Metadata,
+    ) async throws -> AuthorizationDecision {
         guard let protobuf = message as? any SwiftProtobuf.Message else {
             throw AuthorizationDenial(
                 reason: .notPermitted,
@@ -372,8 +380,8 @@ struct AuthorizationInterceptor: ServerInterceptor {
             message: protobuf,
             policy: runtime.descriptorPolicy,
             requestID: requestID,
-            agentReason: nil,
-            origin: .directSocket,
+            agentReason: Self.agentReason(from: metadata),
+            origin: Self.origin(of: metadata),
             operationLimit: nil,
             resolver: runtime.applicationResolver,
         )
@@ -541,6 +549,42 @@ struct AuthorizationInterceptor: ServerInterceptor {
         case .promptRequired: "promptRequired"
         case let .denied(reason): "denied:\(reason.rawValue)"
         }
+    }
+
+    /// The gRPC metadata key the Go layer carries the agent's stated reason on.
+    ///
+    /// IT IS METADATA AND NOT A REQUEST FIELD, which is deliberate on both sides. The reason
+    /// is caller-supplied text that the prompt shows inside a field marked NOT VERIFIED;
+    /// putting it in the request message would make it look like part of the request being
+    /// authorized rather than a claim about it, and the design's whole argument for the
+    /// prompt rests on that distinction. It also means adding the reason changed no request
+    /// message and therefore no capability and no scope.
+    static let agentReasonMetadataKey = "exactmac-agent-reason"
+
+    /// The agent's reason, or nil.
+    ///
+    /// A BLANK header is treated as ABSENT rather than as a reason, because a header an agent
+    /// can set to "" has satisfied the requirement without saying anything. The policy
+    /// escalates a reasonless request rather than treating it as routine, and that
+    /// escalation is only honest if an empty string does not count as a reason.
+    static func agentReason(from metadata: Metadata) -> String? {
+        let values = metadata[stringValues: agentReasonMetadataKey]
+        guard let value: String = values.first(where: { _ in true }) else { return nil }
+        return value.isEmpty ? nil : value
+    }
+
+    /// Where the request came from, which the policy escalates when it cannot attribute one.
+    ///
+    /// The Go MCP layer announces itself by name. That is a CLAIM and not an identity, and
+    /// it is treated as one: the engine raises the risk class for an unattributed origin,
+    /// and the peer identity the operator judges comes from the socket rather than from
+    /// anything a caller says about itself.
+    static let mcpProxyMetadataKey = "exactmac-origin"
+
+    static func origin(of metadata: Metadata) -> RequestOrigin {
+        let values = metadata[stringValues: mcpProxyMetadataKey]
+        guard values.first(where: { _ in true }) == "mcp" else { return .directSocket }
+        return .mcpProxy
     }
 
     private static func requestIdentifier(method: String, at now: MonotonicInstant) -> String {
