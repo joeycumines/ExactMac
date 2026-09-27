@@ -206,6 +206,10 @@ struct UntrustedField: View {
         .padding(.trailing, Design.Space.component)
         .padding(.bottom, Design.Space.chip)
         .padding(.leading, 0)
+        // FILLS the row. Sized to its content it becomes a box that shrinks to the shortest
+        // reason, which reads as a different kind of thing from the full-width field above
+        // and below it — and the design has every provenance field at the row's full width.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
                 .fill(Design.Ink.surfaceSunken),

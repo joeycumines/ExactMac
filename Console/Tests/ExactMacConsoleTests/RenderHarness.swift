@@ -10,7 +10,7 @@ import Testing
 /// the app draws is to have the app draw it itself.
 enum RenderHarness {
     @MainActor
-    static func png<V: View>(_ view: V, size: CGSize, to path: String) throws {
+    static func png(_ view: some View, size: CGSize, to path: String) throws {
         // The directory has to exist before the write, and a missing one is the difference
         // between "the surface does not render" and "there was nowhere to put it".
         try FileManager.default.createDirectory(
@@ -80,6 +80,104 @@ struct RenderTests {
             MenuBarPopover(model: model),
             size: CGSize(width: Design.Layout.popoverWidth, height: 380),
             to: RenderHarness.outputDirectory + "popover.png",
+        )
+    }
+}
+
+@Suite("The designed windows render", .serialized)
+@MainActor
+struct WindowRenderTests {
+    @Test
+    func `the grants manager renders at 720pt`() throws {
+        let grants = [
+            GrantRow.Model(
+                id: "1",
+                consequence: "Read the clipboard in TextEdit",
+                capability: "clipboard.read",
+                scope: "clipboard.read  ·  TextEdit only  ·  for 5 minutes",
+                holder: "exactmac-mcp",
+                signature: .unnotarized,
+                origin: "Origin: prompt at 16:42  ·  granted 4 minutes ago",
+                remaining: "3m 12s",
+                countdown: .live,
+            ),
+            GrantRow.Model(
+                id: "2",
+                consequence: "Type and click as you, in any app",
+                capability: "input.synthesize",
+                scope: "input.synthesize  ·  every application  ·  for 8 hours",
+                holder: "exactmac-mcp",
+                signature: .unsigned,
+                origin: "Origin: prompt at 16:38  ·  granted 8 minutes ago",
+                remaining: "1m 04s",
+                countdown: .soon,
+            ),
+            GrantRow.Model(
+                id: "3",
+                consequence: "Read the accessibility tree of any app",
+                capability: "observation.ax",
+                scope: "observation.ax  ·  every application  ·  inside an envelope",
+                holder: "codex",
+                signature: .signed,
+                origin: "Origin: envelope approved at 16:30  ·  envelope has 1h 52m left",
+                remaining: "1h 52m",
+                countdown: .live,
+            ),
+            GrantRow.Model(
+                id: "4",
+                consequence: "Read the clipboard in any app",
+                capability: "clipboard.read",
+                scope: "clipboard.read  ·  every application  ·  for 15 minutes",
+                holder: "codex",
+                signature: .signed,
+                origin: "Origin: prompt at 15:58  ·  expired 12 minutes ago",
+                remaining: "expired",
+                countdown: .expired,
+            ),
+        ]
+        try RenderHarness.png(
+            GrantsManager(grants: grants),
+            size: CGSize(width: 720, height: 642),
+            to: RenderHarness.outputDirectory + "grants.png",
+        )
+    }
+
+    @Test
+    func `the activity timeline renders with a broken chain`() throws {
+        let rows = [
+            ActivityRow.Model(
+                id: "1",
+                isAllowed: true,
+                time: "16:42:07",
+                consequence: "Read the clipboard in TextEdit",
+                capability: "clipboard.read · TextEdit only",
+                basis: "Allowed by a grant you approved at 16:38 · expires in 3m 12s",
+                identity: "exactmac-mcp · pid 4517",
+                signature: .unnotarized,
+                agentReason: "Pasting the test fixture into the TextEdit scratch buffer.",
+                operatorNote: nil,
+            ),
+            ActivityRow.Model(
+                id: "2",
+                isAllowed: false,
+                time: "16:39:52",
+                consequence: "Run a shell command in any application",
+                capability: "script.execute · every application",
+                basis: "Denied — no grant matched, and you declined it in the prompt",
+                identity: "codex · pid 8823",
+                signature: .signed,
+                agentReason: "Installing the fixture dependencies before the run.",
+                operatorNote: "Use the scoped option next time — this reaches every app I have open.",
+            ),
+        ]
+        try RenderHarness.png(
+            ActivityTimeline(
+                rows: rows,
+                integrity: .broken(at: 1283),
+                subtitle: "Today · entries after 1,283 are untrusted",
+            ),
+            size: CGSize(width: 720, height: 824),
+            to: RenderHarness.outputDirectory + "activity.png",
         )
     }
 }
