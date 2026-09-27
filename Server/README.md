@@ -73,18 +73,29 @@ Transport is selected by CLI subcommand: `exactmac mcp` (stdio) or `exactmac htt
 ### Example Configuration
 
 ```bash
-# Manual development: bind the Swift gRPC server to loopback TCP.
-# Unix sockets require launchd activation and must be left unset here.
-unset GRPC_UNIX_SOCKET
-export GRPC_LISTEN_ADDRESS="127.0.0.1"
-export GRPC_PORT="8080"
+# Manual development over a Unix socket: the server binds the pathname itself.
+export GRPC_UNIX_SOCKET="$HOME/Library/Caches/exactmac.sock"
 
 swift run ExactMacServer
 ```
 
-The local LaunchAgent deployment configures `GRPC_UNIX_SOCKET` and supplies the
-matching launchd-owned descriptor. Do not set that variable for a manually
-launched server; use loopback TCP as shown above.
+A client on that socket is only able to do anything if it binds a pathname of
+its own before connecting. The server identifies the caller from the kernel's
+report of the peer socket, and the peer's bound pathname is what lets it
+correlate an RPC with a connection; a client that connects without one is
+unattributable and every capability on that connection is refused. The Go MCP
+proxy in this repository does bind one.
+
+Loopback TCP is the reduced posture and is only useful for exercising the
+denial paths: a TCP listener has no owning user and therefore no principal, so
+every consent-requiring capability is denied on it by design.
+
+```bash
+unset GRPC_UNIX_SOCKET
+export GRPC_LISTEN_ADDRESS="127.0.0.1"
+export GRPC_PORT="8080"
+swift run ExactMacServer
+```
 
 When `MCP_AUDIT_LOG_FILE` is set, the MCP process records tool name, status, duration, and UTC timestamps only; tool arguments and user content are never stored. New files are created with mode `0600`. Existing paths must be regular files owned by the current user, mode `0600`, with one hard link; symlinks and non-regular files are rejected.
 
@@ -99,9 +110,9 @@ See [DEPLOYMENT.md](../DEPLOYMENT.md) for the complete deployment guide and the 
 
 ## TLS Setup
 
-The Swift gRPC server does not serve TLS: manual execution binds to
-loopback TCP, while the local LaunchAgent may provide an owner-private Unix
-socket through launchd activation (see the Core Settings table).
+The Swift gRPC server does not serve TLS: it binds either a loopback TCP
+port or an owner-private Unix socket it creates itself (see the Core Settings
+table).
 TLS is provided by the MCP proxy's Streamable HTTP endpoint:
 
 1. **Generate or obtain certificates:**

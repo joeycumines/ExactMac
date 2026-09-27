@@ -111,27 +111,25 @@ func (d *peerIdentityDialer) dial(ctx context.Context, address string) (net.Conn
 	return &namedConn{Conn: connection, name: name, remove: d.remove}, nil
 }
 
-// reserveName picks a name nothing else can be holding, because binding is exclusive: a
-// collision is not a correctness problem, it is a retry.
+// reserveName picks a name this socket can take. A name that is already in use is not a
+// correctness problem — the bind fails with EADDRINUSE and the dial fails, which is what
+// should happen when another process holds a name — so there is nothing to retry here.
 func (d *peerIdentityDialer) reserveName() (string, error) {
-	for attempt := 0; attempt < 8; attempt++ {
-		suffix := make([]byte, 8)
-		if _, err := rand.Read(suffix); err != nil {
-			return "", fmt.Errorf("generate a client socket name: %w", err)
-		}
-		name := filepath.Join(d.directory, "emc-"+hex.EncodeToString(suffix)+".sock")
-		// `sun_path` is 104 bytes on Darwin, and a name that does not fit addresses a
-		// DIFFERENT socket rather than failing, which is why the shipped server socket lives
-		// in ~/Library/Caches: it leaves room for a client name beside it.
-		if len(name) >= 104 {
-			return "", fmt.Errorf(
-				"the server socket's directory leaves no room for a client socket name: %q is %d bytes",
-				name, len(name),
-			)
-		}
-		return name, nil
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return "", fmt.Errorf("generate a client socket name: %w", err)
 	}
-	return "", fmt.Errorf("could not find an unused client socket name")
+	name := filepath.Join(d.directory, "emc-"+hex.EncodeToString(suffix)+".sock")
+	// `sun_path` is 104 bytes on Darwin, and a name that does not fit addresses a DIFFERENT
+	// socket rather than failing, which is why the shipped server socket lives in
+	// ~/Library/Caches: it leaves room for a client name beside it.
+	if len(name) >= 104 {
+		return "", fmt.Errorf(
+			"the server socket's directory leaves no room for a client socket name: %q is %d bytes",
+			name, len(name),
+		)
+	}
+	return name, nil
 }
 
 func (d *peerIdentityDialer) remove(name string) {
@@ -141,6 +139,15 @@ func (d *peerIdentityDialer) remove(name string) {
 // namedConn removes its socket's name when the connection closes, because the name is what
 // makes this process identifiable and a name left on a dead socket is a name a later process
 // could be handed.
+//
+// CLOSE FIRST, THEN REMOVE, and the order is load-bearing. The exclusivity the whole scheme
+// rests on belongs to the SOCKET, not to the directory entry: the kernel keeps refusing to
+// bind the name to a second socket while this one lives, but it stops the instant this
+// process unlinks the entry while the socket is still open. Removing first therefore lets a
+// second socket take the name and connect while this connection is still live, and the
+// server would then see two live connections presenting one token and attribute the first's
+// calls to the second's identity. A blocking connect is not an option either — the token has
+// to disappear before Close returns, and the socket has to be closed first for that to hold.
 type namedConn struct {
 	net.Conn
 	name   string
@@ -149,8 +156,9 @@ type namedConn struct {
 }
 
 func (c *namedConn) Close() error {
+	err := c.Conn.Close()
 	c.once.Do(func() { c.remove(c.name) })
-	return c.Conn.Close()
+	return err
 }
 
 // bindUnixSocketName gives a not-yet-connected socket a pathname of its own.

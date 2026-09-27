@@ -4,6 +4,7 @@ import GRPCNIOTransportHTTP2
 import NIOCore
 import NIOPosix
 import os
+import Synchronization
 
 // MARK: - Reading the kernel's answer from an accepted channel
 
@@ -21,9 +22,20 @@ import os
 /// only handle SwiftNIO will give out.
 ///
 /// MEASURED on this machine with a C probe rather than read from a header: `LOCAL_PEERPID`
-/// returned the peer pid, `LOCAL_PEERCRED` returned an `xucred` whose `cr_uid` is the peer's
-/// effective uid, `getpeername` on the accepted socket returned the peer's bound pathname,
-/// and an unnamed peer's `getpeername` returned an empty pathname.
+/// returned the peer's pid, `LOCAL_PEERCRED` returned an `xucred` whose `cr_uid` is the
+/// peer's effective uid, `getpeername` on the accepted socket returned the peer's bound
+/// pathname, and an unnamed peer's `getpeername` returned an empty pathname.
+///
+/// `LOCAL_PEERPID` NAMES THE PEER SOCKET'S CREATING PROCESS, NOT NECESSARILY THE PROCESS
+/// CURRENTLY SPEAKING, and the same probe showed the distinction is real: with the creating
+/// process gone the option still reports it, because the socket outlives its creator. A
+/// process that forks while holding a named socket therefore has its children's calls
+/// attributed to the parent — the parent's pid, so the parent's executable path, the
+/// parent's signature state and the parent's grants. Nothing in these two options can see
+/// that, so the limitation belongs at the resolution site rather than hidden here, and
+/// `CallerIdentityResolver` is where a reader should look for what is and is not provable
+/// from a pid. A dead creator fails closed on its own, because there is no executable to
+/// resolve and an unresolved identity escalates and then denies.
 ///
 /// NOTHING HERE BLOCKS. `unsafeGetSocketOption` completes its promise inline when it is
 /// already on the event loop, and every callback below runs on that loop, so the whole
@@ -166,29 +178,37 @@ enum UnixSocketPeerEvidence {
 
 // MARK: - What the server requires of its own socket pathname
 
-/// The server binds its own Unix socket, so it owns the node at that pathname and has to
-/// decide what to do about one it did not create.
+/// The server binds its own Unix socket, so the node at that pathname is the server's to
+/// manage and it has to decide what to do about one it did not create.
 ///
-/// These checks are the same shape as `ConsoleServerEndpoint.listen()`'s and they are
-/// separate functions because they bracket the bind and must not be one another: a node that
-/// is wrong before the bind is not the node the bind produced, and a node that is wrong after
-/// it is the node just created.
+/// THE DECISION IS AN ADVISORY LOCK, NOT A PROBE, and that choice was bought by measurement.
+/// The first version asked whether anything was listening by calling `connect(2)`, and a
+/// C probe on this machine showed that cannot answer the question: with the accept queue
+/// full, a non-blocking connect to a LIVE Unix listener returns `ECONNREFUSED` — the same
+/// errno a socket with no listener returns — and a blocking one does not return at all. So
+/// a probe both mistakes a busy server for a dead one, which would unlink a live server's
+/// node, and can hang the startup path on one. `flock(2)` answers it exactly, because the
+/// kernel releases the lock when the holder dies, so a node left behind by a crash is
+/// present and unlocked while a live server's is present and held.
 enum UnixSocketNodeError: Error, Equatable, CustomStringConvertible {
-    case pathAlreadyExistsAndIsLive(String)
     case pathIsNotASocket(String)
     case pathIsNotOwnedByThisUser(String, actual: uid_t)
-    case pathIsNotOwnerOnly(String, actual: mode_t)
+    case pathAlreadyClaimed(String)
+    case ownerNodeIsNotARegularFile(String)
+    case ownerNodeIsNotOwnerOnly(String, actual: mode_t)
     case systemCall(operation: String, path: String, code: Int32)
 
     var description: String {
         switch self {
-        case let .pathAlreadyExistsAndIsLive(path):
-            "\(path) is already served by a live listener; refusing to take the pathname over"
         case let .pathIsNotASocket(path):
-            "\(path) exists and is not a socket; refusing to remove it"
+            "\(path) exists and is not a socket; refusing to take it over"
         case let .pathIsNotOwnedByThisUser(path, actual):
             "\(path) is owned by uid \(actual); refusing to touch it"
-        case let .pathIsNotOwnerOnly(path, actual):
+        case let .pathAlreadyClaimed(path):
+            "\(path) is claimed by a running server; refusing to take the pathname over"
+        case let .ownerNodeIsNotARegularFile(path):
+            "\(path) exists and is not a regular file; refusing to use it as a lock"
+        case let .ownerNodeIsNotOwnerOnly(path, actual):
             "\(path) has permissions 0\(String(actual, radix: 8)); expected 0600"
         case let .systemCall(operation, path, code):
             "\(operation) failed for \(path): errno \(code)"
@@ -196,53 +216,138 @@ enum UnixSocketNodeError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-enum UnixSocketNode {
-    /// Removes a node left behind by a previous run, and refuses everything else.
-    ///
-    /// A LEFTOVER NODE IS THE ONE LEGITIMATE REASON THE PATH CAN ALREADY EXIST, and taking
-    /// it has to be safe in three ways. `lstat` never follows a symlink, so a symlink placed
-    /// at the path cannot turn the unlink into a removal of something else. The node must be
-    /// a socket owned by this user, so a regular file or another user's node is refused
-    /// rather than deleted. And the node must have NO live listener, which is checked by
-    /// connecting to it: unlinking a pathname a running server is still serving would give
-    /// two listeners on one name and split the clients between them.
-    static func reclaimStaleNode(at path: String) throws {
-        var status = stat()
-        guard path.withCString({ lstat($0, &status) }) == 0 else {
-            if errno == ENOENT { return }
-            throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
-        }
-        try requireOwnerOnlySocket(status, path: path)
-        guard !isLive(path) else {
-            throw UnixSocketNodeError.pathAlreadyExistsAndIsLive(path)
-        }
-        guard unlink(path) == 0 else {
-            throw UnixSocketNodeError.systemCall(operation: "unlink", path: path, code: errno)
-        }
+/// This process's exclusive claim on one socket pathname.
+///
+/// IT IS THE PROOF OF OWNERSHIP, and both directions of the socket's life depend on it. A
+/// server that could not claim the pathname does not bind it and does not remove it on the
+/// way out, so a refused start can never delete a live server's node; and a server that
+/// holds the claim knows no other live server can be on the pathname, so removing the node
+/// on shutdown is removing its own.
+///
+/// A `final class` holding a descriptor, so the lock lives exactly as long as the claim and
+/// the kernel closes it if this process dies without releasing.
+final class SocketPathClaim: @unchecked Sendable {
+    /// Beside the socket, so it is on the same filesystem and in the same owner-only place.
+    static func ownerNodePath(forSocketPath path: String) -> String { path + ".owner" }
+
+    let path: String
+    private let ownerNodePath: String
+    private let descriptor: Int32
+
+    init(path: String, ownerNodePath: String, descriptor: Int32) {
+        self.path = path
+        self.ownerNodePath = ownerNodePath
+        self.descriptor = descriptor
     }
 
-    /// Makes the node the bind just created owner-only, and says so if it cannot.
+    deinit {
+        _ = Darwin.close(descriptor)
+    }
+
+    /// Removes the socket and the lock node, then drops the lock.
     ///
-    /// The process umask is `0077`, so `bind` creates the node as `0700` — owner-only, and
-    /// already a boundary. `0600` is nevertheless what the deployment contract and the Go
-    /// client's admission check both require, and a socket is never searched, so the execute
-    /// bit on it is noise that only widens a checker's idea of what is exposed.
+    /// IN THAT ORDER, and the order is the whole subtlety. Unlinking the lock node while the
+    /// lock is still held leaves a window in which a starting server creates a fresh node
+    /// and locks that instead, which is correct: by then this process's socket is already
+    /// gone, so the pathname is free and the newcomer may have it. Removing the socket
+    /// first, under the lock, is what stops two live servers sharing one name.
+    func release() throws {
+        try UnixSocketNode.unlinkSocketNode(at: path)
+        if unlink(ownerNodePath) != 0, errno != ENOENT {
+            // A lock node this process cannot remove is a leftover, not a safety failure:
+            // the lock itself is released when the descriptor closes below, and the next
+            // start opens or replaces the node.
+            throw UnixSocketNodeError.systemCall(
+                operation: "unlink",
+                path: ownerNodePath,
+                code: errno,
+            )
+        }
+        _ = Darwin.close(descriptor)
+    }
+}
+
+enum UnixSocketNode {
+    /// Claims the pathname for this process, and removes a node left behind by a previous run.
+    ///
+    /// NOTHING HERE FOLLOWS A SYMLINK. `lstat` describes the node itself, `O_NOFOLLOW`
+    /// refuses to open through one, and a socket, regular file or directory that is not
+    /// what this server expects is reported rather than removed — because unlinking whatever
+    /// sits at a path is how a symlink there becomes a way to delete somebody else's file.
+    static func claim(_ path: String) throws -> SocketPathClaim {
+        var status = stat()
+        if path.withCString({ lstat($0, &status) }) == 0 {
+            // Owner and socket type, and NOT the mode. The mode of a node this process did
+            // not create is a property of the run that crashed, not evidence about anything
+            // that matters here: `hardenBoundNode` sets it on the node the bind is about to
+            // create, and requiring it of a leftover would mean a server that crashed under
+            // a permissive umask could never restart without an operator clearing the
+            // pathname by hand — which is the whole failure the claim exists to remove.
+            try requireOwnedSocketIgnoringMode(status, path: path)
+        } else if errno != ENOENT {
+            throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
+        }
+
+        let ownerNodePath = SocketPathClaim.ownerNodePath(forSocketPath: path)
+        try requireOwnerOnlyLockNode(ownerNodePath)
+        let descriptor = Darwin.open(
+            ownerNodePath,
+            O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC,
+            0o600,
+        )
+        guard descriptor >= 0 else {
+            throw UnixSocketNodeError.systemCall(operation: "open", path: ownerNodePath, code: errno)
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            _ = Darwin.close(descriptor)
+            // EWOULDBLOCK IS THE ANSWER, not a failure to find out: the pathname is being
+            // served by a process that is still alive.
+            throw UnixSocketNodeError.pathAlreadyClaimed(path)
+        }
+        // Holding the claim is what makes removing a leftover node safe, so the removal
+        // comes after it and not before.
+        try unlinkSocketNode(at: path)
+        return SocketPathClaim(path: path, ownerNodePath: ownerNodePath, descriptor: descriptor)
+    }
+
+    /// Makes the node the bind just created owner-only.
+    ///
+    /// IT CHMODS UNCONDITIONALLY AND CHECKS ONLY THAT THE CHMOD WORKED. An earlier version
+    /// first required the node to be owner-only, which is the mode it exists to establish,
+    /// so a process whose umask was not `0077` bound a `0755` node, refused to accept it, and
+    /// threw out of `makeListeningChannel` after the listener was already bound — which
+    /// abandoned an accepted child whose configured channel nothing ever consumed, and
+    /// SwiftNIO answers that with a `Fatal error` that kills the process rather than an
+    /// error anyone can read. A check that contradicts the operation it guards is not a
+    /// check.
     static func hardenBoundNode(at path: String) throws {
         var status = stat()
         guard path.withCString({ lstat($0, &status) }) == 0 else {
             throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
         }
-        try requireOwnerOnlySocket(status, path: path)
-        let permissions = status.st_mode & 0o777
-        guard permissions == 0o600 else {
-            guard chmod(path, 0o600) == 0 else {
-                throw UnixSocketNodeError.systemCall(operation: "chmod", path: path, code: errno)
-            }
-            return
+        // The node must be a socket this user owns before it is touched at all, and the mode
+        // is deliberately not part of that: the node was just created by this process's bind,
+        // and the mode is a parameter of that bind rather than a fact about a stranger's file.
+        try requireOwnedSocketIgnoringMode(status, path: path)
+        guard chmod(path, 0o600) == 0 else {
+            throw UnixSocketNodeError.systemCall(operation: "chmod", path: path, code: errno)
         }
     }
 
-    private static func requireOwnerOnlySocket(_ status: stat, path: String) throws {
+    /// Removes a socket node, and says so rather than removing anything that is not one.
+    static func unlinkSocketNode(at path: String) throws {
+        var status = stat()
+        guard path.withCString({ lstat($0, &status) }) == 0 else {
+            if errno == ENOENT { return }
+            throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
+        }
+        try requireOwnedSocketIgnoringMode(status, path: path)
+        guard unlink(path) == 0 else {
+            throw UnixSocketNodeError.systemCall(operation: "unlink", path: path, code: errno)
+        }
+    }
+
+    private static func requireOwnedSocketIgnoringMode(_ status: stat, path: String) throws {
         guard status.st_mode & mode_t(0o170000) == mode_t(0o140000) else {
             throw UnixSocketNodeError.pathIsNotASocket(path)
         }
@@ -252,55 +357,19 @@ enum UnixSocketNode {
         }
     }
 
-    /// Removes the node this process bound, on a clean shutdown.
-    ///
-    /// AFTER the transport has closed, so nothing is still accepting through it, and CHECKED
-    /// the same way `reclaimStaleNode` checks, because a pathname is mutable and unlinking
-    /// whatever sits at it is how a symlink there becomes a way to remove somebody else's
-    /// file. A node that has been replaced since the bind is reported rather than deleted.
-    static func releaseBoundNode(at path: String) throws {
+    private static func requireOwnerOnlyLockNode(_ path: String) throws {
         var status = stat()
         guard path.withCString({ lstat($0, &status) }) == 0 else {
             if errno == ENOENT { return }
             throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
         }
-        try requireOwnerOnlySocket(status, path: path)
-        guard status.st_mode & 0o777 == 0o600 else {
-            throw UnixSocketNodeError.pathIsNotOwnerOnly(path, actual: status.st_mode & 0o777)
+        guard status.st_mode & mode_t(0o170000) == mode_t(0o100000) else {
+            throw UnixSocketNodeError.ownerNodeIsNotARegularFile(path)
         }
-        guard unlink(path) == 0 else {
-            throw UnixSocketNodeError.systemCall(operation: "unlink", path: path, code: errno)
+        let permissions = status.st_mode & 0o777
+        guard permissions == 0o600 else {
+            throw UnixSocketNodeError.ownerNodeIsNotOwnerOnly(path, actual: permissions)
         }
-    }
-
-    /// Whether anything is currently accepting on `path`.
-    ///
-    /// A refused connection is the answer a stale node gives: the socket file outlived the
-    /// process that bound it. Anything else — success, or a failure that is not a refusal —
-    /// is treated as live, so an ambiguous probe is the safe answer.
-    private static func isLive(_ path: String) -> Bool {
-        let probe = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard probe >= 0 else { return true }
-        defer { Darwin.close(probe) }
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.stride)
-        let bytes = Array(path.utf8)
-        guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else { return true }
-        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
-            pointer.withMemoryRebound(to: CChar.self, capacity: bytes.count + 1) { chars in
-                for (index, byte) in bytes.enumerated() {
-                    chars[index] = CChar(bitPattern: byte)
-                }
-                chars[bytes.count] = 0
-            }
-        }
-        let result = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                Darwin.connect(probe, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.stride))
-            }
-        }
-        return result == 0 || errno != ECONNREFUSED
     }
 }
 
@@ -315,13 +384,17 @@ enum UnixSocketNode {
 /// descriptor, so launchd supervises the server process and the server binds its own
 /// pathname. The accept is worth more than the descriptor handoff, because without it the
 /// server cannot say who is calling and every capability denies.
-struct PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory {
+/// A FINAL CLASS because it owns the pathname claim for the life of the process, and the
+/// claim is what the shutdown path consults before it removes anything.
+final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory {
     typealias ConnectionChannel = HTTP2ServerTransport.ConnectionConfigurator.ConnectionChannel
 
     let eventLoopGroup: any EventLoopGroup
     let socketPath: String
     let registry: ConnectionPeerRegistry
     let logger: Logger
+
+    private let claim = Mutex<SocketPathClaim?>(nil)
 
     init(
         eventLoopGroup: any EventLoopGroup,
@@ -338,31 +411,58 @@ struct PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory {
         self.logger = logger
     }
 
+    /// Removes the socket this process bound, and does nothing if it never bound one.
+    ///
+    /// THE ABSENCE IS THE POINT. A server that failed to claim the pathname failed because
+    /// another server is serving it, and the one thing it must not then do is remove that
+    /// server's node — which is what an unconditional unlink would do, and what made a
+    /// refused start destructive rather than merely inert.
+    func releaseClaim() throws {
+        guard let held = claim.withLock({ claim in
+            defer { claim = nil }
+            return claim
+        }) else {
+            return
+        }
+        try held.release()
+    }
+
     func makeListeningChannel(
         listenerConfigurator: HTTP2ServerTransport.ListenerConfigurator,
         connectionConfigurator: HTTP2ServerTransport.ConnectionConfigurator,
     ) async throws -> NIOAsyncChannel<ConnectionChannel, Never> {
-        try UnixSocketNode.reclaimStaleNode(at: socketPath)
-        let channel = try await ServerBootstrap(group: eventLoopGroup)
-            .serverChannelInitializer { channel in
-                // The quiescing handler the listener configurator installs is what makes
-                // `beginGracefulShutdown` close the LISTENER; omitting it would leave the
-                // process accepting connections it has already stopped serving.
-                listenerConfigurator.configure(channel: channel)
-            }
-            .bind(
-                unixDomainSocketPath: socketPath,
-                cleanupExistingSocketFile: false,
-            ) { channel in
-                Self.accept(channel, registry: registry, logger: logger) { channel in
-                    connectionConfigurator.configure(channel: channel, tls: .none)
+        let held = try UnixSocketNode.claim(socketPath)
+        do {
+            let channel = try await ServerBootstrap(group: eventLoopGroup)
+                .serverChannelInitializer { channel in
+                    // The quiescing handler the listener configurator installs is what makes
+                    // `beginGracefulShutdown` close the LISTENER; omitting it would leave the
+                    // process accepting connections it has already stopped serving.
+                    listenerConfigurator.configure(channel: channel)
                 }
-            }
-        // After the bind, because before it there is no node to check, and after it there is
-        // no second chance: a listener left world-readable is a listener anybody can use.
-        try UnixSocketNode.hardenBoundNode(at: socketPath)
-        logger.info("gRPC listener bound at \(self.socketPath, privacy: .public)")
-        return channel
+                .bind(
+                    unixDomainSocketPath: socketPath,
+                    cleanupExistingSocketFile: false,
+                ) { channel in
+                    Self.accept(channel, registry: self.registry, logger: self.logger) { channel in
+                        connectionConfigurator.configure(channel: channel, tls: .none)
+                    }
+                }
+            // After the bind, because before it there is no node to check, and after it there
+            // is no second chance: a listener left accessible to another user is a listener
+            // this server cannot honestly call owner-only.
+            try UnixSocketNode.hardenBoundNode(at: socketPath)
+            // Only now, once the node exists and is this process's, does the claim become
+            // the fact the shutdown path is allowed to act on.
+            claim.withLock { $0 = held }
+            logger.info("gRPC listener bound at \(self.socketPath, privacy: .public)")
+            return channel
+        } catch {
+            // A bind that failed leaves the claim to drop, and dropping it removes only a
+            // node this process proved nobody else was serving.
+            try? held.release()
+            throw error
+        }
     }
 
     /// Identifies the connection, registers it, and only then hands it to the gRPC pipeline.

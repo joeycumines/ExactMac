@@ -4,6 +4,7 @@ import ExactMacProto
 import Foundation
 import GRPCCore
 import GRPCNIOTransportHTTP2
+import GRPCProtobuf
 import NIOCore
 import NIOPosix
 import XCTest
@@ -20,67 +21,135 @@ import XCTest
 /// cannot take away the token a later connection has claimed; and something that is not an
 /// AF_UNIX stream is refused at accept rather than carried.
 final class PeerIdentificationTests: XCTestCase {
+    /// Runs `body` against a live harness and ALWAYS tears the harness down before returning.
+    ///
+    /// THE TEARDOWN IS AWAITED, and that is not tidiness. A `defer { Task { ... } }` hands the
+    /// shutdown to a task nothing waits for, so the next test can start while the previous
+    /// server is still closing its event loops — and an event loop that shuts down under a
+    /// live stream releases that stream's writer unfinished, which SwiftNIO answers with a
+    /// `Fatal error` that kills the whole test process rather than failing one test. The
+    /// symptom appeared as whichever test ran second failing to connect, which looked like a
+    /// transport fault and was not one.
+    private func withHarness(
+        _ body: (PeerIdentifyingHarness) async throws -> Void,
+    ) async throws {
+        let harness = try await PeerIdentifyingHarness.start()
+        do {
+            try await body(harness)
+        } catch {
+            await harness.stop()
+            throw error
+        }
+        await harness.stop()
+    }
+
     // MARK: - The kernel names the connecting process
 
     /// The whole of E1 in one assertion: a real accepted AF_UNIX connection, identified by
     /// the kernel as this very process, reachable by the token the transport will report.
     func testTheKernelIdentifiesTheConnectingProcessOnTheAcceptedSocket() async throws {
-        let harness = try await PeerIdentifyingHarness.start()
-        defer { Task { await harness.stop() } }
-        let peerName = harness.directory.appending("peer.sock")
+        try await withHarness { harness in
+            let peerName = harness.directory.appending("peer.sock")
 
-        let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
-        defer { client.close() }
+            let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
+            defer { client.close() }
 
-        let evidence = try await harness.evidence(forPeerName: peerName)
-        XCTAssertEqual(evidence.processIdentifier, getpid(), "the kernel named another process")
-        XCTAssertEqual(evidence.effectiveUserIdentifier, geteuid())
-        XCTAssertEqual(harness.registry.liveCount, 1)
+            let evidence = try await harness.evidence(forPeerName: peerName)
+            XCTAssertEqual(evidence.processIdentifier, getpid(), "the kernel named another process")
+            XCTAssertEqual(evidence.effectiveUserIdentifier, geteuid())
+            XCTAssertEqual(harness.registry.liveCount, 1)
+        }
     }
 
     /// The token the transport reports is the peer's own pathname, which is the only
     /// per-connection value `ServerContext` carries.
     func testTheTokenIsThePeersOwnSocketName() async throws {
-        let harness = try await PeerIdentifyingHarness.start()
-        defer { Task { await harness.stop() } }
-        let peerName = harness.directory.appending("named-peer.sock")
+        try await withHarness { harness in
+            let peerName = harness.directory.appending("named-peer.sock")
 
-        let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
-        defer { client.close() }
+            let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
+            defer { client.close() }
 
-        try await XCTAssertEventually("the connection was identified and registered") {
-            harness.registry.evidence(forPeerDescription: "unix:\(peerName)") != nil
+            try await XCTAssertEventually("the connection was identified and registered") {
+                harness.registry.evidence(forPeerDescription: "unix:\(peerName)") != nil
+            }
+            let token = try XCTUnwrap(PeerConnectionToken(peerDescription: "unix:\(peerName)"))
+            XCTAssertEqual(token.pathname, peerName)
         }
-        let token = try XCTUnwrap(PeerConnectionToken(peerDescription: "unix:\(peerName)"))
-        XCTAssertEqual(token.pathname, peerName)
     }
 
     // MARK: - A peer that names nothing
 
-    /// CARRIED BUT UNATTRIBUTABLE, and the distinction is the point: refusing the connection
-    /// would turn a client that has not opted into naming its socket into a transport error
-    /// it cannot diagnose, so it is admitted and denied at the authorization layer instead.
-    func testAnUnnamedPeerIsCarriedAndRegistersNothing() async throws {
-        let harness = try await PeerIdentifyingHarness.start()
-        defer { Task { await harness.stop() } }
+    /// CARRIED BUT UNATTRIBUTABLE, proved by carrying a real RPC over it.
+    ///
+    /// The earlier version of this test connected, then connected again and watched the
+    /// second one register, which would also have passed had the first been REFUSED — so it
+    /// did not establish the thing its name claimed. A full gRPC exchange over the unnamed
+    /// connection establishes both halves at once: the server spoke HTTP/2 on it, so it was
+    /// carried, and the RPC was refused, so carrying it bought the caller nothing.
+    func testAnUnnamedPeerCarriesRealTrafficAndIsRefused() async throws {
+        try await withHarness { harness in
 
-        let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: nil)
-        defer { client.close() }
-        // The listener is still serving and still identifying, which is shown by a NAMED peer
-        // registering immediately afterwards. It could not do so if the first connection had
-        // taken the listener down with it.
-        let named = harness.directory.appending("after-anonymous.sock")
-        let second = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: named)
-        defer { second.close() }
-        _ = try await harness.evidence(forPeerName: named)
+            let client = GRPCClient(
+                transport: try .http2NIOPosix(
+                    target: .unixDomainSocket(path: harness.socketPath),
+                    transportSecurity: .plaintext,
+                ),
+            )
+            // The client and the calls share a task group because `runConnections` does not
+            // return until the client shuts down, so awaiting it before making a call would
+            // wait for the call it is meant to be waiting for.
+            try await withThrowingDiscardingTaskGroup { group in
+                group.addTask { try await client.runConnections() }
+                do {
+                    let _: Exactmac_V1_Clipboard = try await client.unary(
+                        request: ClientRequest(message: Exactmac_V1_GetClipboardRequest.with {
+                            $0.name = "clipboard"
+                        }),
+                        descriptor: Exactmac_V1_ExactMac.Method.GetClipboard.descriptor,
+                        serializer: ProtobufSerializer<Exactmac_V1_GetClipboardRequest>(),
+                        deserializer: ProtobufDeserializer<Exactmac_V1_Clipboard>(),
+                        options: .defaults,
+                    ) { response in
+                        try response.message
+                    }
+                    XCTFail("a caller nothing can identify must be refused")
+                } catch let error as RPCError {
+                    XCTAssertEqual(error.code, .permissionDenied)
+                    XCTAssertEqual(
+                        try extractErrorInfo(from: error).reason,
+                        DenialReason.unauthenticatedPeer.rawValue,
+                    )
+                }
+                client.beginGracefulShutdown()
+            }
 
-        XCTAssertEqual(
-            harness.registry.liveCount, 1,
-            "an unnamed peer must register nothing, because there is no token to register it under",
-        )
-        // And an empty pathname is refused as a token, which is the same absence the
-        // transport's Unix-socket fallback produces for an unnamed peer.
-        XCTAssertNil(PeerConnectionToken(peerDescription: "unix:"))
+            XCTAssertEqual(harness.counters.counts[DenialReason.unauthenticatedPeer.rawValue], 1)
+            XCTAssertEqual(
+                harness.registry.liveCount, 0,
+                "an unnamed peer must register nothing, because there is no token to register it under",
+            )
+            // And an empty pathname is refused as a token, which is the same absence the
+            // transport's Unix-socket fallback produces for an unnamed peer.
+            XCTAssertNil(PeerConnectionToken(peerDescription: "unix:"))
+        }
+    }
+
+    /// The listener keeps identifying after an unattributable connection, which is the other
+    /// half of "carried": the accept path is not left in a state where one refused
+    /// attribution poisons the next connection.
+    func testTheListenerKeepsIdentifyingAfterAnUnnamedPeer() async throws {
+        try await withHarness { harness in
+
+            let anonymous = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: nil)
+            defer { anonymous.close() }
+            let named = harness.directory.appending("after-anonymous.sock")
+            let second = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: named)
+            defer { second.close() }
+            _ = try await harness.evidence(forPeerName: named)
+
+            XCTAssertEqual(harness.registry.liveCount, 1)
+        }
     }
 
     /// The end of the fail-closed chain: a caller nothing can identify is refused, the
@@ -123,18 +192,18 @@ final class PeerIdentificationTests: XCTestCase {
     /// A closed connection stops resolving, so a call on it can never be authorized against
     /// a token that has since been released.
     func testAClosedConnectionStopsResolving() async throws {
-        let harness = try await PeerIdentifyingHarness.start()
-        defer { Task { await harness.stop() } }
-        let peerName = harness.directory.appending("closing-peer.sock")
+        try await withHarness { harness in
+            let peerName = harness.directory.appending("closing-peer.sock")
 
-        let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
-        try await XCTAssertEventually("the connection was registered") {
-            harness.registry.evidence(forPeerDescription: "unix:\(peerName)") != nil
-        }
-        client.close()
+            let client = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: peerName)
+            try await XCTAssertEventually("the connection was registered") {
+                harness.registry.evidence(forPeerDescription: "unix:\(peerName)") != nil
+            }
+            client.close()
 
-        try await XCTAssertEventually("the token is retired when the connection closes") {
-            harness.registry.evidence(forPeerDescription: "unix:\(peerName)") == nil
+            try await XCTAssertEventually("the token is retired when the connection closes") {
+                harness.registry.evidence(forPeerDescription: "unix:\(peerName)") == nil
+            }
         }
     }
 
@@ -180,29 +249,31 @@ final class PeerIdentificationTests: XCTestCase {
     /// A TCP connection is not an authentic Unix stream, and accepting it would be claiming
     /// an identity the kernel gives no standing for.
     func testATCPConnectionIsRefusedAtAccept() async throws {
-        let refused = Counter()
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { group.shutdownGracefully { _ in } }
-        let channel = try await ServerBootstrap(group: group)
-            .childChannelInitializer { channel in
-                UnixSocketPeerEvidence.identify(channel)
-                    .flatMapThrowing { _ in
-                        XCTFail("a TCP connection was identified")
-                        throw TestFailure.identified
-                    }
-                    .flatMapError { error in
-                        XCTAssertEqual(error as? UnixSocketPeerEvidence.Failure, .notAUnixSocket)
-                        refused.increment()
-                        return channel.eventLoop.makeSucceededFuture(())
-                    }
+        try await withHarness { harness in
+            let refused = Counter()
+            let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+            defer { group.shutdownGracefully { _ in } }
+            let channel = try await ServerBootstrap(group: group)
+                .childChannelInitializer { channel in
+                    UnixSocketPeerEvidence.identify(channel)
+                        .flatMapThrowing { _ in
+                            XCTFail("a TCP connection was identified")
+                            throw TestFailure.identified
+                        }
+                        .flatMapError { error in
+                            XCTAssertEqual(error as? UnixSocketPeerEvidence.Failure, .notAUnixSocket)
+                            refused.increment()
+                            return channel.eventLoop.makeSucceededFuture(())
+                        }
+                }
+                .bind(host: "127.0.0.1", port: 0)
+                .get()
+            let port = try XCTUnwrap(channel.localAddress?.port)
+            let client = try TCPClient(host: "127.0.0.1", port: port)
+            defer { client.close() }
+            try await XCTAssertEventually("the TCP connection reached the acceptor") {
+                refused.value == 1
             }
-            .bind(host: "127.0.0.1", port: 0)
-            .get()
-        let port = try XCTUnwrap(channel.localAddress?.port)
-        let client = try TCPClient(host: "127.0.0.1", port: port)
-        defer { client.close() }
-        try await XCTAssertEventually("the TCP connection reached the acceptor") {
-            refused.value == 1
         }
     }
 }
@@ -228,6 +299,7 @@ private final class HandlerEntry: @unchecked Sendable {
 
 private enum TestFailure: Error {
     case pathTooLong(String)
+    case write(Int32)
     case socket(Int32)
     case bind(Int32)
     case connect(Int32)
@@ -294,37 +366,48 @@ private func XCTAssertEventually(
 
 // MARK: - Harness
 
-/// A real gRPC server on a real Unix socket, served by the peer-identifying accept path.
+/// A real gRPC server on a real Unix socket, served by the peer-identifying accept path and
+/// guarded by the real authorization interceptor.
 ///
-/// The service list is empty because nothing here makes an RPC: the properties under test
-/// are decided at accept time, and a suite that issued calls would be testing handlers rather
-/// than the transport.
+/// A REAL SERVICE, not an empty router. The registry entry is created before the gRPC
+/// pipeline is configured, so a pipeline that refused to configure would still leave every
+/// accept-path test green while the server carried nothing at all. Registering the service
+/// and driving a real call over the socket is what rules that out.
 private final class PeerIdentifyingHarness: @unchecked Sendable {
-    let socketPath: String
-    let directory: String
-    let registry: ConnectionPeerRegistry
-
     /// Named rather than written inline: `GRPCServer` is generic over its TRANSPORT, and an
-    /// empty service list gives the compiler nothing to infer that parameter from.
+    /// empty service list would give the compiler nothing to infer that parameter from.
     typealias Transport = PublicRequestValidatingServerTransport<
         HTTP2ServerTransport.Custom<PeerIdentifyingListenerFactory>
     >
 
+    let socketPath: String
+    let directory: String
+    let registry: ConnectionPeerRegistry
+    let counters: AuthorizationCounters
+
     private let group: MultiThreadedEventLoopGroup
     private let server: GRPCServer<Transport>
+    private let listener: PeerIdentifyingListenerFactory
+    private let serveTask: Task<Void, any Error>
 
     private init(
         socketPath: String,
         directory: String,
         registry: ConnectionPeerRegistry,
+        counters: AuthorizationCounters,
         group: MultiThreadedEventLoopGroup,
         server: GRPCServer<Transport>,
+        listener: PeerIdentifyingListenerFactory,
+        serveTask: Task<Void, any Error>,
     ) {
         self.socketPath = socketPath
         self.directory = directory
         self.registry = registry
+        self.counters = counters
         self.group = group
         self.server = server
+        self.listener = listener
+        self.serveTask = serveTask
     }
 
     static func start() async throws -> PeerIdentifyingHarness {
@@ -332,32 +415,45 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
         // bytes, `NSTemporaryDirectory()` is 49 of them on this machine, and a full-length
         // UUID plus a descriptive name overruns it. The same arithmetic is why the shipped
         // socket lives at `~/Library/Caches/exactmac.sock` and not under a nested state
-        // directory, and it is the reason `ServerConfig` treats an over-long path as an error
-        // rather than truncating it.
+        // directory, and it is the reason an over-long path is an error rather than a
+        // truncation.
         let directory = NSTemporaryDirectory() + "emc-e1-" + String(abs(UUID().uuidString.hashValue) % 1_000_000)
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let socketPath = directory + "/listener.sock"
         let registry = ConnectionPeerRegistry()
+        let counters = AuthorizationCounters()
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 2)
-        let factory = PeerIdentifyingListenerFactory(
+        let listener = PeerIdentifyingListenerFactory(
             eventLoopGroup: group,
             socketPath: socketPath,
             registry: registry,
         )
         let server: GRPCServer<Transport> = GRPCServer(
             transport: productionServerTransport(
-                HTTP2ServerTransport.Custom(listenerFactory: factory),
+                HTTP2ServerTransport.Custom(listenerFactory: listener),
             ),
-            services: [],
-            interceptors: [],
+            services: [ExactMacServiceComposition(system: MockSystemOperations()).exactMacService],
+            interceptors: productionServerInterceptors(
+                AuthorizationInterceptor(
+                    runtime: .unixSocket(
+                        descriptorPolicy: try PublicRequestDescriptorPolicy.load(),
+                        isConsoleReachable: true,
+                        peerEvidence: .registry(registry),
+                    ),
+                    counters: counters,
+                ),
+            ),
         )
-        _ = Task { try await server.serve() }
+        let serveTask = Task { try await server.serve() }
         let harness = PeerIdentifyingHarness(
             socketPath: socketPath,
             directory: directory,
             registry: registry,
+            counters: counters,
             group: group,
             server: server,
+            listener: listener,
+            serveTask: serveTask,
         )
         try await XCTAssertEventually("the listener bound its socket") {
             FileManager.default.fileExists(atPath: socketPath)
@@ -370,14 +466,21 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
         let description = "unix:" + peerName
         var found: PeerProcessEvidence?
         try await XCTAssertEventually("the connection was identified and registered") {
-            found = registry.evidence(forPeerDescription: description)
+            found = self.registry.evidence(forPeerDescription: description)
             return found != nil
         }
         return try XCTUnwrap(found)
     }
 
+    /// Stops the server, drops the socket claim, and only then stops the event loops.
+    ///
+    /// IN THAT ORDER, because shutting the group down first is what makes SwiftNIO complain
+    /// that tasks cannot be scheduled on a shut-down event loop, and a warning on every run
+    /// of a security suite is a warning nobody reads.
     func stop() async {
         server.beginGracefulShutdown()
+        try? await serveTask.value
+        try? listener.releaseClaim()
         try? await group.shutdownGracefully()
         try? FileManager.default.removeItem(atPath: directory)
     }
@@ -401,6 +504,29 @@ private struct UnixClient {
         } catch {
             Darwin.close(descriptor)
             throw error
+        }
+        // The HTTP/2 client connection preface and an empty SETTINGS frame, written before
+        // anything else is waited on.
+        //
+        // A SOCKET THAT CONNECTS AND SAYS NOTHING IS NOT A CLIENT, and this one is the only
+        // part of the suite that has to impersonate one. Sending the preface is what makes
+        // the connection a legitimate HTTP/2 connection, and it is what the Go proxy sends:
+        // the server's HTTP/2 machinery tears down a connection that never speaks the
+        // protocol, and a connection the suite provokes a teardown of would be testing
+        // grpc-swift's teardown rather than ExactMac's accept path.
+        let preface: [UInt8] = Array("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".utf8) + [
+            0x00, 0x00, 0x00, // SETTINGS payload length: 0
+            0x04, // SETTINGS
+            0x00, // flags
+            0x00, 0x00, 0x00, 0x00, // stream 0
+        ]
+        var written = 0
+        while written < preface.count {
+            let count = preface.withUnsafeBytes { bytes -> Int in
+                Darwin.write(descriptor, bytes.baseAddress!.advanced(by: written), preface.count - written)
+            }
+            guard count > 0 else { throw TestFailure.write(errno) }
+            written += count
         }
         self.descriptor = descriptor
     }

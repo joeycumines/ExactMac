@@ -65,10 +65,6 @@ struct PeerConnectionRegistration: Sendable, Hashable {
 final class ConnectionPeerRegistry: Sendable {
     private struct State {
         var live: [PeerConnectionToken: (identifier: UInt64, evidence: PeerProcessEvidence)] = [:]
-        /// Tokens whose connection has closed. A retired token resolves to nothing even if
-        /// an entry for it somehow survives, so the fail-closed answer does not depend on
-        /// the removal having won a race.
-        var retired: Set<PeerConnectionToken> = []
         var nextIdentifier: UInt64 = 1
     }
 
@@ -79,6 +75,14 @@ final class ConnectionPeerRegistry: Sendable {
     )
 
     /// - Returns: the registration to hand back when the connection closes.
+    ///
+    /// THE MAP IS THE WHOLE OF THE STATE, and that is a deliberate bound. An earlier version
+    /// also kept a set of retired tokens, so that a closed connection's token resolved to
+    /// nothing even if an entry for it somehow survived. Removing the entry under the same
+    /// lock that adds it already guarantees that, and the set grew by one entry per closed
+    /// connection for the life of a long-lived process with no cap — which is a
+    /// same-uid process looping connect-and-close, and a breach of the standing invariant
+    /// that every growing server-side resource is bounded.
     func register(
         _ token: PeerConnectionToken,
         evidence: PeerProcessEvidence,
@@ -87,7 +91,6 @@ final class ConnectionPeerRegistry: Sendable {
             let identifier = state.nextIdentifier
             state.nextIdentifier += 1
             state.live[token] = (identifier, evidence)
-            state.retired.remove(token)
             return PeerConnectionRegistration(token: token, identifier: identifier)
         }
         logger.info(
@@ -111,7 +114,6 @@ final class ConnectionPeerRegistry: Sendable {
                 return false
             }
             state.live.removeValue(forKey: registration.token)
-            state.retired.insert(registration.token)
             return true
         }
         logger.info(
@@ -128,8 +130,7 @@ final class ConnectionPeerRegistry: Sendable {
     func evidence(forPeerDescription description: String) -> PeerProcessEvidence? {
         guard let token = PeerConnectionToken(peerDescription: description) else { return nil }
         return state.withLock { state in
-            guard !state.retired.contains(token) else { return nil }
-            return state.live[token]?.evidence
+            state.live[token]?.evidence
         }
     }
 

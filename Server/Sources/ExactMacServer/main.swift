@@ -25,19 +25,16 @@ private func setServerProcessUmask() -> mode_t {
 ///
 /// This function ensures all resources are properly cleaned up in the correct order:
 /// 1. Await the composition-owned service lifetime drain started with transport shutdown
-/// 2. Remove the socket node this process created, and only that one
+/// 2. Drop the claim on the socket pathname, which removes this process's node
 ///
 /// - Parameters:
-///   - socketPathToRelease: The Unix socket path this process bound, or nil for a TCP
-///     listener. It is REMOVED rather than left behind, because the node outlives the
-///     descriptor and a node with no listener behind it is what the next start has to
-///     recognise as stale. It is unlinked by pathname only after the transport has closed,
-///     and only when the node is still the owner-only socket this user is entitled to
-///     remove, so a node replaced in the meantime is never deleted.
+///   - listenerFactory: The listener this server ran, or nil for a TCP listener. The claim
+///     lives in it, so a server that never claimed the pathname — because another server is
+///     serving it — removes nothing at all.
 ///   - serviceLifetime: The composition-owned producer and mutation lifetime.
 @MainActor
 private func performGracefulShutdown(
-    socketPathToRelease: String?,
+    listenerFactory: PeerIdentifyingListenerFactory?,
     serviceLifetime: ServiceLifetime,
 ) async throws {
     logger.info("Initiating graceful shutdown...")
@@ -45,9 +42,9 @@ private func performGracefulShutdown(
     await serviceLifetime.shutdown()
     logger.info("Composition-owned service work drained")
 
-    if let socketPathToRelease {
-        try UnixSocketNode.releaseBoundNode(at: socketPathToRelease)
-        logger.info("Released Unix socket node: \(socketPathToRelease, privacy: .private)")
+    if let listenerFactory {
+        try listenerFactory.releaseClaim()
+        logger.info("Released the Unix socket claim: \(listenerFactory.socketPath, privacy: .private)")
     }
 
     logger.info("Graceful shutdown complete")
@@ -130,7 +127,7 @@ func serve<Transport: ServerTransport>(
     config: ServerConfig,
     transport: Transport,
     authorizationRuntime: AuthorizationRuntime,
-    socketPathToRelease: String?,
+    listenerFactory: PeerIdentifyingListenerFactory?,
 ) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 1: NSApplication.shared
@@ -268,7 +265,7 @@ func serve<Transport: ServerTransport>(
     var cleanupError: (any Error)?
     do {
         try await performGracefulShutdown(
-            socketPathToRelease: socketPathToRelease,
+            listenerFactory: listenerFactory,
             serviceLifetime: composition.serviceLifetime,
         )
     } catch {
@@ -325,20 +322,19 @@ func main() async throws {
         logger.info("Will listen on Unix socket: \(socketPath, privacy: .private)")
         logger.info("Authorization: unix-socket variant; the owning user is the principal.")
         let registry = ConnectionPeerRegistry()
+        let listener = PeerIdentifyingListenerFactory(
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
+            socketPath: socketPath,
+            registry: registry,
+        )
         try await serve(
             config: config,
-            transport: HTTP2ServerTransport.Custom(
-                listenerFactory: PeerIdentifyingListenerFactory(
-                    eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
-                    socketPath: socketPath,
-                    registry: registry,
-                ),
-            ),
+            transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
             authorizationRuntime: .unixSocket(
                 descriptorPolicy: descriptorPolicy,
                 peerEvidence: .registry(registry),
             ),
-            socketPathToRelease: socketPath,
+            listenerFactory: listener,
         )
         return
     }
@@ -354,7 +350,7 @@ func main() async throws {
             transportSecurity: .plaintext,
         ),
         authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
-        socketPathToRelease: nil,
+        listenerFactory: nil,
     )
 }
 

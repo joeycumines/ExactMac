@@ -111,11 +111,15 @@ endef
 # Accessibility, Vision, and Metal must run in the logged-in user's GUI domain.
 # KeepAlive=true also implies RunAtLoad. The 0077 umask keeps files and
 # directories owner-only while preserving the execute/search bit required by
-# macOS framework cache trees. launchd creates the Unix socket with owner-only
-# mode before activating it. The Swift server receives that exact descriptor
-# through launch_activate_socket and never binds the pathname itself.
-# ThrottleInterval bounds KeepAlive restarts so a repeated fatal error cannot
-# spin a tight crash loop; unmanaged paths are never mutated.
+# macOS framework cache trees. launchd supervises the PROCESS and nothing else:
+# there is deliberately no Sockets key, because the server binds its own Unix
+# socket. It has to, because reading the caller's pid is the only way it can
+# know who is calling, that read happens at accept, and SwiftNIO can only accept
+# from a socket it bound itself. A pathname left by a crashed server is taken
+# over under a lock the kernel releases when the holder dies, so a restart needs
+# no operator; a pathname a live server holds is refused, and refused is
+# non-destructive. ThrottleInterval bounds KeepAlive restarts so a repeated fatal
+# error cannot spin a tight crash loop.
 define EXACTMAC_LAUNCHD_PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -131,20 +135,6 @@ define EXACTMAC_LAUNCHD_PLIST
     <dict>
         <key>GRPC_UNIX_SOCKET</key>
         <string>$(EXACTMAC_SOCKET)</string>
-    </dict>
-    <key>Sockets</key>
-    <dict>
-        <key>Listener</key>
-        <dict>
-            <key>SockFamily</key>
-            <string>Unix</string>
-            <key>SockType</key>
-            <string>Stream</string>
-            <key>SockPathName</key>
-            <string>$(EXACTMAC_SOCKET)</string>
-            <key>SockPathMode</key>
-            <integer>384</integer>
-        </dict>
     </dict>
     <key>KeepAlive</key>
     <true/>
