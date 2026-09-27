@@ -1,0 +1,446 @@
+import SwiftUI
+
+/// One process in the caller's ancestry.
+///
+/// The design walks FOUR levels before reaching the requester — Terminal, zsh, opencode,
+/// exactmac — and that traversal is the point: the operator is consenting to something an
+/// agent asked, not to something a binary asked. The socket peer is the LAST row.
+///
+/// THREE SIGNALS mark the requester and nothing else does: an accent marker, a semibold
+/// label, and accent ink on the role. The ink is already at maximum on the agent row, so the
+/// promotion is weight and marker colour — deliberately, because more colour on the same row
+/// would be the same information twice.
+///
+/// Indentation is 20pt per level, expressed as leading padding. The 1pt guide ticks are
+/// optional at 1x on a Retina panel and the tree still reads without them, so they are
+/// drawn but carry no information.
+struct CallerTree: View {
+    struct Row: Identifiable, Equatable {
+        let id: Int32
+        let name: String
+        let role: String
+        let depth: Int
+        let signature: SignatureBadge.State
+        let isRequester: Bool
+    }
+
+    let rows: [Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                HStack(alignment: .center, spacing: Design.Space.leading) {
+                    if row.depth > 0 {
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(Design.Ink.separator)
+                            .frame(width: 1, height: 18)
+                    }
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(row.isRequester ? Design.Ink.accent : Design.Ink.separator)
+                        .frame(width: 3, height: 16)
+                    // The name and the role are separated by the design's own delimiter.
+                    Text(Design.joined([row.name, row.role]))
+                        .font(.system(size: 12, weight: row.isRequester ? .semibold : .regular))
+                        .foregroundStyle(Design.Ink.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: Design.Space.leading)
+                    SignatureBadge(state: row.signature)
+                }
+                .padding(.leading, CGFloat(row.depth) * Design.Space.treeIndent + Design.Space.chip)
+                .padding(.trailing, Design.Space.chip)
+                .frame(height: 34)
+            }
+        }
+        .padding(.vertical, Design.Space.hair)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surface),
+        )
+    }
+}
+
+/// The exact request, and nothing truncated.
+///
+/// The scroll region deliberately ENDS INSIDE this block in every prompt the design draws —
+/// the caption is the last thing visible and the body is sliced. That is the design showing
+/// that there is more, and it must not be "fixed" by shrinking the payload to fit.
+struct PayloadBlock: View {
+    let text: String
+    var onCopy: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Design.Space.leading) {
+            VStack(alignment: .leading, spacing: Design.Space.one) {
+                Text("EXACT REQUEST — NOTHING IS TRUNCATED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Design.Ink.textSecondary)
+                HStack(alignment: .top, spacing: Design.Space.leading) {
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Button("Copy", action: onCopy)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Design.Ink.accentText)
+                        // The copy lands on the SHARED clipboard, and saying so is part of
+                        // offering it.
+                        Text("lands on the shared clipboard")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Design.Ink.textTertiary)
+                    }
+                }
+            }
+            // Menlo, because the .fig cannot render a monospace face and therefore cannot
+            // carry the code/prose distinction in type. The real app can, so it does.
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Design.Ink.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Design.Space.three)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surfaceSunken),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .strokeBorder(Design.Ink.separator, lineWidth: 1),
+        )
+    }
+}
+
+/// The approval prompt.
+///
+/// THREE REGIONS, and the arrangement is the design's central claim: a HUGGING header
+/// carrying the reason, a FIXED 236pt scrolling disclosure, and a HUGGING footer carrying
+/// the decision. Nothing here has a fixed window height, so the window is content-driven and
+/// the 236pt viewport is the one number that makes the reason visible without scrolling.
+struct ApprovalPrompt: View {
+    enum State: Equatable {
+        case pending
+        case expanded
+        case noReason
+        case denied
+        case expired
+        case consoleUnreachable
+    }
+
+    // MARK: Content
+
+    //
+    // Every string below is the design's copy, verbatim. A prompt that paraphrases its own
+    // warnings is a prompt that says something weaker than the thing it is warning about.
+
+    let state: State
+    let title: String
+    let capabilityLine: String
+    let risk: String
+    let riskDot: Color
+    let clock: String?
+    let reason: String?
+    let implication: String?
+    let tree: [CallerTree.Row]
+    let target: String?
+    let payload: String
+    let biometricLine: String
+    let biometricDot: Color
+    let moreChoicesLabel: String?
+    let showOptionsLabel: String?
+    let selectedOption: OptionRow.Kind?
+    var onDecision: (OptionRow.Kind) -> Void = { _ in }
+    var onCopyPayload: () -> Void = {}
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            disclosure
+            footer
+        }
+        .frame(width: Design.Layout.promptWidth)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.large, style: .continuous)
+                .fill(Design.Ink.surface),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Design.Radius.large, style: .continuous)
+                .strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
+        )
+    }
+
+    // MARK: Header — hugs, and holds the reason
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Design.Space.three) {
+            HStack(alignment: .center, spacing: Design.Space.chip) {
+                StatusPill(kind: .risk(risk, riskDot))
+                Spacer(minLength: 0)
+                if let clock {
+                    Text(clock)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textTertiary)
+                }
+            }
+            VStack(alignment: .leading, spacing: Design.Space.one) {
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Design.Ink.textPrimary)
+                Text(capabilityLine)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Design.Ink.textTertiary)
+            }
+            if let reason {
+                UntrustedField(
+                    caption: state == .noReason ? .caller : .agentReason,
+                    value: reason,
+                )
+            } else {
+                reasonMissing
+            }
+            if let implication, state == .pending || state == .expanded {
+                // Same geometry as the untrusted field, and separable from it ONLY by the
+                // rule's colour: orange means someone else wrote this, grey means the
+                // system's own finding. No border, so the pair reads as one tier.
+                HStack(alignment: .center, spacing: Design.Space.component) {
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(Design.Rule.unknown)
+                        .frame(width: 3, height: 18)
+                    Text(implication)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, Design.Space.chip)
+                .padding(.trailing, Design.Space.three)
+                .padding(.bottom, Design.Space.chip)
+                .padding(.leading, 0)
+            }
+        }
+        .padding(.top, Design.Space.frame)
+        .padding(.trailing, Design.Space.frame)
+        .padding(.bottom, 14)
+        .padding(.leading, Design.Space.frame)
+    }
+
+    /// The state an agent that gave NO reason puts the operator in. Not a shorter prompt: a
+    /// different one, with a neutral rule rather than a warning-coloured one, and an
+    /// instruction that steers toward the narrowest grant.
+    private var reasonMissing: some View {
+        HStack(alignment: .center, spacing: Design.Space.component) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Design.Rule.unknown)
+                .frame(width: 3, height: 24)
+            VStack(alignment: .leading, spacing: Design.Space.hair) {
+                Text("THE AGENT GAVE NO REASON")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Design.Ink.textPrimary)
+                Text("Decline, or allow only for this exact request.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Design.Ink.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, Design.Space.chip)
+        .padding(.trailing, Design.Space.three)
+        .padding(.bottom, Design.Space.chip)
+        .padding(.leading, 0)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surfaceSunken),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
+        )
+    }
+
+    // MARK: Disclosure — the only fixed height in the prompt
+
+    private var disclosure: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Design.Space.component) {
+                CallerTree(rows: tree)
+                if let target {
+                    // The fill spans the whole content column, and the caption's 13pt
+                    // leading inset is INSIDE it. Putting the background on the padded view
+                    // insets the box itself, which the render showed as a white block
+                    // narrower than the tree above it.
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                            .fill(Design.Ink.surface)
+                        SystemField(caption: .target, value: target)
+                    }
+                }
+                PayloadBlock(text: payload, onCopy: onCopyPayload)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: Design.Layout.promptScrollHeight)
+        .background(Design.Ink.surfaceSunken)
+    }
+
+    // MARK: Footer — hugs, and carries the decision
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: Design.Space.three) {
+            HStack(alignment: .center, spacing: Design.Space.chip) {
+                StatusDot(biometricDot, diameter: 8)
+                Text(biometricLine)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Design.Ink.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Design.Space.three)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                    .fill(Design.Ink.surfaceSunken),
+            )
+
+            if state == .expanded {
+                // The primary button is GONE. There is no default affordance, because the
+                // options are the decision and one highlighted button beside six rows would
+                // be a second, weaker default.
+                VStack(spacing: Design.Space.leading) {
+                    ForEach(OptionRow.Kind.allCases, id: \.self) { kind in
+                        OptionRow(
+                            kind: kind,
+                            isDefault: kind == selectedOption,
+                        ) { onDecision(kind) }
+                    }
+                }
+            } else if isSettled {
+                settledOutcome
+            } else {
+                CollapsedActions()
+            }
+
+            NoteField()
+
+            if !isSettled, state != .expanded {
+                Rectangle()
+                    .fill(Design.Ink.separator)
+                    .frame(height: 1)
+                DenyRow(moreChoicesLabel: moreChoicesLabel)
+            }
+        }
+        .padding(.top, Design.Space.three)
+        .padding(.trailing, Design.Space.frame)
+        .padding(.bottom, Design.Space.frame)
+        .padding(.leading, Design.Space.frame)
+    }
+
+    /// A settled prompt keeps the whole header — chip, title, capability and the reason — so
+    /// the operator can still read WHAT was asked, and drops the implication, the
+    /// disclosure, the biometric strip, every button, the note field and the whole footer.
+    /// THERE IS NO PATH FROM HERE BACK TO A DECISION, so an expired request cannot be
+    /// approved after the fact.
+    private var settledOutcome: some View {
+        let headline: String
+        let sub: String
+        switch state {
+        case .denied:
+            headline = "Denied"
+            sub = "Your note went back to the agent: use the scoped option, not this one."
+        case .expired:
+            headline = "Expired unanswered"
+            sub = "After 45 seconds with no decision the request was denied. "
+                + "Nothing was granted."
+        default:
+            headline = "Console unreachable"
+            sub = "ExactMac could not reach the consent service, so it denied. "
+                + "This is the safe direction."
+        }
+        return VStack(alignment: .leading, spacing: Design.Space.tight) {
+            Text(headline)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(state == .denied ? Design.Ink.danger : Design.Ink.textSecondary)
+            Text(sub)
+                .font(.system(size: 11))
+                .foregroundStyle(Design.Ink.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Design.Space.three)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                .fill(Design.Ink.surfaceRaised),
+        )
+    }
+
+    private var isSettled: Bool {
+        state == .denied || state == .expired || state == .consoleUnreachable
+    }
+}
+
+/// The collapsed affordances, deliberately far apart: a primary action at the top right and
+/// a deny at the bottom left, separated by a hairline and the note field, so muscle memory
+/// cannot reach the destructive row from the default one.
+private struct CollapsedActions: View {
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            ConsoleButton(title: "Allow once", kind: .primary)
+                .frame(width: 150)
+        }
+    }
+}
+
+private struct DenyRow: View {
+    let moreChoicesLabel: String?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Design.Space.chip) {
+            ConsoleButton(title: "Deny", kind: .deny)
+                .frame(width: 96)
+            if let moreChoicesLabel {
+                HStack(alignment: .center, spacing: Design.Space.chip) {
+                    Text(moreChoicesLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Text("Show")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Design.Ink.accentText)
+                }
+                .padding(.vertical, Design.Space.leading)
+                .padding(.horizontal, Design.Space.three)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                        .fill(Design.Ink.surfaceSunken),
+                )
+            }
+        }
+    }
+}
+
+private struct NoteField: View {
+    @State private var text = ""
+    let caption = "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Design.Space.tight) {
+            Text(caption)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Design.Ink.textSecondary)
+            TextField(
+                "Why are you deciding this way? The agent sees this.",
+                text: $text,
+                axis: .vertical,
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(Design.Ink.textTertiary)
+        }
+        .padding(Design.Space.three)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                .fill(Design.Ink.surface),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                .strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
+        )
+    }
+}

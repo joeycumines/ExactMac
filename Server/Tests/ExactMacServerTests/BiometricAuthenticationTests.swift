@@ -395,23 +395,23 @@ final class BiometricAuthenticationTests: XCTestCase {
 
     /// A whole option, because the authenticator takes one and a partially-built value is
     /// not a thing the model can express.
-    private static let allowOnce = OfferedDecision(
-        kind: .allowOnce,
-        scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
-        duration: .once,
-        blastRadius: BlastRadius(
-            capability: 0.65,
-            breadth: 0.45,
-            duration: 0.08,
-            remainingCount: 1,
-            targetConsequence: 0.45,
-            signatureQuality: 0.5,
-        ),
-        biometric: .notRequired,
-        isDestructive: false,
-        isDefault: true,
-        isPrimary: true,
-    )
+    ///
+    /// TAKEN FROM THE ENGINE rather than assembled. An `OfferedDecision` is the policy's
+    /// output, and hand-building one means copying the risk model's internal weights into a
+    /// test that does not own them — a second copy of the model that goes stale silently
+    /// when the first one moves, and which asserts about a decision the engine never made.
+    private static let allowOnce: OfferedDecision = {
+        let options = AuthorizationPolicy.offeredDecisions(
+            for: clipboardRequest,
+            posture: .balanced,
+            riskClass: .routine,
+            targetIsHighConsequence: false,
+            signature: .signedAndValid,
+            agentGaveReason: true,
+            originIsKnown: true,
+        )
+        return options.first { $0.kind == .allowOnce } ?? options[0]
+    }()
 
     private static let allFailures: [BiometricFailure] = [
         .noEnrolment,
