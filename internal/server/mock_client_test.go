@@ -61,7 +61,12 @@ type mockExactMacClient struct {
 	// display tests that must not reach them. A suite that DOES drive the clipboard sets
 	// these rather than replacing the mock, so a 68-method interface has one
 	// implementation rather than two that can fall behind each other.
-	getClipboardFunc        func(ctx context.Context, req *pb.GetClipboardRequest) (*pb.Clipboard, error)
+	getClipboardFunc func(ctx context.Context, req *pb.GetClipboardRequest) (*pb.Clipboard, error)
+	// The two administrative calls. Optional like the clipboard ones, and for the same
+	// reason: most suites must not reach them, and a second implementation of a
+	// 68-method client interface is a second thing that can fall behind it.
+	listGrantsFunc          func(ctx context.Context, req *pb.ListGrantsRequest) (*pb.ListGrantsResponse, error)
+	preauthorizeEnvelopeFn  func(ctx context.Context, req *pb.PreauthorizeEnvelopeRequest) (*pb.PreauthorizeEnvelopeResponse, error)
 	getClipboardHistoryFunc func(ctx context.Context, req *pb.GetClipboardHistoryRequest) (*pb.ClipboardHistory, error)
 	// FindElements mock
 	findElementsFunc func(ctx context.Context, req *pb.FindElementsRequest) (*pb.FindElementsResponse, error)
@@ -442,4 +447,22 @@ func newTestServer() *MCPServer {
 		cfg: &config.Config{RequestTimeout: 30},
 		ctx: context.Background(),
 	}
+}
+
+func (m *mockExactMacClient) ListGrants(
+	ctx context.Context, in *pb.ListGrantsRequest, opts ...grpc.CallOption,
+) (*pb.ListGrantsResponse, error) {
+	if m.listGrantsFunc != nil {
+		return m.listGrantsFunc(ctx, in)
+	}
+	panic("ListGrants not expected to be called in this suite")
+}
+
+func (m *mockExactMacClient) PreauthorizeEnvelope(
+	ctx context.Context, in *pb.PreauthorizeEnvelopeRequest, opts ...grpc.CallOption,
+) (*pb.PreauthorizeEnvelopeResponse, error) {
+	if m.preauthorizeEnvelopeFn != nil {
+		return m.preauthorizeEnvelopeFn(ctx, in)
+	}
+	panic("PreauthorizeEnvelope not expected to be called in this suite")
 }
