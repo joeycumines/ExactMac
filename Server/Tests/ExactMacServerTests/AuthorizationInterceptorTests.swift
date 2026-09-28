@@ -910,23 +910,10 @@ extension AuthorizationInterceptorTests {
     // refusal; until then this is a known unverified control, recorded in blueprint.json rather
     // than papered over with a green suite.
     //
-    // A proof with a well-formed but WRONG nonce, and one whose expiry has passed, are both
-    // covered by `BiometricProof.authorizes` in the module's own tests. What is not covered
-    // here is that the interceptor CALLS it.
-
-    /// THE SAME PROOF TWICE IS REFUSED THE SECOND TIME, which is the single-use property and
-    /// the reason the ledger exists rather than a comparison.
-    ///
-    /// It is asserted against the ledger directly because the interceptor spends a nonce per
-    /// decision and two decisions would mint two nonces; the property under test is that the
-    /// SET does not hand the same one out twice, and driving two real requests would be a test
-    /// of the minting rather than of the spending.
-    func testACeremonyNonceIsSpentOnce() {
-        let ledger = BiometricNonceLedger()
-        XCTAssertTrue(ledger.spend("nonce-1"), "the first spend must win")
-        XCTAssertFalse(ledger.spend("nonce-1"), "the second spend of one nonce must lose")
-        XCTAssertTrue(ledger.spend("nonce-2"), "a different nonce is unaffected")
-    }
+    // The single-use property is asserted against the ledger directly in
+    // `testACeremonyNonceIsSpentOnce` below, because the interceptor spends a nonce per
+    // decision and two decisions would mint two nonces -- driving two real requests would test
+    // the minting rather than the spending.
 }
 
 /// A clock that does not move, so an expiry is expired because the test said so rather than
@@ -939,5 +926,121 @@ private final class FrozenClock: MonotonicClock, @unchecked Sendable {
 
     func now() -> MonotonicInstant {
         instant
+    }
+}
+
+/// Invariant 3: a biometric success authorizes exactly one decision, is bound to a
+/// per-decision nonce, and never downgrades silently.
+///
+/// THE PROPERTY IS THE ONE A BOOLEAN COULD NOT CARRY. `biometricObtained: true` was an
+/// assertion by the operator's interface that a ceremony happened, and the interceptor believed
+/// it; the interface is the same process as the enforcer, so a bug there was indistinguishable
+/// from a finger on the sensor. The server's `BiometricProof` and `BiometricNonceLedger` were
+/// written for this and called by nothing.
+///
+/// THESE TWO WERE WRITTEN ONCE, DELETED, AND WRITTEN AGAIN, and the reason is worth keeping.
+/// The first attempt drove the interceptor with this file's plain `request(message)` fixture and
+/// passed against a build with the proof check DISABLED — so they were asserting the handler
+/// was not reached without establishing why. The counters said `notPermitted`, and the consent
+/// handler had not been called at all: `request(message)` carries neither the agent's reason nor
+/// the MCP origin, and this file's own comment on `requestWithAgentAndOrigin` says the policy
+/// escalates every option without them. The scenario was not the one under test. The fixture
+/// that carries both is the one this file already uses for the ceremony, and the same refusal
+/// is now attributed to the ceremony rather than to the escalation.
+extension AuthorizationInterceptorTests {
+    /// The handler a ceremony test must be reached through, and the counters it is judged by.
+    private func refusedByCeremonyCheck(
+        _ consent: @escaping ConsentAnswering,
+    ) async throws -> AuthorizationCounters {
+        let counters = AuthorizationCounters()
+        var runtime = try AuthorizationRuntime.unixSocket(
+            descriptorPolicy: Self.loadPolicy(),
+            clock: FrozenClock(now: MonotonicInstant(nanoseconds: 1_000_000_000_000)),
+            isConsoleReachable: true,
+            peerEvidence: .fixed(Self.thisProcess),
+        )
+        runtime.consent = consent
+        let interceptor = AuthorizationInterceptor(runtime: runtime, counters: counters)
+        let box = HandlerEntry()
+        do {
+            _ = try await interceptor.intercept(
+                request: Self.requestWithAgentAndOrigin(
+                    Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
+                    reason: "because the test says so",
+                ),
+                context: Self.context(method: "\(RPCAuthorizationMap.serviceName)/GetClipboard"),
+                next: { _, _ in
+                    box.wasEntered = true
+                    throw RPCError(code: .internalError, message: "the handler was reached")
+                },
+            ) as StreamingServerResponse<Exactmac_V1_Clipboard>
+        } catch {
+            // Every path out of here other than the handler is the refusal under test.
+        }
+        XCTAssertFalse(box.wasEntered, "a global grant was issued on an unusable ceremony")
+        return counters
+    }
+
+    /// A proof for the WRONG NONCE is refused.
+    ///
+    /// The nonce is well-formed, not malformed: the shape defended against is an interface that
+    /// performed no ceremony and invented a nonce that looks like one, and a check that only
+    /// refused empty strings would pass this.
+    func testAProofWithTheWrongNonceIsRefused() async throws {
+        let forged: ConsentAnswering = { request, _, _ in
+            ConsentAnswer(
+                requestID: request.id,
+                isApproved: true,
+                selected: .allowGlobalPersistent,
+                note: nil,
+                ceremonyProof: BiometricProof(
+                    requestID: request.id,
+                    nonce: String(repeating: "a", count: 64),
+                    decidedAt: MonotonicInstant(nanoseconds: 1000),
+                    expiresAt: MonotonicInstant(nanoseconds: 900_000_000_000),
+                ),
+            )
+        }
+        let counters = try await refusedByCeremonyCheck(forged)
+        XCTAssertEqual(
+            counters.counts[DenialReason.biometricUnavailable.rawValue], 1,
+            "the refusal must be attributed to the ceremony, not to something upstream; got \(counters.counts)",
+        )
+    }
+
+    /// An EXPIRED proof is refused. A ceremony is a moment, not a licence, and a proof good for
+    /// the rest of the session is a bearer token with extra steps.
+    func testAnExpiredProofIsRefused() async throws {
+        let stale: ConsentAnswering = { request, _, decision in
+            ConsentAnswer(
+                requestID: request.id,
+                isApproved: true,
+                selected: .allowGlobalPersistent,
+                note: nil,
+                ceremonyProof: ServerFixture.proof(
+                    for: decision,
+                    requestID: request.id.rawValue,
+                    decidedAt: MonotonicInstant(nanoseconds: 0),
+                    expiresAt: MonotonicInstant(nanoseconds: 1),
+                ),
+            )
+        }
+        let counters = try await refusedByCeremonyCheck(stale)
+        XCTAssertEqual(
+            counters.counts[DenialReason.biometricUnavailable.rawValue], 1,
+            "the refusal must be attributed to the ceremony, not to something upstream; got \(counters.counts)",
+        )
+    }
+
+    /// The SINGLE-USE property, asserted against the ledger directly, which is where it lives.
+    ///
+    /// Two real decisions would mint two nonces, so driving two requests would test the
+    /// minting rather than the spending. What is at stake is that the SET does not hand the
+    /// same nonce out twice, and that is a property of `spend`.
+    func testACeremonyNonceIsSpentOnce() {
+        let ledger = BiometricNonceLedger()
+        XCTAssertTrue(ledger.spend("nonce-1"), "the first spend must win")
+        XCTAssertFalse(ledger.spend("nonce-1"), "the second spend of one nonce must lose")
+        XCTAssertTrue(ledger.spend("nonce-2"), "a different nonce is unaffected")
     }
 }
