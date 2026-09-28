@@ -1,21 +1,5 @@
 import Foundation
 
-/// The consent channel, as the model needs it.
-///
-/// A PROTOCOL because the decision path is the whole function of this program and it has to
-/// be assertable without standing up a server: a model wired to a concrete channel can only
-/// be exercised over a real socket, and a socket test proves that a decision was POSTED, which
-/// is one half of it. The other half — that the decision is the one the operator's option
-/// implies, for the request the operator was shown — needs no socket at all.
-protocol ConsoleChannel: AnyObject, Sendable {
-    var isConnected: Bool { get }
-    func connect() async throws
-    func disconnect()
-    func nextFrame(timeout: Duration) async throws -> ConsoleFrame?
-    func post(_ decision: ConsentDecision) async throws
-    func query(_ kind: QueryKind) async throws
-}
-
 /// The ceremony the server decided is required, behind a protocol.
 ///
 /// THE PROTOCOL IS WHAT MAKES A DECISION TESTABLE WITHOUT A SENSOR. The whole suite must run
@@ -31,7 +15,6 @@ protocol ConsoleChannel: AnyObject, Sendable {
 @MainActor
 protocol CeremonyPerforming: AnyObject {
     func perform(
-        requestID: AuthorizationRequestID,
         nonce: String,
         reason: String,
     ) async -> BiometricCeremony.Outcome

@@ -1,4 +1,5 @@
 @testable import ExactMacConsole
+@testable import ExactMacServer
 import Foundation
 import Testing
 
@@ -11,82 +12,52 @@ import Testing
 @Suite("The prompt says what it means", .serialized)
 @MainActor
 struct PromptCompositionTests {
+    /// Built from the SERVER'S OWN TYPES through the app's real mapping.
+    ///
+    /// It used to be built from the duplicated wire shapes, so it exercised a translation
+    /// production no longer performs. It also took four parameters the server does not
+    /// send — a consequence string, a scope string, a consent timeout and a revoke-everything
+    /// flag — and the app now derives the first two and has no source at all for the last
+    /// two. Those are named where they are asserted rather than faked here.
     private static func request(
-        capability: String = "clipboard.read",
-        consequence: String = "Read the clipboard and its history",
-        scope: String = "TextEdit only  ·  until you revoke it",
+        capability: Capability = .clipboardRead,
+        rpcName: String = "exactmac.v1.ExactMac/GetClipboard",
         agentReason: String? = "answering a question about what you copied",
-        riskClass: String = "elevated",
-        implied: [String] = [],
-        offered: [String] = ["allowOnce", "deny"],
+        riskClass: RiskClass = .elevated,
+        implied: Set<Capability> = [],
+        offered: [OfferedDecision.Kind] = [.allowOnce, .deny],
         requiresBiometric: Bool = false,
         biometricReason: String? = nil,
-        timeout: Int = 45,
-        isRevokeAll: Bool = false,
     ) -> PendingRequest {
-        PendingRequest(
-            consent: PendingConsent(
-                request: WireRequest(
-                    requestID: "r",
-                    rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                    capability: capability,
-                    capabilityConsequence: consequence,
-                    scopeDescription: scope,
-                    argumentSummary: "the clipboard and its history",
-                    agentReason: agentReason,
-                    blastRadius: 0.4,
-                    riskClass: riskClass,
-                    isRevokeAll: isRevokeAll,
-                    operationLimit: nil,
-                    effectiveCapabilities: implied,
-                ),
-                identity: WireIdentity(
-                    processIdentifier: 501,
-                    effectiveUserIdentifier: 501,
-                    executablePath: "/usr/local/bin/exactmac",
-                    bundleIdentifier: nil,
-                    signature: "unnotarized",
-                    designatedRequirement: nil,
-                    isFullyResolved: true,
-                    ancestors: [],
-                    isAncestryTruncated: false,
-                ),
-                decision: WireDecision(
-                    basis: "promptRequired",
-                    requiresBiometric: requiresBiometric,
-                    biometricReason: biometricReason,
-                    offered: offered.enumerated().map { index, kind in
-                        WireOption(
-                            kind: kind,
-                            scopeDescription: Self.scope(for: kind, at: index),
-                            durationDescription: "once",
-                            blastRadius: 0.4,
-                            requiresBiometric: false,
-                            isDestructive: kind == "deny",
-                            isDefault: index == 0,
-                            isPrimary: index == 0,
-                        )
-                    },
-                    consentTimeoutSeconds: timeout,
-                ),
-                nonce: "n",
-                requestDigest: "d",
+        let (req, identity, decision) = ServerFixture.request(
+            requestID: "r",
+            capability: capability,
+            rpcName: rpcName,
+            agentReason: agentReason,
+        )
+        return PendingRequest(
+            request: req,
+            identity: identity,
+            decision: AuthorizationDecision(
+                outcome: .deny,
+                basis: .promptRequired,
+                effectiveCapabilities: Set([capability]).union(implied),
+                blastRadius: decision.blastRadius,
+                riskClass: riskClass,
+                // NO REASON BY DEFAULT, so the case where the engine required a ceremony
+                // without saying why is reachable at all.
+                biometric: requiresBiometric
+                    ? .required(reason: biometricReason ?? "")
+                    : .notRequired,
+                offeredDecisions: decision.offeredDecisions.filter { offered.contains($0.kind) },
+                expiresAt: nil,
             ),
         )
     }
 
-    /// The server describes each option's SCOPE, and the scopes are what distinguish one
-    /// option from another. The fixture used one string for all of them, which produced
-    /// "or any and any" and hid whether the prompt was reading the right field.
-    private static func scope(for _: String, at index: Int) -> String {
-        let scopes = [
-            "this exact request",
-            "one application",
-            "every app this agent touches",
-            "a declared capability set",
-        ]
-        return index < scopes.count ? scopes[index] : "none"
-    }
+    // The server describes each option's SCOPE, and the scopes are what distinguish one
+    // option from another. The fixture used one string for all of them, which produced
+    // "or any and any" and hid whether the prompt was reading the right field.
 
     /// NOTHING AN ENGINE INTERNAL MAY APPEAR ON THE SURFACE.
     ///
@@ -126,20 +97,32 @@ struct PromptCompositionTests {
                 )
             }
         }
-        // The risk chip names a level, never the basis the engine reached it by.
-        #expect(request.riskClass.label != request.basis)
+        // THE RISK CHIP NAMES A LEVEL. The second half of this assertion used to be
+        // `riskClass.label != basis`, which proved the chip was not showing the engine's
+        // reason for reaching that risk class. `basis` is no longer carried on the
+        // disclosure at all — the model dropped it rather than merely declining to render
+        // it — so there is nothing left for the chip to confuse itself with, and the
+        // absence of the field is the stronger guarantee. What is asserted here is the half
+        // that still has a subject: the level is present, and the engine vocabulary the
+        // loop above enumerates is not.
+        #expect(request.riskClass.label.isEmpty == false)
+        #expect(
+            outsideTheScopeLine.contains { $0.contains(request.riskClass.label) },
+            "the level the engine graded it at, shown as a level",
+        )
     }
 
     @Test
     func `The title says what would happen, not what was asked for`() {
         #expect(Self.request().promptTitle == "Read the clipboard and its history")
-        // Revoke-everything is the one decision whose consequence is not a capability, so it
-        // is named rather than described — the string is the only thing standing between
-        // the operator and the assumption they are approving a clipboard read.
-        #expect(
-            Self.request(isRevokeAll: true).promptTitle == "Revoke every grant",
-            "a revoke-everything request must never borrow a capability's title",
-        )
+        // REVOKE-EVERYTHING IS NOT REACHABLE FROM THE SERVER'S REQUEST, and the gap is
+        // named rather than worked around. `AuthorizationRequest` carries no marker
+        // distinguishing it, so `PendingRequest.isRevokeAll` is constant and this test used
+        // to assert a title the product cannot currently produce. The property the title
+        // guards — that the prompt names what would happen rather than the token asked for —
+        // is asserted on the request that CAN arrive.
+        #expect(Self.request().promptTitle == "Read the clipboard and its history")
+        #expect(!Self.request().promptTitle.contains("clipboard.read"), "the title is a consequence, not a token")
     }
 
     @Test
@@ -164,7 +147,7 @@ struct PromptCompositionTests {
         // present and empty.
         #expect(Self.request().implicationText == nil)
 
-        let implied = Self.request(capability: "script.execute", implied: ["clipboard.read"])
+        let implied = Self.request(capability: .scriptExecute, implied: [.clipboardRead])
         #expect(
             implied.implicationText == "Also permits reading the clipboard and its history",
             "got \(implied.implicationText ?? "nil")",
@@ -172,7 +155,7 @@ struct PromptCompositionTests {
         // The capability being asked for must not appear in its own implication, and the
         // boundary is where that is enforced so no call site can reintroduce it. This
         // request IS clipboard.read, so its own capability comes back out of the list.
-        let selfImplied = Self.request(implied: ["clipboard.read", "observation.screen"])
+        let selfImplied = Self.request(implied: [.clipboardRead, .screenObserve])
         #expect(
             selfImplied.implicationText == "Also permits taking a screenshot of the screen",
             "the capability being asked for must not be listed as something it also permits, got \(selfImplied.implicationText ?? "nil")",
@@ -180,24 +163,35 @@ struct PromptCompositionTests {
         // And a genuinely plural implication reads as a list.
         #expect(
             Self.request(
-                capability: "script.execute",
-                implied: ["clipboard.read", "observation.screen"],
+                capability: .scriptExecute,
+                implied: [.clipboardRead, .screenObserve],
             ).implicationText
                 == "Also permits reading the clipboard and its history and taking a screenshot of the screen",
         )
 
-        // An unrecognised token is DROPPED rather than named: the implication's job is to
-        // say what else is permitted, and a bare identifier in that sentence defeats it.
-        #expect(Self.request(implied: ["capability.from.the.future"]).implicationText == nil)
+        // AN UNRECOGNISED TOKEN IS NO LONGER REACHABLE, and that is a real improvement
+        // rather than a lost case. The implied set is now the engine's own `Capability`,
+        // so a name the app does not recognise cannot arrive at all — the prompt used to
+        // have to defend itself against a bare identifier here, and now there is nothing to
+        // defend against. The property that survives is that an implication naming only
+        // capabilities the app can name reads as a sentence.
+        // An implication made of capabilities the app CAN name reads as a sentence, and
+        // that is now the only case: there is no unnameable capability to defend against.
+        #expect(
+            Self.request(implied: [.macroExecute]).implicationText == "Also permits replaying a recorded macro",
+        )
     }
 
     @Test
     func `The prompt says how long the operator has`() {
-        #expect(Self.request(timeout: 45).clockText == "decides in 45s")
-        #expect(
-            Self.request(timeout: 0).clockText == nil,
-            "no timeout is no countdown, and inventing one would be a lie about the deadline",
-        )
+        // NO COUNTDOWN IS SHOWN, AND THAT IS THE HONEST ANSWER TODAY. The engine holds the
+        // consent timeout in its own runtime, not on the request, so nothing reaches the
+        // prompt that could say how long the operator has. Inventing a number would be a lie
+        // about a deadline the operator is being asked to act within, so the line is absent
+        // and this pins that absence. When the server sends a timeout this becomes a
+        // countdown and the assertion inverts.
+        #expect(Self.request().clockText == nil, "no timeout has been sent, so no deadline may be claimed")
+        #expect(Self.request().clockText?.isEmpty != false, "an empty countdown is still a claim")
     }
 
     @Test
@@ -208,8 +202,9 @@ struct PromptCompositionTests {
                 biometricReason: "Touch ID will confirm: allow one clipboard read in TextEdit",
             ).biometricLine == "Touch ID will confirm: allow one clipboard read in TextEdit",
         )
-        // A ceremony with no reason sentence from the server must not fall back to engine
-        // vocabulary, which is what it used to do.
+        // A ceremony the engine required WITHOUT saying why must not fall back to engine
+        // vocabulary, which is what it used to do. The fixture's default reason is empty
+        // precisely so this case is reachable.
         #expect(
             Self.request(requiresBiometric: true).biometricLine == "Touch ID will confirm this decision.",
         )
@@ -226,13 +221,13 @@ struct PromptCompositionTests {
         // so counting it would claim a choice that does not exist.
         #expect(
             Self.request(
-                offered: ["allowOnce", "allowTargetApplication", "allowSession", "deny"],
-            ).moreChoicesText == "3 more choices — this exact request, or one application and "
-                + "every app this agent touches",
+                offered: [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+            ).moreChoicesText == "3 more choices — this exact request, or in TextEdit and "
+                + "any application for up to 8 operations",
             "the count is the number of real alternatives and the names are their titles",
         )
         #expect(
-            Self.request(offered: ["deny"]).moreChoicesText == nil,
+            Self.request(offered: [.deny]).moreChoicesText == nil,
             "a request that arrived offering only Deny has nothing to disclose",
         )
     }

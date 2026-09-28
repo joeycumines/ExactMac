@@ -1,4 +1,5 @@
 @testable import ExactMacConsole
+@testable import ExactMacServer
 import Foundation
 import Testing
 
@@ -20,106 +21,36 @@ struct ConsoleDecisionTests {
         makeRequest(requiresBiometric: requiresBiometric)
     }
 
+    /// A request an operator can be asked about, built from the SERVER'S OWN TYPES.
+    ///
+    /// The `offered` parameter is the console's own `OptionRow.Kind` because the tests
+    /// choose options by the label the operator sees, and it is mapped to the engine's
+    /// `OfferedDecision.Kind` on the way in — so a test that picks `.session` is picking the
+    /// option the engine actually offered, not a string that happens to look like one.
     private static func makeRequest(
         requiresBiometric: Bool = false,
         requestID: String = "req-1",
         offered: [OptionRow.Kind] = [.once, .session, .deny],
     ) -> PendingRequest {
-        PendingRequest(
-            consent: PendingConsent(
-                request: WireRequest(
-                    requestID: requestID,
-                    rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                    capability: "clipboard.read",
-                    capabilityConsequence: "Read the clipboard and its history",
-                    scopeDescription: "every app  ·  until ExactMac quits",
-                    argumentSummary: "the clipboard and its history",
-                    agentReason: "answering a question about what you copied",
-                    blastRadius: 0.4,
-                    riskClass: "elevated",
-                    isRevokeAll: false,
-                    operationLimit: nil,
-                    effectiveCapabilities: ["clipboard.read"],
-                ),
-                identity: WireIdentity(
-                    processIdentifier: 4242,
-                    effectiveUserIdentifier: 501,
-                    executablePath: "/usr/local/bin/exactmac",
-                    bundleIdentifier: "io.github.joeycumines.exactmac",
-                    signature: "signedUnnotarized",
-                    designatedRequirement: nil,
-                    isFullyResolved: true,
-                    ancestors: [
-                        WireAncestor(
-                            processIdentifier: 4200,
-                            executablePath: "/bin/zsh",
-                            bundleIdentifier: nil,
-                            signature: "signedAndValid",
-                            isFullyResolved: true,
-                        ),
-                    ],
-                    isAncestryTruncated: false,
-                ),
-                decision: WireDecision(
-                    basis: "needs your consent",
-                    requiresBiometric: requiresBiometric,
-                    biometricReason: requiresBiometric ? "a standing clipboard grant" : nil,
-                    offered: offered.map {
-                        WireOption(
-                            kind: $0.serverValue,
-                            scopeDescription: "every app  ·  until ExactMac quits",
-                            durationDescription: "this session",
-                            blastRadius: 0.4,
-                            requiresBiometric: requiresBiometric,
-                            isDestructive: $0.isDestructive,
-                            isDefault: $0 == .session,
-                            isPrimary: $0 == .once,
-                        )
-                    },
-                    consentTimeoutSeconds: 90,
-                ),
-                nonce: "nonce-\(requestID)",
-                requestDigest: "digest-\(requestID)",
+        let (req, identity, decision) = ServerFixture.request(requestID: requestID)
+        return PendingRequest(
+            request: req,
+            identity: identity,
+            decision: AuthorizationDecision(
+                outcome: .deny,
+                basis: .promptRequired,
+                effectiveCapabilities: decision.effectiveCapabilities,
+                blastRadius: decision.blastRadius,
+                riskClass: decision.riskClass,
+                biometric: requiresBiometric
+                    ? .required(reason: "a standing clipboard grant")
+                    : .notRequired,
+                offeredDecisions: decision.offeredDecisions.filter {
+                    offered.map(\.serverValue).contains($0.kind.rawValue)
+                },
+                expiresAt: nil,
             ),
         )
-    }
-
-    /// A channel that records what was posted instead of talking to a server, so a decision
-    /// can be asserted without a socket and without a window server.
-    final class RecordingChannel: ConsoleChannel, @unchecked Sendable {
-        private let lock = NSLock()
-        private var _posted: [ConsentDecision] = []
-        private var _queries: [QueryKind] = []
-
-        var posted: [ConsentDecision] {
-            lock.withLock { _posted }
-        }
-
-        var queries: [QueryKind] {
-            lock.withLock { _queries }
-        }
-
-        var isConnected: Bool {
-            true
-        }
-
-        func connect() async throws {
-            throw ConsoleChannelError.unavailable(reason: "not connected")
-        }
-
-        func post(_ decision: ConsentDecision) async throws {
-            lock.withLock { _posted.append(decision) }
-        }
-
-        func query(_ kind: QueryKind) async throws {
-            lock.withLock { _queries.append(kind) }
-        }
-
-        func nextFrame(timeout _: Duration) async throws -> ConsoleFrame? {
-            nil
-        }
-
-        func disconnect() {}
     }
 
     final class ScriptedCeremony: CeremonyPerforming {
@@ -132,7 +63,6 @@ struct ConsoleDecisionTests {
         }
 
         func perform(
-            requestID _: AuthorizationRequestID,
             nonce: String,
             reason: String,
         ) async -> BiometricCeremony.Outcome {
@@ -143,126 +73,111 @@ struct ConsoleDecisionTests {
     }
 
     private func makeModel(
-        channel: RecordingChannel,
         ceremony: (any CeremonyPerforming)? = nil,
     ) -> ConsoleModel {
         ConsoleModel(
-            channel: channel,
-            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
             windows: ConsoleWindowHost(),
             ceremony: ceremony,
-            startLoop: false,
         )
     }
 
-    // MARK: The decision that is posted
+    // MARK: The answer that is produced
 
     @Test
-    func `an approved option is posted for the request the operator was shown`() async throws {
-        let channel = RecordingChannel()
-        let model = makeModel(channel: channel)
+    func `an approved option produces an answer for the request the operator was shown`() async {
+        // IT USED TO ASSERT WHAT WAS POSTED, because the answer travelled over a socket. The
+        // operator interface is in this process, so the answer is RETURNED — and the binding
+        // it asserts is the same one, on a value the server receives directly.
+        let model = makeModel()
         let request = Self.makeRequest()
-        model.deliverPending(request)
 
-        await model.decide(.session, note: "", for: request, biometricObtained: false)
+        let answer = await model.answerValue(.session, for: request)
 
-        #expect(channel.posted.count == 1)
-        let decision = try #require(channel.posted.first)
-        #expect(decision.requestID == request.requestID)
-        #expect(decision.nonce == request.nonce)
-        #expect(decision.requestDigest == request.requestDigest)
-        #expect(decision.isApproved)
-        // THE SERVER'S NAME, not this package's. Posting the console's own `rawValue` is what
-        // made every approval a denial, so the assertion is on the wire value the server
-        // parses rather than on the value that happens to be convenient here.
-        #expect(decision.selected == OptionRow.Kind.session.serverValue)
+        #expect(answer.requestID == request.requestID)
+        #expect(answer.nonce == request.nonce)
+        #expect(answer.requestDigest == request.requestDigest)
+        #expect(answer.isApproved)
+        #expect(answer.kind == .session)
     }
 
     @Test
-    func `choosing deny posts a refusal never an approval`() async throws {
-        let channel = RecordingChannel()
-        let model = makeModel(channel: channel)
+    func `choosing deny produces a refusal and never an approval`() async {
+        let model = makeModel()
         let request = Self.makeRequest()
-        model.deliverPending(request)
 
-        await model.decide(.deny, note: "", for: request, biometricObtained: false)
+        let answer = await model.answerValue(.deny, for: request)
 
-        let decision = try #require(channel.posted.first)
-        #expect(!decision.isApproved)
-        #expect(decision.selected == OptionRow.Kind.deny.serverValue)
+        #expect(!answer.isApproved)
+        #expect(answer.refusal == .operatorDeclined)
     }
 
     @Test
     func `answering one request does not clear another that arrived meanwhile`() async {
-        let channel = RecordingChannel()
-        let model = makeModel(channel: channel)
+        let model = makeModel()
         let first = Self.makeRequest(requestID: "req-1")
         let second = Self.makeRequest(requestID: "req-2")
         model.deliverPending(first)
 
         // A second request arrives while the operator is deciding the first.
         model.deliverPending(second)
-        await model.decide(.once, note: "", for: first, biometricObtained: false)
+        _ = await model.answerValue(.once, for: first)
 
-        #expect(channel.posted.count == 1)
-        #expect(channel.posted.first?.requestID == "req-1")
-        // The second is still waiting, because it is still the operator's to answer.
-        #expect(model.pendingPrompt?.requestID == "req-2")
+        // The answer belongs to the FIRST request, because that is the one the operator was
+        // shown and the one the answer is bound to.
+        #expect(model.pendingPrompt?.requestID == "req-2", "the second is still the operator's to answer")
     }
 
     // MARK: The ceremony
 
     @Test
-    func `a performed ceremony is reported to the server as performed`() async throws {
-        let channel = RecordingChannel()
+    func `a performed ceremony is reported to the server as performed`() async {
         let ceremony = ScriptedCeremony(.performed)
-        let model = makeModel(channel: channel, ceremony: ceremony)
+        let model = makeModel(ceremony: ceremony)
         let request = Self.makeRequest(requiresBiometric: true)
         model.deliverPending(request)
 
-        await model.answer(.session, for: request)
+        // THE ANSWER, NOT THE POST. It used to be read off `channel.posted`, because the
+        // answer travelled to a socket. The operator interface is hosted in this process, so
+        // the answer is RETURNED to the server that asked, and there is no frame to inspect.
+        let answer = await model.answerValue(.session, for: request)
 
-        let decision = try #require(channel.posted.first)
-        #expect(decision.biometricObtained)
-        #expect(decision.isApproved)
+        #expect(answer.biometricObtained)
+        #expect(answer.isApproved)
         #expect(ceremony.nonces == [request.nonce], "the ceremony must be bound to this nonce")
     }
 
     @Test
-    func `a ceremony that did not happen denies and does not fall back to a weaker check`() async throws {
-        let channel = RecordingChannel()
+    func `a ceremony that did not happen denies and does not fall back to a weaker check`() async {
         let ceremony = ScriptedCeremony(.unavailable(.cancelled))
-        let model = makeModel(channel: channel, ceremony: ceremony)
+        let model = makeModel(ceremony: ceremony)
         let request = Self.makeRequest(requiresBiometric: true)
         model.deliverPending(request)
 
-        await model.answer(.global, for: request)
+        let answer = await model.answerValue(.global, for: request)
 
-        let decision = try #require(channel.posted.first)
-        #expect(!decision.biometricObtained, "no ceremony means no claim of one")
+        #expect(!answer.biometricObtained, "no ceremony means no claim of one")
         #expect(
-            !decision.isApproved || decision.selected == OptionRow.Kind.deny.rawValue,
+            !answer.isApproved,
             "a request that needed a ceremony must not be approved without one",
         )
         #expect(
-            decision.selected == OptionRow.Kind.deny.serverValue,
+            answer.kind == .deny,
             "the only thing a failed ceremony can produce is a refusal",
         )
     }
 
     @Test
     func `a ceremony that is not required is not performed`() async {
-        let channel = RecordingChannel()
         let ceremony = ScriptedCeremony(.performed)
-        let model = makeModel(channel: channel, ceremony: ceremony)
+        let model = makeModel(ceremony: ceremony)
         let request = Self.makeRequest(requiresBiometric: false)
         model.deliverPending(request)
 
-        await model.answer(.once, for: request)
+        let answer = await model.answerValue(.once, for: request)
 
         #expect(ceremony.reasons.isEmpty, "no ceremony was required, so none may be performed")
-        #expect(channel.posted.first?.biometricObtained == false)
-        #expect(channel.posted.first?.isApproved == true)
+        #expect(!answer.biometricObtained)
+        #expect(answer.isApproved)
     }
 
     // MARK: The sentence beside the sensor
@@ -302,34 +217,27 @@ struct ConsoleDecisionTests {
         // A real chain runs Terminal -> shell -> agent host -> the binary, and can be deeper
         // still; a cap that hid the truncation would let the operator conclude they had seen
         // the whole ancestry.
-        let consent = PendingConsent(
-            request: WireRequest(
-                requestID: "r", rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                capability: "clipboard.read", capabilityConsequence: "Read the clipboard",
-                scopeDescription: "any", argumentSummary: "x",
-                agentReason: nil, blastRadius: 0, riskClass: "routine", isRevokeAll: false,
-                operationLimit: nil, effectiveCapabilities: [],
-            ),
-            identity: WireIdentity(
-                processIdentifier: 1, effectiveUserIdentifier: 501,
-                executablePath: "/usr/local/bin/exactmac", bundleIdentifier: nil,
-                signature: "signedAndValid", designatedRequirement: nil, isFullyResolved: true,
+        let (req, _, decision) = ServerFixture.request(requestID: "r")
+        let request = PendingRequest(
+            request: req,
+            identity: ServerFixture.identity(
+                isAncestryTruncated: true,
                 ancestors: (1 ... 20).map {
-                    WireAncestor(
+                    ResolvedProcess(
                         processIdentifier: Int32(100 + $0),
-                        executablePath: "/usr/bin/ancestor\($0)",
-                        bundleIdentifier: nil, signature: "signedAndValid", isFullyResolved: true,
+                        parentProcessIdentifier: nil,
+                        code: CodeIdentity(
+                            executablePath: "/usr/bin/ancestor\($0)",
+                            bundleIdentifier: nil,
+                            designatedRequirement: nil,
+                            signature: .signedAndValid,
+                        ),
+                        isFullyResolved: true,
                     )
                 },
-                isAncestryTruncated: true,
             ),
-            decision: WireDecision(
-                basis: "b", requiresBiometric: false, biometricReason: nil,
-                offered: [], consentTimeoutSeconds: 90,
-            ),
-            nonce: "n", requestDigest: "d",
+            decision: decision,
         )
-        let request = PendingRequest(consent: consent)
         let rows = CallerTree.rows(for: request, maximumDepth: 4)
         #expect(rows.count == 5, "the requester plus four ancestors, and no more")
         // The truncation is REPORTED, not hidden: the server said it truncated, and the rows
@@ -350,23 +258,18 @@ struct ConsoleDecisionTests {
     /// differently.
     @Test
     func `an answer is produced without posting anything`() async {
-        let channel = RecordingChannel()
-        let model = makeModel(channel: channel)
+        let model = makeModel()
         let request = Self.makeRequest()
 
         let answer = await model.answerValue(.session, for: request)
 
-        // The state difference that matters: producing the answer must not have touched the
-        // transport. A function that both decides and reports is the thing that cannot be
-        // reused by the direct caller, and the direct caller is the only path left.
-        #expect(channel.posted.isEmpty)
         #expect(answer.isApproved)
         #expect(answer.kind == .session)
     }
 
     @Test
     func `an answer carries the request it answers`() async {
-        let model = makeModel(channel: RecordingChannel())
+        let model = makeModel()
         let request = Self.makeRequest(requestID: "req-bound")
 
         let answer = await model.answerValue(.once, for: request)
@@ -381,7 +284,7 @@ struct ConsoleDecisionTests {
 
     @Test
     func `a declined answer and an unobtainable one are distinguishable`() async {
-        let model = makeModel(channel: RecordingChannel())
+        let model = makeModel()
 
         let declined = await model.answerValue(.deny, for: Self.makeRequest(requestID: "a"))
         #expect(!declined.isApproved)
@@ -401,7 +304,7 @@ struct ConsoleDecisionTests {
     @Test
     func `a ceremony that did not happen refuses rather than approving`() async {
         let ceremony = ScriptedCeremony(.unavailable(.lockedOut))
-        let model = makeModel(channel: RecordingChannel(), ceremony: ceremony)
+        let model = makeModel(ceremony: ceremony)
         let request = Self.makeRequest(requiresBiometric: true)
 
         // The operator chose to ALLOW, and the answer is a refusal. That is the whole
@@ -423,7 +326,7 @@ struct ConsoleDecisionTests {
         // because the posted decision carried the same flag as an honest non-biometric
         // approval. A returned answer makes the difference legible, which is the point of
         // having one.
-        let model = makeModel(channel: RecordingChannel(), ceremony: nil)
+        let model = makeModel(ceremony: nil)
         let request = Self.makeRequest(requiresBiometric: true)
 
         let answer = await model.answerValue(.session, for: request)
@@ -437,7 +340,7 @@ struct ConsoleDecisionTests {
     @Test
     func `a performed ceremony is reported on the returned answer`() async {
         let ceremony = ScriptedCeremony(.performed)
-        let model = makeModel(channel: RecordingChannel(), ceremony: ceremony)
+        let model = makeModel(ceremony: ceremony)
         let request = Self.makeRequest(requiresBiometric: true)
 
         let answer = await model.answerValue(.session, for: request)
@@ -449,7 +352,7 @@ struct ConsoleDecisionTests {
 
     @Test
     func `approval is derived from the option, so the two cannot disagree`() async {
-        let model = makeModel(channel: RecordingChannel())
+        let model = makeModel()
 
         // A deny option must never yield an approved answer, whatever else is set. The value
         // derives one from the other rather than storing both, because a stored pair is a
@@ -533,41 +436,14 @@ struct ServerVocabularyTests {
         // A request arrives offering its options; the console must not substitute its own
         // first element, because the server's default is the narrowest option and the
         // console's first element is not.
-        let consent = PendingConsent(
-            request: WireRequest(
-                requestID: "r", rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                capability: "clipboard.read", capabilityConsequence: "Read the clipboard",
-                scopeDescription: "any", argumentSummary: "x",
-                agentReason: nil, blastRadius: 0, riskClass: "routine", isRevokeAll: false,
-                operationLimit: nil, effectiveCapabilities: [],
+        let (req, identity, _) = ServerFixture.request(requestID: "r")
+        let request = PendingRequest(
+            request: req,
+            identity: identity,
+            decision: ServerFixture.decision(
+                offered: [.allowSession, .deny],
             ),
-            identity: WireIdentity(
-                processIdentifier: 1, effectiveUserIdentifier: 501,
-                executablePath: "/usr/local/bin/exactmac", bundleIdentifier: nil,
-                signature: "signedAndValid", designatedRequirement: nil, isFullyResolved: true,
-                ancestors: [], isAncestryTruncated: false,
-            ),
-            decision: WireDecision(
-                basis: "needs your consent",
-                requiresBiometric: false,
-                biometricReason: nil,
-                offered: [
-                    WireOption(
-                        kind: "allowSession", scopeDescription: "every app", durationDescription: "8h",
-                        blastRadius: 0.6, requiresBiometric: false, isDestructive: false,
-                        isDefault: true, isPrimary: false,
-                    ),
-                    WireOption(
-                        kind: "deny", scopeDescription: "—", durationDescription: "—",
-                        blastRadius: 0, requiresBiometric: false, isDestructive: true,
-                        isDefault: false, isPrimary: false,
-                    ),
-                ],
-                consentTimeoutSeconds: 90,
-            ),
-            nonce: "n", requestDigest: "d",
         )
-        let request = PendingRequest(consent: consent)
         #expect(request.offeredKinds == [.session, .deny], "all six were previously collapsed to deny")
         #expect(request.offeredKinds.first == .session, "not the refusal, which is what it was")
     }

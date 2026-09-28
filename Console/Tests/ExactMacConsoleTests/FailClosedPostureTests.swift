@@ -27,14 +27,15 @@ import Testing
 @Suite("Fail-closed posture")
 @MainActor
 struct FailClosedPostureTests {
-    /// A channel that never connects, so `apply` is driven without a server. The state
-    /// under test is produced by the model's own reasoning, not by a socket.
+    /// A model whose state comes from its own reasoning, driven without a server.
+    ///
+    /// IT TAKES A START-AT-LIN ITEM DOUBLE rather than reaching the real one, because the
+    /// real `SMAppService` reports `.notFound` for a test binary that is not a bundle and a
+    /// suite that consulted it would be measuring the harness rather than the posture.
     private func model(presentation: OperatorInterface) -> ConsoleModel {
         ConsoleModel(
-            channel: RecordingChannel(),
-            serviceController: NeverServiceController(),
+            startAtLogin: StartAtLogin(item: AlwaysRegisteredLoginItem()),
             presentation: presentation,
-            startLoop: false,
         )
     }
 
@@ -66,30 +67,79 @@ struct FailClosedPostureTests {
     }
 
     @Test
-    func `Turning the service on does not grant a headless process a healthy state`() async {
-        // THE SECOND ROUTE, and the one that would have survived a fix applied only to
-        // `apply`. `setServiceEnabled` assigned `.running` itself and cleared the band, so
-        // an operator pressing the toggle on a process that could not ask anybody would
-        // have watched the fail-closed band disappear.
-        let subject = model(presentation: .headless)
+    func `The start-at-login toggle is not a way to change the service state`() {
+        // IT USED TO BE, AND THAT WAS THE BUG THIS SUITE EXISTS TO CATCH. The toggle drove
+        // launchctl, and turning the "service" on wrote `.running` and cleared the
+        // fail-closed band directly — so an operator pressing it on a process that could not
+        // ask anybody watched the band disappear. The toggle is now start-at-login, which
+        // has no business touching whether the server is serving, and this pins that.
+        let subject = model(presentation: .application)
+        let before = subject.serviceState
 
-        try? await subject.setServiceEnabled(true)
+        subject.setServiceEnabled(false)
 
-        #expect(subject.serviceState != .running)
-        #expect(subject.failClosed != nil)
+        #expect(subject.serviceState == before, "start-at-login is not the service, and must not report as one")
+        // And the reverse, on a process that cannot ask: the band stays whatever it was.
+        let headless = model(presentation: .headless)
+        headless.apply(.running)
+        headless.setServiceEnabled(true)
+        #expect(headless.serviceState != .running, "the veto still holds when the toggle is pressed")
+        #expect(headless.failClosed != nil)
     }
 
     @Test
-    func `Turning the service off still reports stopped, not the vaguer safe state`() async {
-        // The veto is deliberately narrow. `.stopped` already means "consent is not
-        // available", and an operator who turned ExactMac off deserves to be told it is off
-        // rather than being given a vaguer reason it cannot act on.
+    func `The veto is narrow, so a state that already denies passes through`() {
+        // `.stopped` and the other three already mean "consent is not available", so the
+        // veto must not replace them: an operator who stopped ExactMac deserves to be told
+        // it is stopped rather than given a vaguer reason they cannot act on.
         let subject = model(presentation: .headless)
 
-        try? await subject.setServiceEnabled(false)
+        for state in [ServiceState.stopped, .degraded, .reduced, .unreachable] {
+            subject.apply(state)
+            #expect(subject.serviceState == state, "\(state) was rewritten to \(subject.serviceState)")
+            #expect(subject.failClosed != nil, "\(state) must say why")
+        }
+    }
 
-        #expect(subject.serviceState == .stopped)
+    @Test
+    func `A hosted server that started is reported as running`() {
+        // THE OTHER HALF OF THE SAME FIX. The app used to learn it was running by failing
+        // to reach a peer process, so it could not say so at all: the only reporter was a
+        // socket loop that found nothing and reported `unreachable` — which put the
+        // fail-closed band in front of an operator while the app was asking them things.
+        // The server this process owns is now reported by this process.
+        let subject = model(presentation: .application)
+
+        subject.reportServerStarted()
+
+        #expect(subject.serviceState == .running)
+        #expect(subject.failClosed == nil)
+    }
+
+    @Test
+    func `A server that could not start is reported with its reason, not as switched off`() {
+        // The distinction matters to whoever reads it: the operator turned nothing off, so
+        // a state inviting them to toggle something would send them after the wrong cause.
+        let subject = model(presentation: .application)
+
+        subject.reportServerStartFailure(reason: "the socket pathname is held by another server")
+
+        #expect(subject.serviceState != .stopped)
+        #expect(subject.serviceState != .running)
         #expect(subject.failClosed != nil)
+        #expect(subject.pendingNotice?.contains("held by another server") == true)
+    }
+
+    @Test
+    func `Constructing the model reports no failure that did not happen`() {
+        // A DEFAULT-VALUE PROPERTY, SO IT IS ASSERTED AS ONE. The app used to start a loop
+        // that polled a socket for a console in another process; there is no such process,
+        // so the loop could only report that nothing was reachable — and it did so every two
+        // seconds, which is how a working app came to display its fail-closed band.
+        let subject = model(presentation: .application)
+
+        #expect(subject.serviceState != .unreachable, "a freshly built model must not claim a fault")
+        #expect(subject.failClosed == nil)
     }
 
     @Test
@@ -110,40 +160,21 @@ struct FailClosedPostureTests {
 
 // MARK: - Doubles
 
-/// A channel that claims a reachable server and never produces a frame, so the model's own
-/// state reasoning is what is under test.
-private final class RecordingChannel: ConsoleChannel, @unchecked Sendable {
-    private(set) var posted: [ConsentDecision] = []
-
-    var isConnected: Bool {
-        true
-    }
-
-    func connect() async throws {}
-    func disconnect() {}
-    func nextFrame(timeout _: Duration) async throws -> ConsoleFrame? {
-        nil
-    }
-
-    func post(_ decision: ConsentDecision) async throws {
-        posted.append(decision)
-    }
-
-    func query(_: QueryKind) async throws {}
-}
-
-/// A service controller that accepts whatever it is told, so the launchctl layer is not what
-/// a test is measuring. It is a double, not a stub of the product: the product's own
-/// `LaunchdServiceController` is exercised by the launchctl suite.
-private final class NeverServiceController: ServiceControlling, @unchecked Sendable {
+/// A login item that is already registered and accepts whatever it is told, so the
+/// registration is not what a posture test is measuring.
+private final class AlwaysRegisteredLoginItem: LoginItemRegistering, @unchecked Sendable {
     private let lock = NSLock()
-    private var enabled = true
+    private var stored: SMAppService.Status = .enabled
 
-    func isServiceEnabled() async throws -> Bool {
-        lock.withLock { enabled }
+    var status: SMAppService.Status {
+        lock.withLock { stored }
     }
 
-    func setServiceEnabled(_ value: Bool) async throws {
-        lock.withLock { enabled = value }
+    func register() throws {
+        lock.withLock { stored = .enabled }
+    }
+
+    func unregister() throws {
+        lock.withLock { stored = .notRegistered }
     }
 }

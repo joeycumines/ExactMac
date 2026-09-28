@@ -35,6 +35,29 @@ enum RenderHarness {
         }
     }
 
+    /// The height the view ASKS for, measured rather than declared.
+    ///
+    /// THE RENDERS USED TO BE DRAWN AT A HARDCODED 710pt — the design's measured height for
+    /// the prompt — while the composition in this file measures taller, so the PNG showed the
+    /// top and bottom of the card cut off at the window edge. The artefact was then cited as
+    /// evidence that the alert fits, which it visibly did not: the risk chip was bisected at
+    /// the top and the options summary was cut at the bottom. A render that lies about its
+    /// own clipping is worse than no render.
+    ///
+    /// Measuring is also what the window host does at runtime (`ConsoleWindowHost.present`
+    /// takes `fittingSize`), so the artefact and the window now agree by construction rather
+    /// than by two people remembering the same number.
+    @MainActor
+    static func fittedHeight(
+        of view: some View,
+        width: CGFloat,
+        ceiling: CGFloat = ConsoleWindowHost.maximumWindowHeight,
+    ) -> CGFloat {
+        let hosting = NSHostingView(rootView: view.frame(width: width))
+        hosting.layoutSubtreeIfNeeded()
+        return min(max(hosting.fittingSize.height, 1), ceiling)
+    }
+
     @MainActor
     static func png(
         _ view: some View,
@@ -200,91 +223,25 @@ struct RenderTests {
         // actually gets. Every earlier render of this surface was written by hand and could
         // therefore show a prompt the product never builds — which is how an alert made of
         // engine enums passed a review of its own layout.
-        let request = PendingRequest(consent: PendingConsent(
-            request: WireRequest(
-                requestID: "r",
-                rpcName: "exactmac.v1.ExactMac/GetAccessibilityTree",
-                capability: "observation.ax",
-                capabilityConsequence: "Read the accessibility tree of an app",
-                scopeDescription: "every application  ·  until you revoke it",
-                argumentSummary: "AXUIElementCopyAttributeValue(AXFocusedApplication, "
-                    + "kAXFocusedWindowAttribute), walking children to depth 12",
-                agentReason: "Refactoring the view controller, which needs the real layout "
-                    + "rather than the one in the storyboard.",
-                blastRadius: 0.71,
-                riskClass: "high",
-                isRevokeAll: false,
-                operationLimit: nil,
-                effectiveCapabilities: ["observation.ax", "observation.screen", "clipboard.read"],
-            ),
-            identity: WireIdentity(
-                processIdentifier: 4517,
-                effectiveUserIdentifier: 501,
-                executablePath: "/usr/local/bin/exactmac",
-                bundleIdentifier: nil,
-                signature: "unnotarized",
-                designatedRequirement: nil,
-                isFullyResolved: true,
-                ancestors: [
-                    WireAncestor(
-                        processIdentifier: 4400,
-                        executablePath: "/usr/local/lib/node_modules/opencode/bin/cli.js",
-                        bundleIdentifier: nil,
-                        signature: "unsigned",
-                        isFullyResolved: true,
-                    ),
-                    WireAncestor(
-                        processIdentifier: 4390,
-                        executablePath: "/bin/zsh",
-                        bundleIdentifier: nil,
-                        signature: "unresolved",
-                        isFullyResolved: false,
-                    ),
-                ],
-                isAncestryTruncated: false,
-            ),
-            decision: WireDecision(
-                basis: "promptRequired",
-                requiresBiometric: true,
-                biometricReason: "Touch ID will confirm: read the accessibility tree of any "
-                    + "application until you revoke it",
-                offered: [
-                    WireOption(
-                        kind: "allowOnce",
-                        scopeDescription: "this exact request",
-                        durationDescription: "once",
-                        blastRadius: 0.2,
-                        requiresBiometric: false,
-                        isDestructive: false,
-                        isDefault: true,
-                        isPrimary: true,
-                    ),
-                    WireOption(
-                        kind: "allowTargetApplication",
-                        scopeDescription: "one application",
-                        durationDescription: "until revoked",
-                        blastRadius: 0.45,
-                        requiresBiometric: false,
-                        isDestructive: false,
-                        isDefault: false,
-                        isPrimary: false,
-                    ),
-                    WireOption(
-                        kind: "deny",
-                        scopeDescription: "none",
-                        durationDescription: "none",
-                        blastRadius: 0,
-                        requiresBiometric: false,
-                        isDestructive: true,
-                        isDefault: false,
-                        isPrimary: false,
-                    ),
-                ],
-                consentTimeoutSeconds: 45,
-            ),
-            nonce: "n",
-            requestDigest: "d",
-        ))
+        // BUILT FROM THE SERVER'S OWN TYPES, through the same mapping the app performs.
+        // The hand-written wire shapes this replaced were a second copy of the server's
+        // types that existed only to cross a socket, so this render could show a prompt the
+        // product does not build -- which is how an alert made of engine enums passed a
+        // review of its own layout.
+        let (authorizationRequest, identity, decision) = ServerFixture.request(
+            requestID: "r",
+            capability: .accessibilityTraverse,
+            rpcName: "exactmac.v1.ExactMac/GetAccessibilityTree",
+            argumentSummary: "AXUIElementCopyAttributeValue(AXFocusedApplication, "
+                + "kAXFocusedWindowAttribute), walking children to depth 12",
+            agentReason: "Refactoring the view controller, which needs the real layout "
+                + "rather than the one in the storyboard.",
+        )
+        let request = PendingRequest(
+            request: authorizationRequest,
+            identity: identity,
+            decision: decision,
+        )
 
         let view = ApprovalPrompt(
             state: .pending,
@@ -308,10 +265,15 @@ struct RenderTests {
             showOptionsLabel: "Show options",
             selectedOption: request.offeredKinds.first,
         )
+        // SIZED FROM THE CONTENT, so the artefact shows the card whole or shows the window
+        // ceiling honestly. A render drawn at a remembered 710pt showed a composition that
+        // measures taller cut off at both ends, and that PNG was cited as proof the alert
+        // fits.
+        let height = RenderHarness.fittedHeight(of: view, width: Design.Layout.promptWidth)
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
                 view,
-                size: CGSize(width: Design.Layout.promptWidth, height: 710),
+                size: CGSize(width: Design.Layout.promptWidth, height: height),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "prompt-composed\(mode.suffix)",
             )
@@ -351,7 +313,7 @@ struct RenderTests {
 
     @Test
     func `the popover renders at 360pt and hugs its content`() throws {
-        let model = ConsoleModel(channel: ConsoleChannelClient(socketPath: "/nonexistent", token: ""))
+        let model = ConsoleModel()
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
                 MenuBarPopover(model: model),

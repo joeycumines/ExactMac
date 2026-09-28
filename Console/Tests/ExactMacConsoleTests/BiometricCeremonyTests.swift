@@ -73,16 +73,6 @@ struct BiometricCeremonyTests {
     }
 
     @Test
-    func `a proof names its request AND carries a nonce, so it is not a bearer token`() {
-        let bound = AuthorizationRequestID(rawValue: "req-1")
-        let other = AuthorizationRequestID(rawValue: "req-2")
-        let proof = CeremonyProof(requestID: bound, nonce: "nonce-a", performed: true)
-        #expect(proof.requestID == bound)
-        #expect(proof.requestID != other, "a proof answered for a different request")
-        #expect(proof.nonce == "nonce-a", "a proof with no nonce is a bearer token")
-    }
-
-    @Test
     func `this machine's availability is answerable without performing a ceremony`() {
         // Either it can, or it says which of the named reasons it cannot — and either answer
         // is a real one rather than a crash.

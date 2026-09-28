@@ -51,11 +51,8 @@ struct ConsoleWindowHostTests {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
         let model = ConsoleModel(
-            channel: ConsoleDecisionTests.RecordingChannel(),
-            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
             windows: host,
             ceremony: nil,
-            startLoop: false,
         )
         model.deliverPending(ConsoleDecisionTests.fixtureRequest())
 
@@ -76,18 +73,19 @@ struct ConsoleWindowHostTests {
     func `the ceremony is what takes focus, and only then`() async {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
-        let channel = ConsoleDecisionTests.RecordingChannel()
         let model = ConsoleModel(
-            channel: channel,
-            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
             windows: host,
             ceremony: ConsoleDecisionTests.ScriptedCeremony(.performed),
-            startLoop: false,
         )
         let request = ConsoleDecisionTests.fixtureRequest(requiresBiometric: true)
         model.deliverPending(request)
         #expect(!application.isRegular, "arriving did not take focus")
 
+        // THE REAL OPERATOR PATH, not `answerValue`. This test's subject is focus, and the
+        // close that hands focus back happens on the answering path — a substitution here
+        // would have quietly tested a function that never closes anything. Whether the
+        // ceremony ran is a different subject and `ConsoleDecisionTests` owns it, against
+        // the value the model returns.
         await model.answer(.session, for: request)
 
         // The TRANSITION, not the end state: the decision closes the window, and closing the
@@ -101,7 +99,6 @@ struct ConsoleWindowHostTests {
             application.transitions == ["regular", "accessory"],
             "and it is given back when the decision closes the window: \(application.transitions)",
         )
-        #expect(channel.posted.first?.biometricObtained == true)
     }
 
     @Test
@@ -109,11 +106,8 @@ struct ConsoleWindowHostTests {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
         let model = ConsoleModel(
-            channel: ConsoleDecisionTests.RecordingChannel(),
-            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
             windows: host,
             ceremony: nil,
-            startLoop: false,
         )
         model.deliverPending(ConsoleDecisionTests.fixtureRequest())
 
@@ -204,11 +198,8 @@ struct ConsoleWindowHostTests {
     func `opening the approval prompt is what the pending notices button does`() {
         let application = FakeApplication()
         let model = ConsoleModel(
-            channel: ConsoleDecisionTests.RecordingChannel(),
-            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
             windows: ConsoleWindowHost(application: application),
             ceremony: nil,
-            startLoop: false,
         )
         model.deliverPending(ConsoleDecisionTests.fixtureRequest())
 

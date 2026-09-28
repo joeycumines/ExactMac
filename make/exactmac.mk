@@ -915,21 +915,32 @@ exactmac.console-register: ## Register the signed console .app with LaunchServic
 ##@ [Console] LaunchAgent
 
 .PHONY: exactmac.console-install
-exactmac.console-install: ## Build, sign, register, bootstrap, and wait for the console LaunchAgent.
-	@# STOP FIRST, exactly as `exactmac.install` does for the server, and for the same reason:
-	@# replacing a signed bundle underneath a running process leaves that process on the old
-	@# binary until it is next respawned, which looks like an install that did nothing.
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-stop
+exactmac.console-install: ## Retired: builds and signs the app, and refuses to install a LaunchAgent for it.
+	@# THE BUILD AND SIGN STEPS STILL RUN, because a bundle is still a thing this repository
+	@# produces. Only the LaunchAgent half is refused, and it is refused LOUDLY rather than
+	@# quietly dropped: an operator who typed this expecting an install should be told the
+	@# architecture changed, not handed a bundle with no explanation for why nothing appeared
+	@# in their login items.
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-build
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-app
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-sign
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-register
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-launchd
-	@printf '%s\n' 'Console installed. The menu bar item is the operator interface.'
+	@printf '%s\n' 'Console app built, signed and registered.'
+	@printf '%s\n' 'NOT installing a console LaunchAgent: the app is one process now and registers itself for start-at-login through ServiceManagement.SMAppService.mainApp.'
+	@printf '%s\n' 'To retire the old one, run: gmake exactmac.retire-launchagents'
 
 .PHONY: exactmac.console-launchd
-exactmac.console-launchd: private SHELL := /bin/bash
-exactmac.console-launchd: ## Write, bootstrap, and wait for the console LaunchAgent.
+exactmac.console-launchd: ## Retired: refuses to write or bootstrap a console LaunchAgent.
+	@printf '%s\n' 'ERROR: installing a console LaunchAgent is retired.' >&2; \
+	printf '%s\n' 'The ExactMac app hosts the gRPC server in its own process and registers itself' >&2; \
+	printf '%s\n' 'for start-at-login through ServiceManagement.SMAppService.mainApp. A second' >&2; \
+	printf '%s\n' 'launchd-managed process serving the same socket is the two-program architecture' >&2; \
+	printf '%s\n' 'this work removed, and it would contend for the pathname.' >&2; \
+	printf '%s\n' '' >&2; \
+	printf '%s\n' '  to retire the old LaunchAgent:  gmake exactmac.retire-launchagents' >&2; \
+	printf '%s\n' '  to report what is installed:     gmake exactmac.retire-launchagents-status' >&2; \
+	printf '%s\n' '  to build and sign the app:      gmake macos.all' >&2; \
+	exit 1
 	@set -uo pipefail; \
 	validate_xml_value() { value="$$1"; name="$$2"; case "$$value" in *'<'*|*'>'*) printf 'ERROR: %s contains XML-significant characters.\n' "$$name" >&2; exit 1;; esac; }; \
 	validate_xml_value "$$EXACTMAC_CONSOLE_BUNDLE_ID" EXACTMAC_CONSOLE_BUNDLE_ID; \
@@ -977,12 +988,17 @@ exactmac.console-launchd: ## Write, bootstrap, and wait for the console LaunchAg
 	exit 1
 
 .PHONY: exactmac.console-start
-exactmac.console-start: ## Start the console service without rebuilding or re-signing.
-	@set -u; \
-	if [ ! -f "$(EXACTMAC_CONSOLE_PLIST)" ]; then \
-		printf '%s\n' "ERROR: console plist is missing; run 'gmake exactmac.console-install' first." >&2; \
-		exit 1; \
-	fi; \
+exactmac.console-start: ## Retired: refuses to start a console LaunchAgent.
+	@# THE PLAINEST OF THE THREE, AND THE ONE MOST WORTH REFUSING. Starting a superseded job
+	@# is how it comes back: `exactmac.retire-launchagents` unloads it, and the next person
+	@# who runs this to "just start the console again" has reinstalled the two-program
+	@# architecture without a plist ever being written. A clean error is the whole behaviour.
+	@printf '%s\n' 'ERROR: starting a console LaunchAgent is retired.' >&2; \
+	printf '%s\n' 'The ExactMac app is the service. Launch it from Applications.' >&2; \
+	printf '%s\n' '' >&2; \
+	printf '%s\n' '  to retire the old LaunchAgent:  gmake exactmac.retire-launchagents' >&2; \
+	printf '%s\n' '  to report what is installed:     gmake exactmac.retire-launchagents-status' >&2; \
+	exit 1
 	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
 		printf 'Console service already loaded: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
 		exit 0; \

@@ -12,8 +12,26 @@ import SwiftUI
 /// The SwiftUI scene. It is NOT `@main`: a file named `main.swift` IS the top-level entry
 /// file, so the entry point is the `ExactMacConsoleMain` enum there and the App struct has
 /// to be launched from it.
+/// The one console state, shared by the SwiftUI scene and the server's consent closure.
+///
+/// A HOLDER RATHER THAN A CONSTRUCTOR PARAMETER, because `App.main()` is static and takes
+/// none, so the scene cannot be given the instance the entry point built. Both halves reach
+/// it here instead, which is the only arrangement in which they are guaranteed to be the
+/// same object rather than two that happen to look alike.
+@MainActor
+enum ConsoleRuntime {
+    static let model = ConsoleModel()
+}
+
 struct ExactMacConsoleApp: App {
-    @State private var model = ConsoleModel()
+    /// The one model, taken from `ConsoleRuntime` rather than constructed here.
+    ///
+    /// `App.main()` IS A STATIC PROTOCOL REQUIREMENT, so a model cannot be handed to the
+    /// scene through it — the instance the App wraps is not an argument anyone controls. The
+    /// shared holder is how the scene and the server's consent closure end up looking at the
+    /// SAME state, which is the property that matters: two models would mean a request
+    /// rendered into a window whose state nobody is reading.
+    @State private var model = ConsoleRuntime.model
 
     var body: some Scene {
         MenuBarExtra {
@@ -149,7 +167,7 @@ struct MenuBarPopover: View {
                 FailClosedBand(title: band.title, text: band.body)
             }
             ServiceToggle(isOn: model.isServiceEnabled) { model.toggleService() }
-            Text("Turning it back on does not restore grants you revoked.")
+            Text("Start ExactMac when you log in. Turning this off does not revoke grants you already made.")
                 .font(.system(size: 10))
                 .foregroundStyle(Design.Ink.textTertiary)
             Rectangle().fill(Design.Ink.separator).frame(height: 1)
@@ -340,9 +358,9 @@ private struct ServiceToggle: View {
                 .frame(width: 38, height: 22)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("ExactMac service")
+            .accessibilityLabel("Start ExactMac when you log in")
             .accessibilityValue(isOn ? "On" : "Off")
-            .accessibilityHint("Turning it back on does not restore grants you revoked.")
+            .accessibilityHint("Turning this off does not revoke grants you already made.")
         }
         .padding(Design.Space.three)
         .background(
