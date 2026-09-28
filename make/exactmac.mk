@@ -51,13 +51,26 @@ EXACTMAC_SOCKET         ?= $(HOME)/Library/Caches/exactmac.sock
 # deliberate fail-closed configuration: a server without one refuses every consent-requiring
 # capability, and a server that went looking for a channel nobody configured would bind a
 # socket it had no reason to own.
+# The state directory, WHERE THE SERVER KEEPS ITS OWN STATE, and it is spelled out rather
+# than derived.
+#
+# IT USED TO BE `$(dir $(EXACTMAC_CONSOLE_SOCKET))`, on the reasoning that deriving it kept
+# the two in agreement. The console socket is gone — the app is one process and presents
+# consent itself — so the derivation was a live coupling to a retired path: renaming the
+# console socket, or a person "tidying up" a pathname they thought was dead, would have
+# silently moved the GRANT STORE and the audit log with it. A state directory that moves
+# because a different variable changed is a state directory that can be lost.
+#
+# The trailing slash is deliberate and load-bearing: it is used as a path PREFIX below
+# (`$(EXACTMAC_STATE_DIR)grant-store`), which is what `$(dir ...)` used to provide, and
+# dropping it would concatenate `~joeyc.exactmac`.
+EXACTMAC_STATE_DIR       ?= $(HOME)/.exactmac/
+# The retired console socket, kept only so a stale deployment's environment can still be
+# READ and diagnosed. NOTHING creates it, nothing connects to it, and it is deliberately
+# NOT handed to any generated plist: the server still parses it into a config field that no
+# production code reads, so passing it would be a deployment asserting a channel that the
+# architecture no longer has. See `exactmac.retire-launchagents`.
 EXACTMAC_CONSOLE_SOCKET  ?= $(HOME)/.exactmac/console.sock
-# The state directory, derived from the console socket so the two cannot disagree. It holds
-# the grant store, the audit log and the console token, and the server REFUSES to start
-# against a directory that is not 0700 — which it correctly refused against a `mkdir -p`
-# made at the shell's umask. Creating it is therefore this module's job, at the right mode,
-# not a side effect of whichever target happened to need the path first.
-EXACTMAC_STATE_DIR       := $(dir $(EXACTMAC_CONSOLE_SOCKET))
 EXACTMAC_STDOUT_LOG     ?= $(HOME)/Library/Logs/exactmac.log
 EXACTMAC_STDERR_LOG     ?= $(HOME)/Library/Logs/exactmac.error.log
 
@@ -84,9 +97,15 @@ EXACTMAC_GO_BIN_DIR ?= $(strip $(shell \
 		gobin="$${gopath%%:*}/bin"; \
 	fi; \
 	if [ -n "$$gobin" ]; then printf '%s' "$$gobin"; else printf '%s' "$(HOME)/go/bin"; fi))
-# The console's own product paths. A SEPARATE bundle identifier from the server's on
-# purpose: the two are separately signed, separately granted TCC access, and separately
-# launched, and a shared identifier would make one process's permissions the other's.
+# The console's own product paths. THE BUNDLE IDENTITY IS NO LONGER A SECURITY BOUNDARY: the
+# comment this replaced said the console keeps a separate identifier from the server's
+# "on purpose: the two are separately signed, separately granted TCC access, and separately
+# launched, and a shared identifier would make one process's permissions the other's". That
+# was true when there were two processes and is false now that the app hosts the server, so
+# the two ids have to merge — which costs the operator one re-grant of Accessibility and
+# Screen Recording, exactly once, at the migration. That cost is unavoidable whichever id
+# survives, because the server's own bundle is what disappears, and it is recorded in
+# blueprint.json gf-4 rather than argued about again.
 EXACTMAC_CONSOLE_APP_NAME         ?= ExactMacConsole
 EXACTMAC_CONSOLE_BUNDLE_ID        ?= com.exactmac.console
 EXACTMAC_CONSOLE_VERSION          ?= $(EXACTMAC_VERSION)
@@ -187,52 +206,16 @@ define EXACTMAC_CONSOLE_INFO_PLIST
 </plist>
 endef
 
-# The console's LaunchAgent. A LaunchAgent rather than a LaunchDaemon because
-# LocalAuthentication — the ceremony the prompt is built on — and the menu bar both belong
-# to the logged-in user's GUI session, and a daemon in another session could neither prompt
-# nor be seen.
-#
-# IT IS DELIBERATELY NOT KEEPALIVE-PAIRED WITH THE SERVER. The console supervises itself; the
-# server's own enable/disable is the operator's, through the menu bar item, and a console
-# that resurrected the server behind their back would be a control that fought itself.
-define EXACTMAC_CONSOLE_LAUNCHD_PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$(EXACTMAC_CONSOLE_APP_EXECUTABLE)</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>EXACTMAC_STATE_DIRECTORY</key>
-        <string>$(dir $(EXACTMAC_CONSOLE_SOCKET))</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
-    <key>ProcessType</key>
-    <string>Interactive</string>
-    <key>AssociatedBundleIdentifiers</key>
-    <array>
-        <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
-    </array>
-    <key>StandardOutPath</key>
-    <string>$(EXACTMAC_CONSOLE_STDOUT_LOG)</string>
-    <key>StandardErrorPath</key>
-    <string>$(EXACTMAC_CONSOLE_STDERR_LOG)</string>
-</dict>
-</plist>
-endef
+# THE CONSOLE'S LAUNCHAGENT TEMPLATE IS GONE, and its removal is the point rather than a
+# tidy-up. The template is a working recipe for the two-process architecture: a menu-bar
+# app, supervised by launchd, talking to a separately-supervised server over a console
+# socket. All three halves of that are retired — the app is one process, it registers
+# itself for start-at-login through `ServiceManagement.SMAppService.mainApp`, and there is
+# no console socket. A template that is merely unreferenced is worse than no template,
+# because it is copy-pasteable: the next person who reaches for "how do I install this"
+# would get a plist that resurrects the design this work removed, and nothing in it says so.
 
 export EXACTMAC_CONSOLE_INFO_PLIST_E := $(EXACTMAC_CONSOLE_INFO_PLIST)
-export EXACTMAC_CONSOLE_LAUNCHD_PLIST_E := $(EXACTMAC_CONSOLE_LAUNCHD_PLIST)
 export EXACTMAC_CONSOLE_APP_NAME EXACTMAC_CONSOLE_BUNDLE_ID EXACTMAC_CONSOLE_VERSION
 export EXACTMAC_CONSOLE_BUILD_VERSION EXACTMAC_CONSOLE_MIN_MACOS EXACTMAC_CONSOLE_APP_EXECUTABLE
 export EXACTMAC_CONSOLE_BUILD_LOG EXACTMAC_CONSOLE_STDOUT_LOG EXACTMAC_CONSOLE_STDERR_LOG
@@ -265,8 +248,6 @@ define EXACTMAC_LAUNCHD_PLIST
     <dict>
         <key>GRPC_UNIX_SOCKET</key>
         <string>$(EXACTMAC_SOCKET)</string>
-        <key>EXACTMAC_CONSOLE_SOCKET</key>
-        <string>$(EXACTMAC_CONSOLE_SOCKET)</string>
     </dict>
     <key>KeepAlive</key>
     <true/>
@@ -915,19 +896,31 @@ exactmac.console-register: ## Register the signed console .app with LaunchServic
 ##@ [Console] LaunchAgent
 
 .PHONY: exactmac.console-install
-exactmac.console-install: ## Retired: builds and signs the app, and refuses to install a LaunchAgent for it.
-	@# THE BUILD AND SIGN STEPS STILL RUN, because a bundle is still a thing this repository
-	@# produces. Only the LaunchAgent half is refused, and it is refused LOUDLY rather than
-	@# quietly dropped: an operator who typed this expecting an install should be told the
-	@# architecture changed, not handed a bundle with no explanation for why nothing appeared
-	@# in their login items.
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-build
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-app
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-sign
-	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-register
-	@printf '%s\n' 'Console app built, signed and registered.'
-	@printf '%s\n' 'NOT installing a console LaunchAgent: the app is one process now and registers itself for start-at-login through ServiceManagement.SMAppService.mainApp.'
-	@printf '%s\n' 'To retire the old one, run: gmake exactmac.retire-launchagents'
+exactmac.console-install: ## Build, sign, install and register the app, then retire the superseded LaunchAgents.
+	@# ONE ACTION, BECAUSE AN UPGRADE THAT NEEDS A SECOND COMMAND IS AN UPGRADE SOMEONE DOES
+	@# NOT FINISH. The old two-process install left a plist in ~/Library/LaunchAgents and a
+	@# job in the launchd domain, and the app has to take over from it: building the bundle
+	@# and leaving the old agent running leaves two processes contending for
+	@# ~/Library/Caches/exactmac.sock, and the second to arrive loses the pathname claim and
+	@# exits with a refusal an operator reads as a broken install.
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.all
+	@set -u; \
+	if ! codesign --verify --deep --strict "$(MACOS_BUNDLE_DIR)"; then printf '%s\n' 'ERROR: the assembled bundle failed signature verification.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(dir $(EXACTMAC_CONSOLE_APP_DIR))"; then printf '%s\n' 'ERROR: could not create the applications directory.' >&2; exit 1; fi; \
+	rm -rf "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_STAGING_DIR)"; \
+	if ! ditto "$(MACOS_BUNDLE_DIR)" "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to copy the app into Applications.' >&2; exit 1; fi; \
+	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: the installed bundle failed signature verification.' >&2; exit 1; fi; \
+	if ! "$(EXACTMAC_LSREGISTER)" -f "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: LaunchServices registration failed.' >&2; exit 1; fi; \
+	mkdir -p "$(EXACTMAC_STATE_DIR)"; chmod 700 "$(EXACTMAC_STATE_DIR)"; \
+	printf 'Installed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.retire-launchagents
+	@printf '%s\n' ''
+	@printf '%s\n' 'Launch it from Applications. It registers itself for start-at-login through'
+	@printf '%s\n' 'ServiceManagement.SMAppService.mainApp the first time you do, which macOS may'
+	@printf '%s\n' 'ask you to approve in System Settings > General > Login Items.'
+	@printf '%s\n' ''
+	@printf '%s\n' 'Accessibility and Screen Recording are granted to a bundle identity, and this is'
+	@printf '%s\n' 'the one change of identity, so macOS will ask for both again exactly once.'
 
 .PHONY: exactmac.console-launchd
 exactmac.console-launchd: ## Retired: refuses to write or bootstrap a console LaunchAgent.
@@ -941,52 +934,6 @@ exactmac.console-launchd: ## Retired: refuses to write or bootstrap a console La
 	printf '%s\n' '  to report what is installed:     gmake exactmac.retire-launchagents-status' >&2; \
 	printf '%s\n' '  to build and sign the app:      gmake macos.all' >&2; \
 	exit 1
-	@set -uo pipefail; \
-	validate_xml_value() { value="$$1"; name="$$2"; case "$$value" in *'<'*|*'>'*) printf 'ERROR: %s contains XML-significant characters.\n' "$$name" >&2; exit 1;; esac; }; \
-	validate_xml_value "$$EXACTMAC_CONSOLE_BUNDLE_ID" EXACTMAC_CONSOLE_BUNDLE_ID; \
-	validate_xml_value "$$EXACTMAC_CONSOLE_APP_EXECUTABLE" EXACTMAC_CONSOLE_APP_EXECUTABLE; \
-	validate_xml_value "$$EXACTMAC_CONSOLE_SOCKET" EXACTMAC_CONSOLE_SOCKET; \
-	if [ ! -x "$(EXACTMAC_CONSOLE_APP_EXECUTABLE)" ]; then \
-		printf '%s\n' 'ERROR: installed console app executable is missing.' >&2; \
-		exit 1; \
-	fi; \
-	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console signature verification failed.' >&2; exit 1; fi; \
-	if ! mkdir -p "$(dir $(EXACTMAC_CONSOLE_PLIST))" "$(dir $(EXACTMAC_CONSOLE_SOCKET))" "$(dir $(EXACTMAC_CONSOLE_STDOUT_LOG))" "$(dir $(EXACTMAC_CONSOLE_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create console LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
-	if ! chmod 700 "$(EXACTMAC_STATE_DIR)" || [ "$$(stat -f '%Lp' "$(EXACTMAC_STATE_DIR)")" != "700" ]; then \
-		printf '%s\n' 'ERROR: the state directory could not be restricted to 0700; the server will refuse to start against it.' >&2; \
-		exit 1; \
-	fi; \
-	plist_tmp=$$(mktemp "$(EXACTMAC_CONSOLE_PLIST).tmp.XXXXXX") || { printf '%s\n' 'ERROR: failed to create temporary console plist.' >&2; exit 1; }; \
-	cleanup_plist_tmp() { rm -f "$$plist_tmp"; }; \
-	trap cleanup_plist_tmp EXIT INT TERM; \
-	if ! printf '%s\n' "$$EXACTMAC_CONSOLE_LAUNCHD_PLIST_E" > "$$plist_tmp"; then printf '%s\n' 'ERROR: failed to write console LaunchAgent plist.' >&2; exit 1; fi; \
-	if ! plutil -lint "$$plist_tmp"; then printf '%s\n' 'ERROR: generated console LaunchAgent plist is invalid.' >&2; exit 1; fi; \
-	if ! chmod 600 "$$plist_tmp"; then printf '%s\n' 'ERROR: failed to secure temporary console plist.' >&2; exit 1; fi; \
-	console_service_absent() { output=$$(launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1); status=$$?; [ "$$status" -ne 0 ] && printf '%s\n' "$$output" | grep -Fq 'Could not find service'; }; \
-	if ! launchctl bootout "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
-		if ! console_service_absent; then printf '%s\n' 'ERROR: could not confirm console bootout; refusing replacement.' >&2; exit 1; fi; \
-	fi; \
-	attempt=0; \
-	while ! console_service_absent && [ "$$attempt" -lt 10 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
-	if ! console_service_absent; then \
-		printf '%s\n' 'ERROR: console LaunchAgent remained loaded; refusing replacement.' >&2; \
-		exit 1; \
-	fi; \
-	if ! mv "$$plist_tmp" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to install console LaunchAgent plist.' >&2; exit 1; fi; \
-	if ! launchctl enable "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; then printf '%s\n' 'ERROR: failed to enable console LaunchAgent.' >&2; exit 1; fi; \
-	if ! launchctl bootstrap "$(EXACTMAC_LAUNCH_DOMAIN)" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to bootstrap console LaunchAgent.' >&2; exit 1; fi; \
-	attempt=0; \
-	while [ "$$attempt" -lt "$(EXACTMAC_WAIT_ATTEMPTS)" ]; do \
-		if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>/dev/null | grep -q 'state = running'; then \
-			printf 'Console service ready: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
-			exit 0; \
-		fi; \
-		sleep 1; attempt=$$((attempt + 1)); \
-	done; \
-	printf '%s\n' 'ERROR: console LaunchAgent did not reach the running state.' >&2; \
-	launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1 | sed -n '1,20p' >&2 || true; \
-	exit 1
-
 .PHONY: exactmac.console-start
 exactmac.console-start: ## Retired: refuses to start a console LaunchAgent.
 	@# THE PLAINEST OF THE THREE, AND THE ONE MOST WORTH REFUSING. Starting a superseded job
@@ -999,13 +946,6 @@ exactmac.console-start: ## Retired: refuses to start a console LaunchAgent.
 	printf '%s\n' '  to retire the old LaunchAgent:  gmake exactmac.retire-launchagents' >&2; \
 	printf '%s\n' '  to report what is installed:     gmake exactmac.retire-launchagents-status' >&2; \
 	exit 1
-	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
-		printf 'Console service already loaded: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
-		exit 0; \
-	fi; \
-	if ! launchctl enable "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; then printf '%s\n' 'ERROR: failed to enable console service.' >&2; exit 1; fi; \
-	if ! launchctl bootstrap "$(EXACTMAC_LAUNCH_DOMAIN)" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to bootstrap console service.' >&2; exit 1; fi; \
-	printf 'Console service bootstrapped: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"
 
 .PHONY: exactmac.console-stop
 exactmac.console-stop: ## Stop the console service, keeping the bundle and the plist.
@@ -1021,30 +961,49 @@ exactmac.console-stop: ## Stop the console service, keeping the bundle and the p
 	fi
 
 .PHONY: exactmac.console-uninstall
-exactmac.console-uninstall: ## Remove the console bundle, LaunchAgent, plist, and socket.
+exactmac.console-uninstall: ## Remove the installed app and the socket. The state directory is left.
+	@# THE APP IS STOPPED FIRST, because it holds the socket pathname under a lock the kernel
+	@# releases only when it dies. Removing a claimed node underneath a live server leaves the
+	@# next start refusing to bind, and the refusal names a socket that is not there.
 	@set -u; \
-	$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-stop || exit 1; \
+	if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1; then \
+		osascript -e 'quit app "$(EXACTMAC_CONSOLE_APP_NAME)"' >/dev/null 2>&1 || true; \
+		attempt=0; \
+		while pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 && [ "$$attempt" -lt 5 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
+		if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1; then printf '%s\n' 'ERROR: the app is still running; quit it and run this again.' >&2; exit 1; fi; \
+	fi; \
 	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then "$(EXACTMAC_LSREGISTER)" -u "$(EXACTMAC_CONSOLE_APP_DIR)" >/dev/null 2>&1 || true; fi; \
 	rm -rf "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_STAGING_DIR)"; \
-	rm -f "$(EXACTMAC_CONSOLE_PLIST)"; \
-	rm -f "$(EXACTMAC_CONSOLE_SOCKET)"; \
+	rm -f "$(EXACTMAC_SOCKET)" "$(EXACTMAC_SOCKET).owner"; \
 	rm -f "$(EXACTMAC_CONSOLE_STDOUT_LOG)" "$(EXACTMAC_CONSOLE_STDERR_LOG)"; \
-	printf 'Console uninstalled: %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"
+	printf 'Removed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	printf '%s\n' ''; \
+	printf '%s\n' 'NOT removed: the login item the app registered for itself. It belongs to the'; \
+	printf '%s\n' 'bundle that created it and macOS removes it when the bundle goes, but it can'; \
+	printf '%s\n' 'also be turned off in System Settings > General > Login Items.'; \
+	printf '%s\n' ''; \
+	printf '%s\n' 'NOT removed: $(EXACTMAC_STATE_DIR)'; \
+	printf '%s\n' '  that is your grant store and decision log. Removing it is a separate,'; \
+	printf '%s\n' '  deliberate act: rm -rf $(EXACTMAC_STATE_DIR)'
 
 .PHONY: exactmac.console-status
-exactmac.console-status: ## Report the console's bundle, signature, service, and socket.
+# NO LAUNCHD PROBE HERE, and the omission is deliberate. There is no longer anything launchd
+# can be holding: the console IS the app, started by the operator opening it, and it
+# registers itself for start-at-login through SMAppService rather than through a job.
+# Reporting "Service: not loaded" every time would have described a service that cannot
+# exist, and would have sent nobody looking for the thing that actually decides it — the
+# login-item registration, which lives inside the app and is visible in System Settings.
+exactmac.console-status: ## Report the console's bundle, signature, and server socket.
 	@set -u; \
 	printf '  App:       %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
 	printf '  Bundle ID: %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
-	printf '  Plist:     %s\n' "$(EXACTMAC_CONSOLE_PLIST)"; \
-	printf '  Socket:    %s\n' "$(EXACTMAC_CONSOLE_SOCKET)"; \
+	printf '  Server socket: %s\n' "$(EXACTMAC_SOCKET)"; \
+	printf '  State dir:     %s\n' "$(EXACTMAC_STATE_DIR)"; \
 	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then \
 		if codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)" 2>/dev/null; then printf '  Signature: verified\n'; else printf '  Signature: MISSING OR INVALID\n'; fi; \
 		ls -ld "$(EXACTMAC_CONSOLE_APP_DIR)"; \
 	else printf '  Bundle:    not installed\n'; fi; \
-	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
-		launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>/dev/null | grep -E '^\s*(state|pid) = ' || true; \
-	else printf '  Service:   not loaded\n'; fi
+	printf '  Start at login:  ask the app, or System Settings > General > Login Items\n'
 
 ##@ [Console] LaunchAgent Retirement
 
