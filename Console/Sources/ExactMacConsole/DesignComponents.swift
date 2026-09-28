@@ -374,7 +374,15 @@ struct ScrollRail: View {
     var body: some View {
         if let thumb = Self.thumb(for: geometry) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(Design.Ink.separator)
+                // textSecondary AND NOT separator, which is what the design drew and what
+                // this first drew. MEASURED: separator on surfaceSunken is 1.27:1 in light
+                // and 1.62:1 in dark, and WCAG 1.4.11 asks 3:1 of a non-text affordance, so
+                // the rail was effectively invisible — a scroll indicator nobody can see is
+                // not an indicator. controlBorder was tried and is 2.89:1 / 2.77:1, still
+                // short. textSecondary is 5.43:1 light and 7.77:1 dark, and reads as a
+                // control rather than as a hairline. The design is updated to match; a test
+                // asserts the ratio in both schemes so it cannot quietly go back.
+                .fill(Design.Ink.textSecondary)
                 .frame(width: Self.width, height: thumb.height)
                 .offset(y: Self.inset + thumb.offset)
                 .frame(maxWidth: .infinity, alignment: .trailing)

@@ -153,6 +153,59 @@ struct PromptScrollTests {
         #expect(abs(atBottom.offset - (track - atBottom.height)) < 0.01)
         #expect(abs(atBottom.height - atTop.height) < 0.01, "scrolling moves it, not resizes it")
     }
+
+    @Test
+    func `The rail is visible enough to be an affordance`() {
+        // FOUND BY LOOKING AT THE RENDER, which is the only reason this is a test and not a
+        // comment. The rail was drawn in `separator`, which is what the .fig drew and what
+        // this first drew, and separator on surfaceSunken measures 1.27:1 in light and 1.62:1
+        // in dark. WCAG 1.4.11 asks 3:1 of a non-text control. So the affordance that exists
+        // to say "there is more, and here is where you are in it" was drawn at a contrast at
+        // which it is not there — and a cut with an invisible rail is the defect E9 was
+        // reported for, wearing a fix.
+        //
+        // MEASURED from the resolved colours rather than asserted as constants, because a
+        // token can change and a test that reads the token's NAME proves nothing.
+        var measured: [(scheme: String, ratio: CGFloat)] = []
+        for name in [NSAppearance.Name.aqua, .darkAqua] {
+            guard let appearance = NSAppearance(named: name) else {
+                Issue.record("the \(name.rawValue) appearance did not resolve")
+                continue
+            }
+            appearance.performAsCurrentDrawingAppearance {
+                measured.append((
+                    name.rawValue,
+                    Self.contrast(Design.Ink.textSecondary, Design.Ink.surfaceSunken),
+                ))
+            }
+        }
+        #expect(measured.count == 2, "both schemes have to be measured or this proves nothing")
+        for entry in measured {
+            let hundredths = (entry.ratio * 100).rounded() / 100
+            #expect(
+                entry.ratio >= 3,
+                "the rail is \(hundredths):1 in \(entry.scheme), and an affordance nobody can see is not one",
+            )
+        }
+    }
+
+    /// WCAG relative-luminance contrast between two SwiftUI colours, resolved in the current
+    /// appearance. Reading the COLOUR and not the token name is the point: a test that
+    /// asserted a token existed would still pass if the token changed to something
+    /// invisible, which is exactly what happened here.
+    private static func contrast(_ foreground: Color, _ background: Color) -> CGFloat {
+        func channel(_ value: CGFloat) -> CGFloat {
+            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        func luminance(_ color: Color) -> CGFloat? {
+            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+            return 0.2126 * channel(rgb.redComponent)
+                + 0.7152 * channel(rgb.greenComponent)
+                + 0.0722 * channel(rgb.blueComponent)
+        }
+        guard let a = luminance(foreground), let b = luminance(background) else { return 0 }
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
 }
 
 private extension CGFloat {
