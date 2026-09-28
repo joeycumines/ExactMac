@@ -626,7 +626,25 @@ struct AuthorizationInterceptor: ServerInterceptor {
         // A decision the ceremony was required for, without the ceremony, is a denial. The
         // check is here rather than inside the engine because the engine is pure and cannot
         // know whether a ceremony happened.
-        if decision.biometric.reason != nil, !answer.biometricObtained {
+        //
+        // THE REQUIREMENT OF THE OPTION THAT WAS SELECTED, NOT OF THE ONE THE PROMPT
+        // FOCUSED, and this is a security property rather than a detail. `decision.biometric`
+        // is the requirement for the default option, and the default is usually the
+        // narrowest: a clipboard read scoped to one application is routine and needs no
+        // ceremony, while `allowGlobalPersistent` for the same request needs one. An
+        // answer selecting the global option therefore passed a check that was reading the
+        // narrow option's bar, and the grant was issued with no fingerprint — defeating the
+        // BREADTH x PERSISTENCE rule the engine exists to enforce. An adversarial review of
+        // this work found it; it is the same shape as the defect
+        // `AuthorizationPolicy.swift` records having fixed once already, one layer up.
+        //
+        // AN ANSWER NAMING AN OPTION THIS ENGINE DID NOT OFFER CANNOT LOWER THE BAR: the
+        // floor is the focused option's own requirement, so an unrecognised or absent
+        // selection is judged against the decision rather than against nothing.
+        let selectedRequirement = answer.selected
+            .flatMap { kind in decision.offeredDecisions.first { $0.kind == kind }?.biometric }
+            ?? decision.biometric
+        if selectedRequirement.reason != nil, !answer.biometricObtained {
             throw AuthorizationDenial(
                 reason: .biometricUnavailable,
                 capability: request.capability,

@@ -381,6 +381,101 @@ final class AuthorizationInterceptorTests: XCTestCase {
         try PublicRequestDescriptorPolicy.load()
     }
 
+    /// A CEREMONY IS REQUIRED FOR THE OPTION THAT WAS SELECTED, NOT FOR THE ONE THE PROMPT
+    /// FOCUSED.
+    ///
+    /// The prompt's default is the NARROWEST option, and the narrowest option is the one most
+    /// likely to need no ceremony — a clipboard read scoped to one application is routine,
+    /// because BREADTH x PERSISTENCE is what escalates. So a check that reads the DECISION's
+    /// requirement is reading the low bar while the operator has selected the one with the
+    /// high bar, and a global eight-hour grant is issued with no fingerprint. An adversarial
+    /// review of this work found it; it is the same shape as the defect
+    /// `AuthorizationPolicy.swift` records having already fixed, one layer up.
+    func testTheCeremonyIsRequiredForTheSelectedOptionNotTheFocusedOne() async throws {
+        // PRECONDITION, and it is the whole point: the FOCUSED option needs no ceremony and
+        // the SELECTED one does. Without this the test could pass for the wrong reason.
+        let identity = CallerIdentity(
+            processIdentifier: 4242,
+            effectiveUserIdentifier: 501,
+            parentProcessIdentifier: nil,
+            code: CodeIdentity(
+                executablePath: "/usr/local/bin/exactmac",
+                bundleIdentifier: nil,
+                designatedRequirement: "identifier \"x\" and anchor apple",
+                signature: .signedAndValid,
+            ),
+            isFullyResolved: true,
+            ancestors: [],
+            isAncestryTruncated: false,
+        )
+        let request = AuthorizationRequest(
+            id: AuthorizationRequestID(rawValue: "broad-1"),
+            rpcName: "\(RPCAuthorizationMap.serviceName)/GetClipboard",
+            capability: .clipboardRead,
+            // A GLOBAL target, because that is the only case the policy offers
+            // `allowGlobalPersistent` in at all: "a global grant for a request that was about
+            // one application is a decision the operator did not think they were making."
+            scope: AuthorizationScope(application: .any),
+            argumentSummary: "the clipboard",
+            agentReason: "because the test says so",
+            origin: .mcpProxy,
+        )
+        let decision = AuthorizationPolicy.evaluate(
+            request: request,
+            identity: identity,
+            grants: [],
+            envelopes: [],
+            posture: .balanced,
+            context: .unixSocket(),
+            now: MonotonicInstant(nanoseconds: 1_000_000_000_000),
+        )
+        XCTAssertNil(
+            decision.biometric.reason,
+            "the narrow default must need no ceremony here, or the test proves nothing",
+        )
+        let broad = decision.offeredDecisions.first { $0.kind == .allowGlobalPersistent }
+        XCTAssertNotNil(broad, "the broad option must be on offer or there is no bar to pass under")
+        XCTAssertNotNil(
+            broad?.biometric.reason,
+            "the broad option must require a ceremony, or there is no bar to pass under",
+        )
+
+        var runtime = try AuthorizationRuntime.unixSocket(
+            descriptorPolicy: Self.loadPolicy(),
+            isConsoleReachable: true,
+            peerEvidence: .fixed(Self.thisProcess),
+        )
+        runtime.consent = BroadApprovalWithoutCeremonyBroker()
+        let interceptor = AuthorizationInterceptor(runtime: runtime, counters: AuthorizationCounters())
+        do {
+            _ = try await interceptor.intercept(
+                request: Self.requestWithAgentAndOrigin(
+                    Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
+                    reason: "because the test says so",
+                ),
+                context: Self.context(method: "\(RPCAuthorizationMap.serviceName)/GetClipboard"),
+                next: { _, _ in
+                    throw RPCError(code: .internalError, message: "the handler was reached")
+                },
+            ) as StreamingServerResponse<Exactmac_V1_Clipboard>
+            XCTFail("a global persistent grant was issued with no ceremony")
+        } catch {
+            // The refusal crosses the interceptor boundary as an RPCError, so the reason is
+            // carried in the message rather than in a typed case. Asserting on the reason
+            // STRING is what the other refusal tests in this file do, and it is enough: the
+            // failure mode is the handler being reached at all.
+            let text = "\(error)"
+            XCTAssertTrue(
+                text.contains("biometricUnavailable"),
+                "expected a biometric refusal, got \(text)",
+            )
+            XCTAssertFalse(
+                text.contains("unauthenticatedPeer"),
+                "the caller must be resolved, or the test would pass without reaching the check",
+            )
+        }
+    }
+
     /// Drives one call through the interceptor and reports whether the handler was entered.
     @discardableResult
     private static func drive(
@@ -415,6 +510,28 @@ final class AuthorizationInterceptorTests: XCTestCase {
     ) -> StreamingServerRequest<Input> {
         StreamingServerRequest(
             metadata: Metadata(),
+            messages: RPCAsyncSequence<Input, any Error>(wrapping: AsyncThrowingStream { continuation in
+                continuation.yield(message)
+                continuation.finish()
+            }),
+        )
+    }
+
+    /// A request carrying BOTH the agent's reason and the MCP origin, because without them
+    /// the policy escalates EVERY option to `.high` and asks for a ceremony even on the
+    /// narrowest one. A test that wanted to show the narrow option needs no ceremony while
+    /// the broad one does MUST supply them, or it is testing a different scenario and passes
+    /// for the wrong reason — which it did, the first time, until the fix was reverted and
+    /// the test stayed green.
+    private static func requestWithAgentAndOrigin<Input: Sendable>(
+        _ message: Input,
+        reason: String,
+    ) -> StreamingServerRequest<Input> {
+        var metadata = Metadata()
+        metadata.addString(reason, forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        metadata.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
+        return StreamingServerRequest(
+            metadata: metadata,
             messages: RPCAsyncSequence<Input, any Error>(wrapping: AsyncThrowingStream { continuation in
                 continuation.yield(message)
                 continuation.finish()
@@ -504,6 +621,7 @@ private struct MislabelledAnswerBroker: ConsentBroker {
 /// Answers correctly, with or without the ceremony the decision demanded.
 private struct ApprovingBroker: ConsentBroker {
     var obtainsCeremony: Bool
+    var selects: OfferedDecision.Kind?
 
     func obtainConsent(
         for request: AuthorizationRequest,
@@ -513,9 +631,29 @@ private struct ApprovingBroker: ConsentBroker {
         ConsentAnswer(
             requestID: request.id,
             isApproved: true,
-            selected: .allowOnce,
+            selected: selects ?? .allowOnce,
             note: "the test approved this",
             biometricObtained: obtainsCeremony,
+        )
+    }
+}
+
+/// Approves the broad option WITHOUT a ceremony, which is the shape of the defect the test
+/// named `testTheCeremonyIsRequiredForTheSelectedOption` drives: the prompt's default is the
+/// narrowest option and is usually the one needing no ceremony, so approving while selecting
+/// the broad option passes a check that was reading the narrow option's bar.
+private struct BroadApprovalWithoutCeremonyBroker: ConsentBroker {
+    func obtainConsent(
+        for request: AuthorizationRequest,
+        identity _: CallerIdentity,
+        decision _: AuthorizationDecision,
+    ) async -> ConsentAnswer? {
+        ConsentAnswer(
+            requestID: request.id,
+            isApproved: true,
+            selected: .allowGlobalPersistent,
+            note: nil,
+            biometricObtained: false,
         )
     }
 }
