@@ -372,6 +372,7 @@ struct ProductionAuthorizationRuntime {
     static func make(
         config: ServerConfig,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        consent: ConsentAnswering? = nil,
     ) throws -> ProductionAuthorizationRuntime {
         try ExactMacRuntimePaths.prepareStateDirectory(environment: environment)
 
@@ -402,18 +403,21 @@ struct ProductionAuthorizationRuntime {
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             grants: GrantStoreSupply(store: store),
-            // NOBODY TO ASK, and that is production's actual state: the operator interface is
-            // hosted in this process and the host has not installed one yet. A nil handler
-            // denies, so the server starts and refuses every consent-requiring capability
-            // rather than granting anything it could not have shown an operator — which is
-            // also why this is not an error. A service that is down is harder to diagnose than
-            // one that is up and denying.
-            consent: nil,
+            // A NIL HANDLER DENIES, and that is the standalone server's actual state: it
+            // installs nothing, so it starts and refuses every consent-requiring capability
+            // rather than granting anything it could not have shown an operator. It is not
+            // an error, because a service that is down is harder to diagnose than one that is
+            // up and denying. A HOST passes its own handler and gets the same fail-closed
+            // behaviour for a request it declines to answer.
+            consent: consent,
             issuance: GrantStoreIssuance(store: store),
             clock: clock,
             posture: config.defaultPosture,
             consentTimeout: consentTimeout,
-            isConsoleReachable: AuthorizationRuntime.noOperatorInterfaceIsInstalled,
+            // Reachability now agrees with the handler: a process that was given something to
+            // ask with can ask, and one that was given nothing cannot. Deriving the two from
+            // the same value is what stops them failing closed independently.
+            isConsoleReachable: consent != nil,
             peerEvidence: .registry(registry),
             audit: AuditDecisionRecorder(audit: audit),
             auditRequired: true,

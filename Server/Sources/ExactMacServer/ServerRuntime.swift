@@ -318,6 +318,58 @@ func serve(
 
 // MARK: - Entry point
 
+/// Runs the server in a host process that brings its own operator interface.
+///
+/// THIS IS THE APP'S ENTRY POINT and `main()` is the standalone one, and the difference is
+/// one argument: a host has somewhere to put a consent prompt, so it hands that place over
+/// as a `ConsentAnswering`, and the server asks through it. `main()` hands over nothing, so
+/// every consent-requiring capability denies — which is the correct behaviour for a server
+/// running on its own with nobody to ask.
+///
+/// NOT `main()` WITH A FLAG, because the two have genuinely different jobs and a flag would
+/// make "am I the app or the server" a question asked at runtime rather than answered by
+/// the entry point the process chose to call.
+@MainActor
+public func serveHosted(consent: ConsentAnswering?) async throws {
+    _ = setServerProcessUmask()
+    let config = ServerConfig.fromEnvironment()
+    logger.info("Hosted server starting; operator interface: \(consent != nil ? "installed" : "absent", privacy: .public)")
+
+    guard let socketPath = config.unixSocketPath else {
+        // A HOST WITH NO UNIX SOCKET HAS NO PRINCIPAL. TCP has no owning user to authenticate,
+        // so it is the reduced posture by construction and a host that reached here cannot
+        // consent for anything regardless of the handler it was given.
+        logger.warning(
+            "Hosted server: no Unix socket is configured, so the reduced unauthenticated posture applies and every consent-requiring capability is denied.",
+        )
+        let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
+        try await serve(
+            config: config,
+            transport: HTTP2ServerTransport.Posix(
+                address: .ipv4(host: config.listenAddress, port: config.port),
+                transportSecurity: .plaintext,
+            ),
+            authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
+            listenerFactory: nil,
+        )
+        return
+    }
+
+    let runtime = try ProductionAuthorizationRuntime.make(config: config, consent: consent)
+    let listener = PeerIdentifyingListenerFactory(
+        eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
+        socketPath: socketPath,
+        registry: runtime.registry,
+    )
+    logger.info("Hosted server listening on a Unix socket: \(socketPath, privacy: .private)")
+    try await serve(
+        config: config,
+        transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
+        authorizationRuntime: runtime.authorizationRuntime,
+        listenerFactory: listener,
+    )
+}
+
 /// Chooses the listener, and with it the authorization posture, before anything is built.
 ///
 /// THE VARIANT IS CHOSEN HERE AND NOWHERE ELSE, because the two differ in a security

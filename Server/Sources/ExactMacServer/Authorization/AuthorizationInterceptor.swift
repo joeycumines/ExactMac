@@ -60,13 +60,29 @@ struct NoStandingGrants: GrantSupply {
 /// and it carries the biometric outcome because "a biometric was required" and "a
 /// biometric was obtained" are different facts.
 public struct ConsentAnswer: Sendable, Equatable {
-    var requestID: AuthorizationRequestID
-    var isApproved: Bool
-    var selected: OfferedDecision.Kind?
-    var note: String?
+    public var requestID: AuthorizationRequestID
+    public var isApproved: Bool
+    public var selected: OfferedDecision.Kind?
+    public var note: String?
     /// Only true when a ceremony was actually performed for THIS request. C6's nonce binds
     /// the two, so a success cannot be replayed onto another decision.
-    var biometricObtained: Bool = false
+    public var biometricObtained: Bool = false
+
+    /// A host constructs the answer it hands back to the server that asked, and the
+    /// memberwise initialiser of a public struct is internal, so this is the seam.
+    public init(
+        requestID: AuthorizationRequestID,
+        isApproved: Bool,
+        selected: OfferedDecision.Kind? = nil,
+        note: String? = nil,
+        biometricObtained: Bool = false,
+    ) {
+        self.requestID = requestID
+        self.isApproved = isApproved
+        self.selected = selected
+        self.note = note
+        self.biometricObtained = biometricObtained
+    }
 }
 
 /// Whom the interceptor asks, and what they said.
