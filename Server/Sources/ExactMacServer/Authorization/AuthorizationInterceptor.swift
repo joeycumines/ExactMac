@@ -18,11 +18,7 @@ protocol MonotonicClock: Sendable {
 /// end a deadline, which is the same reason grant expiry is monotonic.
 struct SystemMonotonicClock: MonotonicClock {
     func now() -> MonotonicInstant {
-        var instant = timespec()
-        clock_gettime(CLOCK_MONOTONIC, &instant)
-        let seconds = UInt64(clamping: instant.tv_sec)
-        let nanos = UInt64(clamping: instant.tv_nsec)
-        return MonotonicInstant(nanoseconds: seconds &* 1_000_000_000 &+ nanos)
+        MonotonicInstant.now()
     }
 }
 

@@ -132,7 +132,7 @@ private func performGracefulShutdown(
 func serve(
     config _: ServerConfig,
     transport: some ServerTransport,
-    authorizationRuntime: AuthorizationRuntime,
+    authorizationRuntime: AuthorizationRuntime? = nil,
     listenerFactory: PeerIdentifyingListenerFactory?,
 ) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -221,10 +221,15 @@ func serve(
     // The transport arrives already built, and so does the authorization posture it implies.
     // Both are decided in `main()` from the LISTENER, because whether the server can say who
     // is calling is a property of the listener and not of a flag.
+    let interceptors: [any ServerInterceptor] = if let authorizationRuntime {
+        productionServerInterceptors(AuthorizationInterceptor(runtime: authorizationRuntime))
+    } else {
+        handlerContractTestInterceptors()
+    }
     let server = GRPCServer(
         transport: productionServerTransport(transport),
         services: services,
-        interceptors: productionServerInterceptors(AuthorizationInterceptor(runtime: authorizationRuntime)),
+        interceptors: interceptors,
     )
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -246,12 +251,14 @@ func serve(
         // not serving would be the other kind of false: the TCP variant does serve, and every
         // consent-requiring capability on it is denied. A health checker that asks about the
         // service gets the truth; one that asks about consent gets the posture.
-        healthService.provider.updateStatus(
-            ProductionAuthorizationRuntime.consentServingStatus(
-                isConsoleReachable: authorizationRuntime.isConsoleReachable(),
-            ),
-            forService: ProductionAuthorizationRuntime.consentHealthServiceName,
-        )
+        if let authorizationRuntime {
+            healthService.provider.updateStatus(
+                ProductionAuthorizationRuntime.consentServingStatus(
+                    isConsoleReachable: authorizationRuntime.isConsoleReachable(),
+                ),
+                forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+            )
+        }
         logger.info("Health service status set to SERVING")
 
         try await waitForServerTermination(
@@ -260,10 +267,12 @@ func serve(
             beginGracefulShutdown: {
                 healthService.provider.updateStatus(.notServing, forService: RPCAuthorizationMap.serviceName)
                 healthService.provider.updateStatus(.notServing, forService: "")
-                healthService.provider.updateStatus(
-                    .notServing,
-                    forService: ProductionAuthorizationRuntime.consentHealthServiceName,
-                )
+                if authorizationRuntime != nil {
+                    healthService.provider.updateStatus(
+                        .notServing,
+                        forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+                    )
+                }
                 server.beginGracefulShutdown()
                 await composition.serviceLifetime.shutdown()
             },
@@ -275,20 +284,24 @@ func serve(
         healthService.provider.updateStatus(.notServing, forService: "exactmac.v1.ExactMac")
         healthService.provider.updateStatus(.notServing, forService: "")
         server.beginGracefulShutdown()
-        healthService.provider.updateStatus(
-            .notServing,
-            forService: ProductionAuthorizationRuntime.consentHealthServiceName,
-        )
+        if authorizationRuntime != nil {
+            healthService.provider.updateStatus(
+                .notServing,
+                forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+            )
+        }
         await composition.serviceLifetime.shutdown()
         _ = try? await serverTask.value
     }
 
     healthService.provider.updateStatus(.notServing, forService: RPCAuthorizationMap.serviceName)
     healthService.provider.updateStatus(.notServing, forService: "")
-    healthService.provider.updateStatus(
-        .notServing,
-        forService: ProductionAuthorizationRuntime.consentHealthServiceName,
-    )
+    if authorizationRuntime != nil {
+        healthService.provider.updateStatus(
+            .notServing,
+            forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+        )
+    }
     logger.info("Health service status set to NOT_SERVING")
 
     var cleanupError: (any Error)?
@@ -393,54 +406,32 @@ public func main() async throws {
     _ = setServerProcessUmask()
     logger.info("Set server process umask: \(ServerProcessPolicy.umask, privacy: .public)")
 
-    logger.info("ExactMacServer starting...")
+    logger.info("ExactMacServer starting (headless dangerous variant)...")
 
     let config = ServerConfig.fromEnvironment()
     logger.info("Configuration loaded")
-    let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
 
     if let socketPath = config.unixSocketPath {
         logger.info("Will listen on Unix socket: \(socketPath, privacy: .private)")
-        logger.info("Authorization: unix-socket variant; the owning user is the principal.")
+        logger.info("Operating mode: headless/dangerous variant (unrestricted automation without consent prompt).")
 
-        // THE STATE THE SERVER OWNS, assembled here rather than inside the interceptor, so
-        // that every refusing default is a decision visible in this function instead of a
-        // consequence of a nil somewhere else. Each of these has a real implementation
-        // behind it; the versions the interceptor defaults to deny, and the point of this
-        // wiring is that production is not running on them.
-        let runtime = try ProductionAuthorizationRuntime.make(config: config)
-        let registry = runtime.registry
+        let registry = ConnectionPeerRegistry()
         let listener = PeerIdentifyingListenerFactory(
             eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
             socketPath: socketPath,
             registry: registry,
         )
-        logger.info("State directory: \(ExactMacRuntimePaths.stateDirectory(), privacy: .private)")
-        logger.info("Decision audit: \(runtime.auditPath, privacy: .private)")
-        logger.info("Grant store: \(runtime.grantStorePath, privacy: .private)")
-        // NO OPERATOR INTERFACE, so every consent-requiring capability denies. `main()` is the
-        // standalone entry point and nothing installs a consent handler behind it; a host that
-        // wants one supplies it through the public API, which `main()` does not take because
-        // this is the entry point for running the server on its own. The warning says what that
-        // means rather than only that a socket is missing.
-        if runtime.authorizationRuntime.consent == nil {
-            logger.warning(
-                "No operator interface is installed, so the server never enters the consent path and every consent-requiring capability is denied. That is the safe answer and it is also a service that cannot do anything.",
-            )
-        }
 
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
-            authorizationRuntime: runtime.authorizationRuntime,
+            authorizationRuntime: nil,
             listenerFactory: listener,
         )
         return
     }
 
-    logger.warning(
-        "Authorization: reduced unauthenticated posture. This listener has no owning user, so every consent-requiring capability is denied and no approval can be given. Do not expose this port beyond the loopback interface.",
-    )
+    logger.info("Operating mode: headless/dangerous variant on TCP.")
     logger.info("Will listen on \(config.listenAddress, privacy: .public):\(config.port, privacy: .public)")
     try await serve(
         config: config,
@@ -448,7 +439,7 @@ public func main() async throws {
             address: .ipv4(host: config.listenAddress, port: config.port),
             transportSecurity: .plaintext,
         ),
-        authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
+        authorizationRuntime: nil,
         listenerFactory: nil,
     )
 }

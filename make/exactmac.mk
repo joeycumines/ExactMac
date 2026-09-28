@@ -389,12 +389,7 @@ exactmac.build-server: ## Build the release Swift server and its resource bundle
 	# THE PRODUCT, EXPLICITLY. A bare `swift build` builds every product including the
 	# `ExactMacServer` library, which produces no runnable file, so the binary check below
 	# would fail against a build that had in fact succeeded.
-	# The product name reaches the shell as an argument, so it is passed through the
-	# environment rather than interpolated into the recipe text. A `$(...)` inside a recipe
-	# is expanded by make, and `exactmac-server` is not a make variable, so the shell was
-	# receiving the literal text with make's own suffix syntax already consumed: `$(EXACTMAC_
-	# SERVER_PRODUCT)` read as the two-character variable `$(EXACTMAC_` followed by
-	# `SERVER_PRODUCT)`, which expanded to nothing and left `-product` behind.
+	# The product name reaches the shell as an exported variable rather than inline expansion.
 	EXACTMAC_SERVER_PRODUCT="$(EXACTMAC_SERVER_PRODUCT)"; export EXACTMAC_SERVER_PRODUCT; \
 	if ! swift build --configuration release --product "$$EXACTMAC_SERVER_PRODUCT" 2>&1 | tee "$(EXACTMAC_SERVER_BUILD_LOG)" | tail -n 40; then printf '%s\n' 'ERROR: Swift server build failed.' >&2; exit 1; fi; \
 	test -x "$(EXACTMAC_SERVER_BIN)" || { printf 'ERROR: server binary missing: %s\n' "$(EXACTMAC_SERVER_BIN)" >&2; exit 1; }; \

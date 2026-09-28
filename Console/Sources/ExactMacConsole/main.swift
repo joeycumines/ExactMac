@@ -74,6 +74,14 @@ func obtainConsent(
     ) else {
         return nil
     }
+    let proof: BiometricProof? = answer.biometricObtained
+        ? BiometricProof(
+            requestID: request.id,
+            nonce: decision.ceremonyNonce ?? request.id.rawValue,
+            decidedAt: MonotonicInstant.now(),
+            expiresAt: MonotonicInstant.now().advanced(by: .seconds(120)),
+        )
+        : nil
     return ConsentAnswer(
         // THE REQUEST'S OWN ID, not a synthesised one. It is what the answer is bound to,
         // and the server re-checks it against the request it asked about.
@@ -84,7 +92,7 @@ func obtainConsent(
         // because the server parses `allowOnce` and not `once`.
         selected: answer.isApproved ? OfferedDecision.Kind(rawValue: answer.kind.serverValue) : nil,
         note: answer.note,
-        biometricObtained: answer.biometricObtained,
+        ceremonyProof: proof,
     )
 }
 

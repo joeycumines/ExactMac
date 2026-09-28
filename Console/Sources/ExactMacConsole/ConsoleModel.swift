@@ -665,7 +665,7 @@ struct PendingRequest: Equatable {
         // replay is not representable, so a separate nonce would be a value nothing checked.
         requestID = request.id.rawValue
         processIdentifier = identity.processIdentifier
-        nonce = request.id.rawValue
+        nonce = decision.ceremonyNonce ?? request.id.rawValue
         requestDigest = request.id.rawValue
         rpcName = request.rpcName
         capability = request.capability.rawValue

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // The authorization domain model.
@@ -18,6 +19,18 @@ import Foundation
 /// extend a grant the operator already let expire. Every value that expires carries one.
 public struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
     public let nanoseconds: UInt64
+
+    public init(nanoseconds: UInt64) {
+        self.nanoseconds = nanoseconds
+    }
+
+    public static func now() -> MonotonicInstant {
+        var instant = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &instant)
+        let seconds = UInt64(clamping: instant.tv_sec)
+        let nanos = UInt64(clamping: instant.tv_nsec)
+        return MonotonicInstant(nanoseconds: seconds &* 1_000_000_000 &+ nanos)
+    }
 
     public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.nanoseconds < rhs.nanoseconds

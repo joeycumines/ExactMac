@@ -49,6 +49,18 @@ public struct BiometricProof: Sendable, Equatable, Hashable {
     /// The ceremony is a moment, not a licence. A proof older than this is refused.
     public var expiresAt: MonotonicInstant
 
+    public init(
+        requestID: AuthorizationRequestID,
+        nonce: String,
+        decidedAt: MonotonicInstant,
+        expiresAt: MonotonicInstant,
+    ) {
+        self.requestID = requestID
+        self.nonce = nonce
+        self.decidedAt = decidedAt
+        self.expiresAt = expiresAt
+    }
+
     /// Whether this proof speaks for `request` at `now`.
     ///
     /// ALL THREE conditions, and each is load-bearing: the request binding stops one decision
