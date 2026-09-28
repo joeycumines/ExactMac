@@ -216,7 +216,14 @@ final class ConsoleModel {
         // already timed out whenever they are not looking at the menu bar, which is almost
         // always. The window orders front WITHOUT activating: the decision is on screen and
         // the operator's keystrokes still go where they were going.
-        windows.present(.approval, title: "ExactMac needs your approval") {
+        windows.present(
+            .approval,
+            title: "ExactMac needs your approval",
+            // The prompt's OWN width, not the window's default. It is a 420pt card, and
+            // putting it in a 720pt window centred it with 150pt of empty chrome either
+            // side, which is not a layout anyone chose.
+            width: Design.Layout.promptWidth,
+        ) {
             approvalWindow(for: request)
         }
     }
@@ -283,7 +290,12 @@ final class ConsoleModel {
         // The operator clicked it, so it comes forward WITH the application: they asked for
         // this window, and making them click again to raise it would be a worse answer than
         // the one they gave.
-        windows.present(.approval, title: "ExactMac needs your approval", activates: true) {
+        windows.present(
+            .approval,
+            title: "ExactMac needs your approval",
+            width: Design.Layout.promptWidth,
+            activates: true,
+        ) {
             approvalWindow(for: request)
         }
     }

@@ -212,69 +212,77 @@ struct SettingsWindow: View {
             subtitle: "Owner-private · stored under your own account",
             footer: Color.clear.frame(height: 0),
         ) {
-            VStack(alignment: .leading, spacing: Design.Space.chip) {
-                SectionLabel(text: "POSTURE")
-                PostureControl(selection: $posture)
-                Text(
-                    "The default. Friction scales with what a grant would actually permit, so "
-                        + "a narrow one asks nothing and a broad one asks for a biometric.",
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(Design.Ink.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-                SectionLabel(text: "BIOMETRIC REQUIREMENTS")
-                ForEach(Self.biometricRows) { SettingRow(setting: $0) }
-
-                SectionLabel(text: "HIGH-CONSEQUENCE TARGETS")
-                VStack(alignment: .leading, spacing: Design.Space.one) {
-                    Text("Applications that always escalate")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Design.Ink.textPrimary)
+            // SCROLLS, because this surface is taller than a screen-sized window and the
+            // header and the rows below it were both off the bottom with nothing to reach
+            // them. The operator's copy describes the last two sections — the switch that
+            // "reveals what is permitted" and the reset — as security controls, and neither
+            // was visible.
+            ScrollView {
+                VStack(alignment: .leading, spacing: Design.Space.chip) {
+                    SectionLabel(text: "POSTURE")
+                        .padding(.top, 1)
+                    PostureControl(selection: $posture)
                     Text(
-                        "Requests against these require a biometric whatever their breadth, "
-                            + "and are never covered by an existing grant. Consequence is a "
-                            + "fact about your life, so you name it.",
+                        "The default. Friction scales with what a grant would actually permit, so "
+                            + "a narrow one asks nothing and a broad one asks for a biometric.",
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(Design.Ink.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: Design.Space.chip) {
-                        ForEach(targets, id: \.self) { TargetChip(title: $0) }
-                        TargetChip(title: "Add an application", isPlaceholder: true)
+
+                    SectionLabel(text: "BIOMETRIC REQUIREMENTS")
+                    ForEach(Self.biometricRows) { SettingRow(setting: $0) }
+
+                    SectionLabel(text: "HIGH-CONSEQUENCE TARGETS")
+                    VStack(alignment: .leading, spacing: Design.Space.one) {
+                        Text("Applications that always escalate")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Design.Ink.textPrimary)
+                        Text(
+                            "Requests against these require a biometric whatever their breadth, "
+                                + "and are never covered by an existing grant. Consequence is a "
+                                + "fact about your life, so you name it.",
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: Design.Space.chip) {
+                            ForEach(targets, id: \.self) { TargetChip(title: $0) }
+                            TargetChip(title: "Add an application", isPlaceholder: true)
+                        }
                     }
+                    .padding(.horizontal, Design.Space.three)
+                    .padding(.vertical, Design.Space.component)
+                    .background(
+                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                            .fill(Design.Ink.surface),
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                            .strokeBorder(Design.Ink.separator, lineWidth: 1),
+                    )
+
+                    SectionLabel(text: "CONSOLE")
+                    SettingRow(setting: SettingRow.Model(
+                        id: "console",
+                        title: "Require Touch ID to open the console",
+                        detail: "Opening the console reveals what is permitted and what was asked. "
+                            + "Without this, anyone at the keyboard can read both.",
+                        isOn: requireTouchIDToOpen,
+                    ))
+
+                    SectionLabel(text: "RESET")
+                    SettingRow(setting: SettingRow.Model(
+                        id: "reset",
+                        title: "Reset everything",
+                        detail: "Revoke every grant, empty the high-consequence list and restore "
+                            + "the default posture. The decision log is append-only and is not "
+                            + "erased.",
+                        isOn: false,
+                        isDestructive: true,
+                        actionTitle: "Reset ExactMac",
+                    ))
                 }
-                .padding(.horizontal, Design.Space.three)
-                .padding(.vertical, Design.Space.component)
-                .background(
-                    RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                        .fill(Design.Ink.surface),
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                        .strokeBorder(Design.Ink.separator, lineWidth: 1),
-                )
-
-                SectionLabel(text: "CONSOLE")
-                SettingRow(setting: SettingRow.Model(
-                    id: "console",
-                    title: "Require Touch ID to open the console",
-                    detail: "Opening the console reveals what is permitted and what was asked. "
-                        + "Without this, anyone at the keyboard can read both.",
-                    isOn: requireTouchIDToOpen,
-                ))
-
-                SectionLabel(text: "RESET")
-                SettingRow(setting: SettingRow.Model(
-                    id: "reset",
-                    title: "Reset everything",
-                    detail: "Revoke every grant, empty the high-consequence list and restore "
-                        + "the default posture. The decision log is append-only and is not "
-                        + "erased.",
-                    isOn: false,
-                    isDestructive: true,
-                    actionTitle: "Reset ExactMac",
-                ))
             }
         }
     }

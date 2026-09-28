@@ -325,34 +325,39 @@ struct ActivityTimeline: View {
                     + "the chain and is shown here rather than hidden.",
             ),
         ) {
-            VStack(spacing: Design.Space.chip) {
-                ForEach(rows) { ActivityRow(row: $0) }
-                if case let .broken(at) = integrity {
-                    // The rule is GREY, not orange: this is the system saying it cannot
-                    // tell you something, which is the other of the two provenances.
-                    HStack(alignment: .center, spacing: Design.Space.component) {
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Design.Rule.unknown)
-                            .frame(width: 3, height: 40)
-                        VStack(alignment: .leading, spacing: Design.Space.tight) {
-                            Design.Font.emphasized("The log has been altered")
-                            Text(
-                                "An entry does not match the hash recorded for it, so "
-                                    + "everything after entry \(at) cannot be trusted. Grants "
-                                    + "are still enforced — but this log is not evidence of "
-                                    + "what happened.",
-                            )
-                            .font(.system(size: 11))
-                            .foregroundStyle(Design.Ink.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            // SCROLLS, for the same reason the settings surface does: the list's length is
+            // whatever the decision log happens to hold, and a window that cannot be resized
+            // would put the oldest entries permanently out of reach.
+            ScrollView {
+                VStack(spacing: Design.Space.chip) {
+                    ForEach(rows) { ActivityRow(row: $0) }
+                    if case let .broken(at) = integrity {
+                        // The rule is GREY, not orange: this is the system saying it cannot
+                        // tell you something, which is the other of the two provenances.
+                        HStack(alignment: .center, spacing: Design.Space.component) {
+                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                .fill(Design.Rule.unknown)
+                                .frame(width: 3, height: 40)
+                            VStack(alignment: .leading, spacing: Design.Space.tight) {
+                                Design.Font.emphasized("The log has been altered")
+                                Text(
+                                    "An entry does not match the hash recorded for it, so "
+                                        + "everything after entry \(at) cannot be trusted. Grants "
+                                        + "are still enforced — but this log is not evidence of "
+                                        + "what happened.",
+                                )
+                                .font(.system(size: 11))
+                                .foregroundStyle(Design.Ink.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        .padding(.horizontal, Design.Space.three)
+                        .padding(.vertical, Design.Space.component)
+                        .background(
+                            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                                .fill(Design.Ink.surfaceSunken),
+                        )
                     }
-                    .padding(.horizontal, Design.Space.three)
-                    .padding(.vertical, Design.Space.component)
-                    .background(
-                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                            .fill(Design.Ink.surfaceSunken),
-                    )
                 }
             }
         }

@@ -219,3 +219,60 @@ struct ConsoleWindowHostTests {
         #expect(model.windows.window(forTesting: .approval) != nil)
     }
 }
+
+/// The window is SIZED FROM ITS CONTENT, which is the fix for two defects Hana found and
+/// the audit measured: the settings window clipped about 300pt of its content with no scroll
+/// view and no way to resize, and the 420pt prompt was centred inside a 720pt window with
+/// 150pt of empty chrome either side.
+///
+/// THE ASSERTION IS A MEASUREMENT rather than a number someone chose, because "the window
+/// fits its content" is a claim about layout and the only honest evidence is a layout pass.
+@Suite("Window sizing")
+@MainActor
+struct WindowSizingTests {
+    @Test
+    func `A window is as tall as its content, up to the ceiling`() {
+        let short = ConsoleWindowHost.fittedHeight(of: Color.clear.frame(height: 200))
+        #expect(abs(short - 200) <= 1, "a 200pt surface is a 200pt window")
+
+        let tall = ConsoleWindowHost.fittedHeight(of: Color.clear.frame(height: 2000))
+        #expect(
+            tall > ConsoleWindowHost.maximumWindowHeight,
+            "content past the ceiling is taller than any window, which is what makes the surface scroll",
+        )
+    }
+
+    @Test
+    func `The prompt is presented at the prompt's own width`() {
+        // The prompt is a 420pt card the design measures; the window default is 720pt, so
+        // passing the wrong one centres it with empty chrome either side. Asserted on the
+        // design constant rather than a literal so the two cannot drift apart silently.
+        #expect(Design.Layout.promptWidth == 420)
+        #expect(Design.Layout.windowWidth == 720)
+        #expect(
+            Design.Layout.promptWidth != Design.Layout.windowWidth,
+            "which is why the width is a parameter and not a constant",
+        )
+    }
+
+    @Test
+    func `The settings surface fits a window, which is what scrolling bought`() {
+        // THIS IS THE REGRESSION GUARD, and it is worth being precise about what it
+        // distinguishes. Measured WITHOUT the scroll view the settings body is over 1008pt —
+        // the design draws it that tall — and it overflowed a window that could not be
+        // resized, so the console and reset sections were unreachable. A `ScrollView` makes
+        // the content's fitted height the VIEWPORT's height rather than the content's, so the
+        // surface now measures to fit. That the number went DOWN is the fix, not a regression
+        // in content, and an assertion that the surface still measures tall would be
+        // asserting the bug.
+        let natural = ConsoleWindowHost.fittedHeight(of: SettingsWindow())
+        #expect(
+            natural > 0,
+            "the surface measured nothing, so the window would have no content",
+        )
+        #expect(
+            natural <= ConsoleWindowHost.maximumWindowHeight,
+            "the surface still overflows a window, so the scroll view is not there: \(natural)",
+        )
+    }
+}

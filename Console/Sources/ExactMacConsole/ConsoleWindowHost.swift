@@ -98,9 +98,22 @@ final class ConsoleWindowHost {
     /// to an option that needs one: `BiometricCeremony` refuses unless the console is
     /// frontmost, because a biometric shown against a hidden window proves nothing. So the
     /// app becomes `regular` when a sensor is about to be used and not one moment earlier.
+    /// The widest a window may be, and the tallest.
+    ///
+    /// A CEILING AND NOT A SIZE. The two surfaces are different shapes — the prompt is a
+    /// 420pt card the design measures to 710, and the settings and activity windows are 720pt
+    /// lists the design draws at their natural height — so one fixed content rect letterboxed
+    /// the prompt with 150pt of empty window either side, and clipped roughly 300pt off the
+    /// bottom of the settings window with no scroll view and no way to resize. The window now
+    /// takes the width its surface declares and the height its content needs, up to this
+    /// ceiling, and anything past the ceiling scrolls inside the surface rather than off the
+    /// bottom of the screen.
+    static let maximumWindowHeight: CGFloat = 1008
+
     func present(
         _ surface: Surface,
         title: String,
+        width: CGFloat = Design.Layout.windowWidth,
         activates: Bool = false,
         @ViewBuilder content: () -> some View,
     ) {
@@ -115,23 +128,29 @@ final class ConsoleWindowHost {
             return
         }
 
+        let hosting = NSHostingView(rootView: content())
+        // The content is asked how tall it wants to be, rather than the window being told,
+        // because a window that guesses is a window that clips.
+        hosting.layoutSubtreeIfNeeded()
+        let fitted = hosting.fittingSize
+        let height = min(
+            max(fitted.height, 1),
+            Self.maximumWindowHeight,
+        )
         let window = NSWindow(
-            contentRect: NSRect(
-                x: 0,
-                y: 0,
-                width: Design.Layout.windowWidth,
-                height: Design.Layout.minWindowHeight,
-            ),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false,
         )
         window.title = title
-        window.contentView = NSHostingView(rootView: content())
+        window.contentView = hosting
         // A console window is not resizable by dragging, because the design measures every
         // surface and a resized one is a surface the design does not describe. Equal minimum
-        // and maximum is the honest way to say fixed, and no frame autosave: autosaving a
-        // size the design does not have is the same mistake one layer down.
+        // and maximum is the honest way to say fixed — and it is set AFTER the fitted height,
+        // because pinning the size before measuring is what produced the clipped settings
+        // window. No frame autosave: autosaving a size the design does not have is the same
+        // mistake one layer down.
         window.minSize = window.frame.size
         window.maxSize = window.frame.size
         window.isReleasedWhenClosed = false
@@ -160,6 +179,16 @@ final class ConsoleWindowHost {
     ) {
         guard let window = windows[surface] else { return }
         window.contentView = NSHostingView(rootView: content())
+    }
+
+    /// The height a surface's content asks for, which is what the window is sized from.
+    ///
+    /// EXPOSED FOR THE TEST THAT PINS IT, because "the settings window fits its content" is a
+    /// claim about measurement and the only honest evidence is a measurement.
+    static func fittedHeight(of content: some View) -> CGFloat {
+        let hosting = NSHostingView(rootView: content)
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
     }
 
     func close(_ surface: Surface) {
