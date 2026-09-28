@@ -327,10 +327,24 @@ enum AuthorizationPolicy {
         // got no ceremony — the case where the operator has least reason to be wary and
         // most to be given — and a SCRIPT asked for once got none either.
         if signature == .unsigned || signature == .invalid || signature == .unresolved {
-            return .required(reason: "the caller's signature is \(signature.rawValue)")
+            // NOT `\(signature.rawValue)`. The operator reads this sentence on the prompt
+            // while Touch ID is waiting, and a raw enum there reads "unsigned" or
+            // "unresolved" as though those were the finding. They are the finding, but they
+            // are a classification and the operator cannot act on it. What they need is
+            // what the classification MEANS for this caller, which is that the binary
+            // cannot be tied to a signer — so the sentence says that.
+            return .required(
+                reason: "this caller is not signed by a developer you can identify",
+            )
         }
         if capability == .scriptExecute {
-            return .required(reason: "running a shell reaches everything this Mac can do")
+            // "everything this Mac can do" was here and it is FALSE: a shell is bounded by
+            // the sandbox, by TCC and by SIP, and a claim the operator can disprove is a
+            // claim they will stop believing. What is true is the part that matters for
+            // this decision — it can read what you can read.
+            return .required(
+                reason: "a shell can read your screen, your clipboard and your keystrokes",
+            )
         }
         // BREADTH x PERSISTENCE, which is the rule the design's own worked example
         // states: a clipboard read scoped to one application stays near free, and the
@@ -350,7 +364,15 @@ enum AuthorizationPolicy {
             return .required(reason: "this application is on your high-consequence list")
         }
         if riskClass == .high {
-            return .required(reason: "this grant would permit a lot")
+            // "this grant would permit a lot" was here. It is an English OPINION where the
+            // operator is being asked to authorise something, and it is the one sentence in
+            // this function that says nothing checkable — no capability, no scope, no
+            // duration. The risk class was computed from all three, so the sentence states
+            // them.
+            return .required(
+                reason: "\(capability.consequence.lowercased()) across "
+                    + "\(scope.application.isGlobal ? "every application" : "the applications in scope")",
+            )
         }
         return .notRequired
     }

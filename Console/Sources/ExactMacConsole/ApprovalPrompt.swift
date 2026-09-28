@@ -102,9 +102,12 @@ struct CallerTree: View {
 
 /// The exact request, and nothing truncated.
 ///
-/// The scroll region deliberately ENDS INSIDE this block in every prompt the design draws —
-/// the caption is the last thing visible and the body is sliced. That is the design showing
-/// that there is more, and it must not be "fixed" by shrinking the payload to fit.
+/// The scroll region may cut inside this block, which is how the surface shows that there is
+/// more. Where it cuts is NOT FIXED by shrinking the payload to fit: the block's caption and
+/// its Copy control are above the cut in the arrangements measured so far, and what
+/// determines the cut is where the block's own 8pt gaps put the safe window. There is no
+/// test pinning that geometry — an autopsy found the ones that existed were self-referential
+/// arithmetic and were removed — so it is established by looking at docs/render/.
 struct PayloadBlock: View {
     let text: String
     var onCopy: () -> Void = {}
@@ -154,9 +157,16 @@ struct PayloadBlock: View {
 /// The approval prompt.
 ///
 /// THREE REGIONS, and the arrangement is the design's central claim: a HUGGING header
-/// carrying the reason, a FIXED 236pt scrolling disclosure, and a HUGGING footer carrying
-/// the decision. Nothing here has a fixed window height, so the window is content-driven and
-/// the 236pt viewport is the one number that makes the reason visible without scrolling.
+/// carrying ONLY what the system derived, a FIXED scrolling disclosure, and a HUGGING footer
+/// carrying the decision.
+///
+/// THE HEADER CARRIES NO CALLER-WRITTEN TEXT, and that is the whole point of the current
+/// arrangement. It used to carry the reason, which meant the only prose readable without
+/// scrolling was text the untrusted caller wrote, while the verified request bytes sat below
+/// the cut — measured at 0pt of 134pt visible. The header now states the risk, the
+/// consequence, the reach and what the grant silently includes, all of it derived here, and
+/// the reason has moved into the disclosure where it is still fully readable, still marked,
+/// and subordinate by position.
 struct ApprovalPrompt: View {
     enum State: Equatable {
         case pending
@@ -212,7 +222,7 @@ struct ApprovalPrompt: View {
         )
     }
 
-    // MARK: Header — hugs, and holds the reason
+    // MARK: Header — hugs, and carries only what the system derived
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Design.Space.three) {
@@ -439,9 +449,10 @@ struct ApprovalPrompt: View {
         .padding(.leading, Design.Space.frame)
     }
 
-    /// A settled prompt keeps the whole header — chip, title, capability and the reason — so
-    /// the operator can still read WHAT was asked, and drops the implication, the
-    /// disclosure, the biometric strip, every button, the note field and the whole footer.
+    /// A settled prompt keeps the whole header — chip, title, capability and the implication,
+    /// so the operator can still read WHAT was asked and HOW FAR it reaches, and drops the
+    /// disclosure (which is where the reason and the request bytes live), the biometric
+    /// strip, every button, the note field and the rest of the footer.
     /// THERE IS NO PATH FROM HERE BACK TO A DECISION, so an expired request cannot be
     /// approved after the fact.
     private var settledOutcome: some View {

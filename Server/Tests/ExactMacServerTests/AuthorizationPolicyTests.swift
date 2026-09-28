@@ -475,7 +475,7 @@ final class AuthorizationPolicyTests: XCTestCase {
         let decision = decide(request(.clipboardRead), identity: unsigned)
         XCTAssertEqual(decision.basis, .promptRequired)
         if case let .required(reason) = decision.biometric {
-            XCTAssertTrue(reason.contains("unsigned"), "the reason must name the weakness")
+            XCTAssertTrue(reason.contains("signed"), "the reason must name the weakness")
         } else {
             XCTFail("an unsigned caller must escalate to a ceremony")
         }
@@ -739,7 +739,7 @@ final class AuthorizationPolicyTests: XCTestCase {
                                 {
                                     XCTAssertEqual(
                                         requirement,
-                                        .required(reason: "running a shell reaches everything this Mac can do"),
+                                        .required(reason: "a shell can read your screen, your clipboard and your keystrokes"),
                                     )
                                 }
                                 // The exemption itself, on a capability where it does apply.

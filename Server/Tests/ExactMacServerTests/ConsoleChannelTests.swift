@@ -196,7 +196,17 @@ final class ConsoleChannelTests: XCTestCase {
         guard case let .shared(value) = token else { return XCTFail("no token") }
         XCTAssertTrue(token.matches(value))
         XCTAssertTrue(token.matches(value.uppercased()), "hex is case-insensitive")
-        XCTAssertFalse(token.matches(String(value.dropLast()) + "0"))
+        // A near miss must miss. THE NEAR MISS USED TO ALIAS: it dropped the last character
+        // and appended "0", which reproduces the token EXACTLY when the token already ends
+        // in "0" — one run in sixteen, since the token is random. On those runs the test was
+        // asserting that a matching token did not match, and failing for a reason that had
+        // nothing to do with the comparison. The character is now flipped to one that
+        // differs, so the near miss is a near miss on every run.
+        // The last character, replaced by one that differs, so the near miss is a near miss.
+        let last = value.last ?? "0"
+        let nearMiss = String(value.dropLast()) + (last == "0" ? "1" : "0")
+        XCTAssertNotEqual(nearMiss, value, "the near miss must differ from the token")
+        XCTAssertFalse(token.matches(nearMiss), "a token one character off must not authenticate")
         XCTAssertFalse(token.matches(""))
         XCTAssertFalse(ConsoleChannelToken.unavailable(reason: "none").matches(value))
     }

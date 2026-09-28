@@ -344,7 +344,7 @@ final class CallerIdentityResolverTests: XCTestCase {
             XCTFail("an unsigned caller must reach a ceremony")
         }
         XCTAssertEqual(
-            decision.biometric.reason?.contains("unsigned"),
+            decision.biometric.reason?.contains("not signed by a developer"),
             true,
             "the ceremony must name the weakness: \(decision.biometric.reason ?? "none")",
         )
@@ -397,7 +397,7 @@ final class CallerIdentityResolverTests: XCTestCase {
             "a signed, application-scoped clipboard read should cost nothing",
         )
         XCTAssertEqual(
-            unsigned.biometric.reason?.contains("unsigned"),
+            unsigned.biometric.reason?.contains("not signed by a developer"),
             true,
             "the unsigned caller's ceremony must name the weakness: "
                 + (unsigned.biometric.reason ?? "none"),

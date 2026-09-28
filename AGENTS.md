@@ -75,6 +75,7 @@ These properties must hold across all changes to `Server/Sources/ExactMacServer`
 14. Text the caller supplied is visually distinguished in the prompt from text the system derived.
 15. Payloads, command text, and target paths never appear in a notification.
 16. No UI change lands before the corresponding design exists in `docs/design.fig`.
+17. No operator-facing string exposes an internal identifier — a capability token, an enum `rawValue`, or an RPC name — and none states an opinion the operator cannot check.
 
 ### Core Directives
 

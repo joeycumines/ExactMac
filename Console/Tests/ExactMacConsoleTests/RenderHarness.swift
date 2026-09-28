@@ -65,9 +65,37 @@ enum RenderHarness {
         try data.write(to: URL(fileURLWithPath: path))
     }
 
+    /// Renders go to a COMMITTED path, not a temporary one.
+    ///
+    /// THEY USED TO GO TO `NSTemporaryDirectory()`, and an autopsy of this work found zero
+    /// raster files tracked anywhere in the repository: every visual claim in this project's
+    /// history was backed by a PNG that existed only while the machine that produced it was
+    /// running. Under this project's own standing rule — the only acceptable evidence for
+    /// anything visual is a rendered artefact THAT WAS READ — an artefact nobody else can
+    /// open is not evidence, it is a claim. So the output directory is in the tree, the
+    /// files are committed, and a reviewer can look at exactly what was looked at.
     static let outputDirectory = ProcessInfo.processInfo
         .environment["EXACTMAC_RENDER_DIR"]
-        ?? NSTemporaryDirectory() + "exactmac-render/"
+        ?? repositoryRelativeRenderDirectory
+
+    /// Resolved from `#filePath` rather than from the working directory, so the path does not
+    /// depend on where the test runner happens to be launched from.
+    static let repositoryRelativeRenderDirectory: String = {
+        let testFile = URL(fileURLWithPath: #filePath)
+        // Console/Tests/ExactMacConsoleTests/RenderHarness.swift -> repository root
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        // TWO COMPONENTS, NOT ONE WITH A SLASH: `appendingPathComponent("docs/render/")`
+        // appends the whole string as a single component, so the separator is swallowed and
+        // the files land as `docs/renderprompt-light.png`.
+        return root
+            .appendingPathComponent("docs")
+            .appendingPathComponent("render")
+            .path + "/"
+    }()
 }
 
 @Suite("The designed surfaces render", .serialized)
@@ -319,91 +347,6 @@ struct RenderTests {
         )
         let restoredAppearance = NSAppearance.currentDrawing()
         #expect(initialAppearance == restoredAppearance)
-    }
-
-    @Test
-    func `prompt disclosure geometry ensures no control is cut and the request is still reachable`() {
-        // D1's ORIGINAL INVARIANT IS UNCHANGED AND ITS METHOD IS NOT: no control may be
-        // bisected by the scroll cut, and the caption's "EXACT REQUEST — NOTHING IS
-        // TRUNCATED" must be true on screen. What changed is WHICH controls exist above the
-        // cut, because the reason moved into this region and the viewport went 236 -> 320.
-        //
-        // IT PREVIOUSLY ASSERTED `copyTop >= viewportHeight` — that the Copy control sits
-        // BELOW the fold. That was the old design's intent, to show there is more, and under
-        // the redesign it is simply false: the Copy row now lands at 237.5 inside a 320pt
-        // viewport. The gate is RESTATED rather than relaxed, and the new form is STRONGER:
-        // the caption AND the whole Copy row must be inside the viewport, so nothing is
-        // bisected at all, AND the payload's own body must still fall below it, so there is
-        // genuinely more to scroll to. Asserting only the first half would let a viewport
-        // tall enough to show everything pass while removing the scroll region the reason
-        // and the cut now depend on.
-        let tree: [CallerTree.Row] = [
-            .init(id: 1, name: "Terminal", role: "host", depth: 0, signature: .signed, isRequester: false),
-            .init(id: 2, name: "zsh", role: "login shell", depth: 1, signature: .unresolved, isRequester: false),
-            .init(id: 3, name: "opencode", role: "agent  ·  origin", depth: 2, signature: .unsigned, isRequester: false),
-            .init(id: 4, name: "exactmac", role: "requesting", depth: 3, signature: .unnotarized, isRequester: true),
-        ]
-        let treeView = NSHostingView(rootView: CallerTree(rows: tree).frame(width: 388))
-        treeView.layoutSubtreeIfNeeded()
-        let treeHeight = treeView.fittingSize.height
-        #expect(abs(treeHeight - 140) <= 1.0)
-
-        let targetView = NSHostingView(rootView: ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                .fill(Design.Ink.surface)
-            SystemField(caption: .target, value: "/Users/joeyc/dev/secret-project/notes.txt")
-        }.frame(width: 388, height: 35))
-        targetView.layoutSubtreeIfNeeded()
-        let targetHeight = targetView.fittingSize.height
-        #expect(abs(targetHeight - 35) <= 1.0)
-
-        // The reason is now in this region, so it is part of the stack the cut falls through.
-        let reasonView = NSHostingView(
-            rootView: UntrustedField(
-                caption: .agentReason,
-                value: "Pasting the test fixture into the TextEdit scratch buffer.",
-            ).frame(width: 388),
-        )
-        reasonView.layoutSubtreeIfNeeded()
-        let reasonHeight = reasonView.fittingSize.height
-
-        let viewportHeight = Design.Layout.promptScrollHeight
-        let captionTop = Design.Space.three + treeHeight + Design.Space.component
-            + targetHeight + Design.Space.component + reasonHeight + Design.Space.component
-            + Design.Space.two
-        let captionHeight: CGFloat = 14.5
-        let captionBottom = captionTop + captionHeight
-        let copyTop = captionBottom + Design.Space.two
-        let copyHeight: CGFloat = 30
-        let copyBottom = copyTop + copyHeight
-
-        #expect(
-            captionBottom < viewportHeight,
-            "the caption ends at \(captionBottom) against a \(viewportHeight)pt viewport, so it is cut",
-        )
-        #expect(
-            copyBottom < viewportHeight,
-            "the Copy row ends at \(copyBottom) against a \(viewportHeight)pt viewport, so a control is bisected by the cut",
-        )
-        // And there is still something below the cut, or the region is not a scroll region.
-        //
-        // THIS ASSERTION WAS VACUOUS AT FIRST. It read `copyBottom + 8 < viewport + 4`, which
-        // is 343.5 < 352 — true for any viewport above 339, so it could not fail and proved
-        // nothing. The real claim is about the PAYLOAD BLOCK, not about the Copy row: the
-        // block's own bottom must fall below the viewport, so the cut bisects text and the
-        // operator can see the request continues. Measured: the block runs 275..386 against a
-        // 348pt viewport, so 38pt of it is below the fold.
-        let blockView = NSHostingView(rootView: PayloadBlock(
-            text: "AXUIElementCopyAttributeValue(AXFocusedApplication, kAXFocusedWindowAttribute), "
-                + "walking children to depth 12",
-        ).frame(width: 388))
-        blockView.layoutSubtreeIfNeeded()
-        let blockHeight = blockView.fittingSize.height
-        let blockTop = captionTop - Design.Space.two
-        #expect(
-            blockTop + blockHeight > viewportHeight,
-            "the payload block ends at \(blockTop + blockHeight) inside a \(viewportHeight)pt viewport, so the whole request is already visible and the cut demonstrates nothing",
-        )
     }
 
     @Test

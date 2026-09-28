@@ -800,7 +800,7 @@ struct PendingRequest: Equatable {
         }
         return requiresBiometric
             ? "Touch ID will confirm this decision."
-            : "Nothing else is asked of you — this one needs no fingerprint."
+            : "Nothing else is asked of you. This one needs no fingerprint."
     }
 
     /// The collapsed disclosure of the wider option set, and what it says rather than "More

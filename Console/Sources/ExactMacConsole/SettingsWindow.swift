@@ -302,32 +302,32 @@ struct SettingsWindow: View {
         .init(
             id: "global",
             title: "Grant every application, indefinitely",
-            detail: "The broadest grant there is. It is a standing permission, so it is worth "
-                + "proving you are you.",
+            detail: "The broadest grant ExactMac can issue. It stays in force until you "
+                + "revoke it, so approving it proves you are you.",
             isOn: true,
             isLocked: true,
         ),
         .init(
             id: "observe",
             title: "Observe any application continuously",
-            detail: "Sustained reading of everything on screen, in any application, for the "
-                + "life of the grant.",
+            detail: "Reads everything on screen, in every application, for as long as the "
+                + "grant lasts.",
             isOn: true,
             isLocked: true,
         ),
         .init(
             id: "revokeAll",
             title: "Revoke every grant at once",
-            detail: "Wiping every standing permission is exactly the moment a stolen session "
-                + "would want.",
+            detail: "If someone else has your session, this is the first control they "
+                + "would use.",
             isOn: true,
             isLocked: true,
         ),
         .init(
             id: "allowOnce",
             title: "Allow once — this exact request",
-            detail: "A narrow one-shot ask is where friction is deliberately not spent. "
-                + "Turning this on makes every trivial request cost a fingerprint.",
+            detail: "A single narrow request does not need a fingerprint. With this on, "
+                + "it does.",
             isOn: false,
         ),
     ]
