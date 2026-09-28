@@ -83,6 +83,61 @@ final class GrantStoreTests: XCTestCase {
 
     // MARK: - Persistence
 
+    /// A STORE THAT HAS BECOME UNREADABLE REPORTS UNREADABLE, AND THE POLICY REFUSES ON IT.
+    ///
+    /// `snapshot().integrity` was the constant `.intact` for the whole life of this type, and
+    /// `GrantStore` is the only production `GrantSupply` — so `AuthorizationPolicy`'s
+    /// `grantStoreUnreadable` denial, whose comment says "a grant store that could not be read
+    /// is not an empty one", could never fire. The store's own documentation claimed
+    /// UNREADABLE DENIES, and nothing denied.
+    ///
+    /// The test drives the real file: issue a grant, then replace the store's contents with
+    /// something that is not a grant store, and ask the snapshot what it thinks. It asserts
+    /// through the POLICY as well as the store, because the store reporting unreadable is
+    /// only worth anything if the decision refuses.
+    func testAStoreDamagedAfterStartupIsReportedUnreadableAndDenies() async throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+
+        // Intact, and a grant is live.
+        let before = await store.snapshot()
+        XCTAssertEqual(before.integrity, .intact)
+
+        // DAMAGE IT THE WAY A RECOVERY WOULD: replace the file with bytes that are not a
+        // grant store, on the same path, keeping the mode and owner the checks expect.
+        let descriptor = try FileManager.default.createFile(
+            atPath: path,
+            contents: Data("this is not a grant store".utf8),
+            attributes: [.posixPermissions: 0o600],
+        )
+        XCTAssertNotNil(descriptor, "the fixture must be able to damage the store")
+
+        let after = await store.snapshot()
+        guard case .unreadable = after.integrity else {
+            XCTFail("a store replaced with non-store bytes reported \(after.integrity)")
+            return
+        }
+        // AND THE DECISION REFUSES RATHER THAN TREATING IT AS EMPTY.
+        let decision = AuthorizationPolicy.evaluate(
+            request: AuthorizationRequest(
+                id: AuthorizationRequestID(rawValue: "damaged"),
+                rpcName: "\(RPCAuthorizationMap.serviceName)/GetClipboard",
+                capability: .clipboardRead,
+                scope: AuthorizationScope(),
+                argumentSummary: "the clipboard",
+                agentReason: "because the test says so",
+                origin: .mcpProxy,
+            ),
+            identity: Self.identity(),
+            grants: after.grants,
+            envelopes: after.envelopes,
+            posture: .balanced,
+            context: .unixSocket(store: after.integrity),
+            now: clock.now(),
+        )
+        XCTAssertEqual(decision.denialReason, .grantStoreUnreadable)
+    }
+
     /// A grant survives the process: torn down, reopened from the same file, and still there
     /// with the origin the operator would need to reason about it.
     func testAGrantSurvivesTheStoreBeingRebuilt() throws {

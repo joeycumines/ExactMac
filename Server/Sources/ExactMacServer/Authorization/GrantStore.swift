@@ -414,13 +414,55 @@ final class GrantStore: Sendable {
     }
 
     /// What the interceptor hands the engine each request.
+    ///
+    /// `integrity` IS NOW THE STORE'S ACTUAL INTEGRITY rather than a constant, and it was a
+    /// constant for the whole life of this type. `AuthorizationPolicy` has a
+    /// `grantStoreUnreadable` denial whose comment reads "A grant store that could not be
+    /// read is not an empty one", and it could never fire: this was the only production
+    /// `GrantSupply`, it always answered `.intact`, and the interceptor copied that answer
+    /// straight into the decision context. The store's own documentation said a failing store
+    /// is UNREADABLE AND NOT EMPTY AND THAT UNREADABLE DENIES, and none of those three
+    /// sentences was true after startup.
+    ///
+    /// SO IT RE-READS THROUGH THE SAME HARDENED OPEN `load()` uses. The file is small and
+    /// this runs once per request, and the alternative — trusting a validated-once copy in
+    /// memory — is what made the claim false: anything that damages the file after startup
+    /// would be invisible, and an operator whose store had been replaced with an empty one
+    /// would see a silent narrowing of their own permissions rather than a refusal.
+    ///
+    /// WHAT THIS DOES NOT DO, and the limit is the threat model's rather than the code's:
+    /// a same-uid process can WRITE a well-formed store, because the file's owner is the
+    /// operator. `risk-same-uid-malware-residual` in threat-model/RISKS.md already declares
+    /// that residual accepted. This change makes a store that has become UNREADABLE deny,
+    /// which is the claim the code was making and was not keeping.
     func snapshot() async -> GrantSnapshot {
         let at = clock.now()
         return GrantSnapshot(
             grants: liveGrants(now: at),
             envelopes: liveEnvelopes(now: at),
-            integrity: .intact,
+            integrity: currentIntegrity(),
         )
+    }
+
+    /// The store's integrity RIGHT NOW, re-verified through the hardened open rather than
+    /// remembered from startup.
+    private func currentIntegrity() -> AuthorizationContext.StoreIntegrity {
+        do {
+            let descriptor = try openHardened()
+            defer { Self.closeDescriptor(descriptor) }
+            let bytes = try Self.readAll(descriptor: descriptor, path: path)
+            guard !bytes.isEmpty else { return .intact }
+            let contents = try JSONDecoder().decode(GrantStoreContents.self, from: bytes)
+            guard contents.bootWallClockSeconds == bootWallClockSeconds else {
+                return .unreadable(reason: "the store on disk was written under an earlier boot")
+            }
+            return .intact
+        } catch {
+            // The reason is logged, never returned: it carries a filesystem path, and the
+            // console is not the place a server-side path belongs.
+            logger.notice("Grant store is unreadable and is denying: \(String(describing: error), privacy: .public)")
+            return .unreadable(reason: "the grant store could not be read")
+        }
     }
 
     /// The grants manager's view: what is held, by whom, for what, and until when.
