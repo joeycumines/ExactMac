@@ -181,10 +181,26 @@ endef
 # read by the shell.
 export MACOS_INFO_PLIST_E := $(MACOS_INFO_PLIST)
 
+##@ [macOS] Build Targets
+
+# THE BUILD IS A TARGET BECAUSE `macos.all` WAS PACKAGING WHATEVER WAS ALREADY THERE.
+# `macos.bundle` requires a release product and says "build it first" when there is none, but
+# nothing built it, so `macos.all` -- the target the install path runs -- assembled whatever
+# binary happened to be in the build directory. A source change reached the bundle only after
+# someone remembered to run `swift build` by hand, and a check that assembles a bundle and
+# launches it was verifying a stale binary without saying so. Found by a negative control:
+# editing the app so it installed a consent handler in headless mode changed nothing the check
+# reported, because the checked binary predated the edit.
+.PHONY: macos.build
+macos.build: macos.require-tools ## Build the release product the bundle is assembled from.
+	@printf '%s\n' '=== Building $(MACOS_APP_NAME) (release) ==='; \
+	if ! cd "$(dir $(MACOS_BUILD_DIR))"; then printf '%s\n' 'ERROR: the build directory is unavailable.' >&2; exit 1; fi; \
+	if ! swift build -c release --product "$(MACOS_APP_NAME)"; then printf '%s\n' 'ERROR: the release build failed.' >&2; exit 1; fi
+
 ##@ [macOS] Bundle Targets
 
 .PHONY: macos.all
-macos.all: macos.bundle macos.sign macos.verify ## Assemble, sign, then verify the .app (the three phases, in order).
+macos.all: macos.build macos.bundle macos.sign macos.verify ## Assemble, sign, then verify the .app (the three phases, in order).
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.bundle
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.sign
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.verify
@@ -197,7 +213,7 @@ macos.plist: macos.require-tools ## Generate the bundle Info.plist and lint it.
 	@printf 'Info.plist: %s\n' '$(MACOS_INFO_PLIST_PATH)'
 
 .PHONY: macos.bundle
-macos.bundle: macos.require-tools ## Create a clean .app from the SwiftPM release product, icon included.
+macos.bundle: macos.require-tools macos.build ## Create a clean .app from the SwiftPM release product, icon included.
 	@test -f '$(MACOS_ICON_REQUIRED)' || { printf 'ERROR: no app icon at %s; a bundle without one shows a placeholder in the Dock and the window list.\n' '$(MACOS_ICON)' >&2; exit 1; }
 	@test -x '$(MACOS_BINARY_REQUIRED)' || { printf 'ERROR: no product binary at %s; build the release product first.\n' '$(MACOS_BINARY)' >&2; exit 1; }
 	@test -d '$(MACOS_REQUIRED_RESOURCE_BUNDLE)' || { printf 'ERROR: no SwiftPM resource bundle at %s.\n' '$(MACOS_REQUIRED_RESOURCE_BUNDLE)' >&2; exit 1; }
