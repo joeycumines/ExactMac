@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// The decision engine.
 ///
@@ -193,8 +194,49 @@ enum AuthorizationPolicy {
             riskClass: askedRisk,
             biometric: focused.biometric,
             offeredDecisions: offered,
+            // MINTED WHEN **ANY** OFFERED OPTION NEEDS A CEREMONY, and not when the FOCUSED
+            // one does -- the first version of this line read `focused.biometric.reason`, and
+            // the prompt's default is the NARROWEST option, which is exactly the one that does
+            // not need one. So the nonce was nil on every prompt whose broad option required a
+            // fingerprint, and a test asserting the precondition caught it: a decision that
+            // offered a ceremony had no nonce for it, which would have made every later proof
+            // check vacuous rather than merely wrong.
+            //
+            // It is minted HERE rather than at the moment of asking so the value that the
+            // HERE rather than at the moment of asking so the value that the operator's
+            // interface performs against is the same one the server later checks. It is a
+            // CSPRNG value: a predictable nonce is not a nonce, because a caller who can
+            // guess the next one can present a proof for a decision nobody asked about. There
+            // is no case in this file that needs the identifier of the process to be random
+            // for that reason, which is a different property and a comment on its own.
+            ceremonyNonce: offered.contains { $0.biometric.reason != nil } ? Self.ceremonyNonce() : nil,
             expiresAt: nil,
         )
+    }
+
+    /// A fresh ceremony nonce, from the system CSPRNG.
+    ///
+    /// `SecRandomCopyBytes` rather than `UUID().uuidString`, because a UUID is 122 bits drawn
+    /// from a hash with a fixed structure and this value's whole job is to be unguessable to
+    /// whatever is trying to present a proof for somebody else's decision.
+    private static let logger = Logger(
+        subsystem: "io.github.joeycumines.exactmac",
+        category: "authorization.policy",
+    )
+
+    private static func ceremonyNonce() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess
+        else {
+            // A FAILURE HERE IS NOT A FALLBACK TO SOMETHING WEAKER. Without a nonce the proof
+            // cannot be bound to this decision, so a decision that needs a ceremony must be
+            // refused rather than authorised with an unbindable one.
+            Self.logger.error(
+                "The system random source failed; a ceremony cannot be bound to this decision.",
+            )
+            return ""
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - The risk model

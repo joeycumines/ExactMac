@@ -64,9 +64,25 @@ public struct ConsentAnswer: Sendable, Equatable {
     public var isApproved: Bool
     public var selected: OfferedDecision.Kind?
     public var note: String?
-    /// Only true when a ceremony was actually performed for THIS request. C6's nonce binds
-    /// the two, so a success cannot be replayed onto another decision.
-    public var biometricObtained: Bool = false
+    /// THE CEREMONY'S PROOF, or nil when none was performed or none was claimed.
+    ///
+    /// IT REPLACED A BOOLEAN, and the boolean WAS the defect. `biometricObtained: true` said a
+    /// ceremony happened and the interceptor took it at face value, so anything able to return
+    /// an answer could satisfy the requirement for a fingerprint without one. With the operator
+    /// interface hosted in the same process that is not a remote attacker — it is a bug in the
+    /// app, and invariant 3 is about the app as much as about a stranger.
+    ///
+    /// A proof names the request, carries a single-use nonce the server minted for this
+    /// decision, and expires. The server checks all three and spends the nonce atomically, so
+    /// one ceremony authorizes one decision and cannot be replayed onto a second.
+    public var ceremonyProof: BiometricProof?
+
+    /// Whether a ceremony was performed, DERIVED from the proof rather than stated beside it.
+    ///
+    /// DERIVED, because a boolean stored next to a proof is a second source of truth: a `true`
+    /// beside a nil proof would claim a ceremony the server can see did not happen, which is
+    /// the exact state a downgrade produces.
+    public var biometricObtained: Bool { ceremonyProof != nil }
 
     /// A host constructs the answer it hands back to the server that asked, and the
     /// memberwise initialiser of a public struct is internal, so this is the seam.
@@ -75,13 +91,13 @@ public struct ConsentAnswer: Sendable, Equatable {
         isApproved: Bool,
         selected: OfferedDecision.Kind? = nil,
         note: String? = nil,
-        biometricObtained: Bool = false,
+        ceremonyProof: BiometricProof? = nil,
     ) {
         self.requestID = requestID
         self.isApproved = isApproved
         self.selected = selected
         self.note = note
-        self.biometricObtained = biometricObtained
+        self.ceremonyProof = ceremonyProof
     }
 }
 
@@ -220,6 +236,10 @@ struct AuthorizationRuntime: Sendable {
     /// recorder into a refusal rather than a silent gap, because Invariant 1 is that no RPC
     /// reaches a handler without a decision on the record.
     var audit: (any DecisionRecording)?
+    /// The spent-proof set. ONE PER RUNTIME, not one per call, because spending a nonce is only
+    /// meaningful if both attempts look at the same set.
+    let ceremonyLedger = BiometricNonceLedger()
+
     /// Whether a decision that could not be recorded may still be enforced.
     ///
     /// FALSE IN PRODUCTION, and the refusal it produces is `auditUnavailable`: an
@@ -684,6 +704,25 @@ struct AuthorizationInterceptor: ServerInterceptor {
                 reason: .biometricUnavailable,
                 capability: request.capability,
             )
+        }
+        // AND THE CLAIM IS CHECKED, NOT BELIEVED, when the answer does carry one. The check
+        // above asks only whether a ceremony was CLAIMED; this asks whether the claim is a
+        // proof FOR THIS DECISION that has not been spent and has not expired. The server wrote
+        // `BiometricProof` and `BiometricNonceLedger` for exactly this and called neither, so
+        // an invariant claimed two load-bearing controls that were dead code.
+        if let proof = answer.ceremonyProof {
+            let now = runtime.clock.now()
+            guard proof.authorizes(request, nonce: decision.ceremonyNonce ?? "", now: now),
+                  runtime.ceremonyLedger.spend(proof.nonce)
+            else {
+                logger.error(
+                    "A ceremony proof for \(request.id.rawValue, privacy: .private) did not authorise this decision.",
+                )
+                throw AuthorizationDenial(
+                    reason: .biometricUnavailable,
+                    capability: request.capability,
+                )
+            }
         }
 
         let issued = try await runtime.issuance.authorize(

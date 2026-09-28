@@ -866,6 +866,22 @@ public struct AuthorizationDecision: Sendable, Equatable {
     /// needs a human. Every hard denial carries none, so nothing a caller could act on
     /// travels back with a refusal.
     public var offeredDecisions: [OfferedDecision]
+
+    /// THE NONCE A CEREMONY FOR THIS DECISION MUST BE PERFORMED AGAINST, or nil when this
+    /// decision needs none.
+    ///
+    /// IT LIVES ON THE DECISION rather than being minted at the moment of asking, because it
+    /// has to reach the operator's interface INSIDE the consent call and come back inside the
+    /// answer, and a value the interface never sees is a value it cannot bind to. Invariant 3
+    /// says a biometric success authorizes exactly one decision and is bound to a per-decision
+    /// nonce; while the console was a second process that binding lived in a token handshake,
+    /// and when the interface moved in-process there was nothing left to carry it, so the
+    /// answer's `biometricObtained` was a boolean the interface asserted and the interceptor
+    /// took at face value. The server's own `BiometricProof` and `BiometricNonceLedger` were
+    /// written for exactly this and were called by nothing. Minting the nonce here puts the
+    /// value on both sides of the same call.
+    public var ceremonyNonce: String?
+
     /// When a standing grant or envelope matched, the instant it stops authorising.
     public var expiresAt: MonotonicInstant?
 

@@ -41,20 +41,20 @@ enum BiometricFailure: Error, Equatable, Sendable {
 /// presence is not consent for a particular request. A proof with no request binding is a
 /// bearer token: whatever presents it next is authorized, which is a confused deputy
 /// wearing the operator's own fingerprint.
-struct BiometricProof: Sendable, Equatable, Hashable {
-    var requestID: AuthorizationRequestID
+public struct BiometricProof: Sendable, Equatable, Hashable {
+    public var requestID: AuthorizationRequestID
     /// Single-use, and bound to this decision. Two decisions cannot share one.
-    var nonce: String
-    var decidedAt: MonotonicInstant
+    public var nonce: String
+    public var decidedAt: MonotonicInstant
     /// The ceremony is a moment, not a licence. A proof older than this is refused.
-    var expiresAt: MonotonicInstant
+    public var expiresAt: MonotonicInstant
 
     /// Whether this proof speaks for `request` at `now`.
     ///
     /// ALL THREE conditions, and each is load-bearing: the request binding stops one decision
     /// being honoured for another, the nonce is what a spent-proof ledger keys on, and the
     /// expiry stops a proof being replayed later in the same session.
-    func authorizes(
+    public func authorizes(
         _ request: AuthorizationRequest,
         nonce expectedNonce: String,
         now: MonotonicInstant,
