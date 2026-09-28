@@ -303,6 +303,7 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
                 requestID: request.id.rawValue,
                 rpcName: request.rpcName,
                 capability: request.capability.rawValue,
+                capabilityConsequence: request.capability.consequence,
                 scopeDescription: request.scope.description,
                 argumentSummary: request.argumentSummary,
                 agentReason: request.agentReason,

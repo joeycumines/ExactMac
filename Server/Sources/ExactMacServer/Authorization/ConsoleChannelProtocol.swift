@@ -240,6 +240,10 @@ struct WireRequest: Sendable, Equatable, Codable {
     var requestID: String
     var rpcName: String
     var capability: String
+    /// What the capability would TAKE, in the operator's words. The prompt's title is this
+    /// string, because a capability token is not something an operator can picture and the
+    /// engine is the only thing that holds the consequence.
+    var capabilityConsequence: String
     var scopeDescription: String
     var argumentSummary: String
     var agentReason: String?
@@ -247,6 +251,9 @@ struct WireRequest: Sendable, Equatable, Codable {
     var riskClass: String
     var isRevokeAll: Bool
     var operationLimit: Int?
+    /// The capabilities this grant silently includes. The engine closes the set over
+    /// implication, so this is the operator's entitlement to know what else an approval
+    /// would permit.
     var effectiveCapabilities: [String]
 }
 

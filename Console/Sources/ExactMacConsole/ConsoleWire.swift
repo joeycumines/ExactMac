@@ -104,6 +104,11 @@ struct WireRequest: Sendable, Equatable, Codable {
     var requestID: String
     var rpcName: String
     var capability: String
+    /// What the capability would TAKE, in the operator's words: "Read the clipboard and its
+    /// history". Sent because a prompt cannot derive it — "clipboard.read" is a token, and
+    /// what the operator has to picture is the consequence. The engine holds it and nothing
+    /// else does.
+    var capabilityConsequence: String
     var scopeDescription: String
     var argumentSummary: String
     var agentReason: String?
@@ -111,6 +116,9 @@ struct WireRequest: Sendable, Equatable, Codable {
     var riskClass: String
     var isRevokeAll: Bool
     var operationLimit: Int?
+    /// The capabilities this grant SILENTLY INCLUDES, beyond the one being asked for. The
+    /// engine closes the capability set over implication — a shell can read the screen — so
+    /// an operator is entitled to know that before agreeing, and the design draws it.
     var effectiveCapabilities: [String]
 }
 

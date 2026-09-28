@@ -236,22 +236,28 @@ final class ConsoleModel {
     private func approvalWindow(for request: PendingRequest) -> some View {
         ApprovalPrompt(
             state: optionsExpandedFor == request.requestID ? .expanded : .pending,
-            title: "\(request.capability) · \(request.rpcName)",
-            capabilityLine: request.capability,
-            risk: request.basis,
-            riskDot: Design.Ink.caution,
-            clock: nil,
+            title: request.promptTitle,
+            capabilityLine: request.promptScopeLine,
+            risk: request.riskClass.label,
+            riskDot: request.riskClass.dot,
+            clock: request.clockText,
             reason: request.agentReason,
-            implication: nil,
+            implication: request.implicationText,
             tree: CallerTree.rows(for: request),
-            target: request.scopeDescription,
+            // THE TARGET FIELD IS OMITTED, and that is a decision rather than an omission.
+            // The wire carries ONE scope string and the prompt had two places for it — the
+            // scope line and this field — so "every application · until you revoke it"
+            // appeared twice in four lines. The design's target field holds a resolved PATH
+            // (/Users/…/notes.txt) which the server does not send; it held the scope instead.
+            // Showing the scope once, on the line the design puts the breadth, beats showing
+            // it twice. E7's design pass is where a real target gets designed.
+            target: nil,
             payload: request.argumentSummary,
-            biometricLine: request.biometricReason
-                ?? "No ceremony is required for this option",
-            biometricDot: request.requiresBiometric ? Design.Ink.caution : Design.Ink.success,
-            moreChoicesLabel: request.offered.count > 1 ? "More choices" : nil,
+            biometricLine: request.biometricLine,
+            biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
+            moreChoicesLabel: request.moreChoicesText,
             showOptionsLabel: "Show options",
-            selectedOption: request.offered.first,
+            selectedOption: request.offeredKinds.first,
             onDecision: { kind in
                 Task { await self.answer(kind, for: request) }
             },
@@ -599,6 +605,9 @@ struct PendingRequest: Equatable {
     let requestDigest: String
     let rpcName: String
     let capability: String
+    /// What the capability would take, in words. This is the prompt's title, because
+    /// "observation.ax" is a token and what the operator has to picture is the consequence.
+    let consequence: String
     let scopeDescription: String
     let argumentSummary: String
     let agentReason: String?
@@ -609,9 +618,42 @@ struct PendingRequest: Equatable {
     let ancestors: [Ancestor]
     let isAncestryTruncated: Bool
     let basis: String
+    /// The engine's own risk class, which is what the design's chip shows. `basis` says WHY a
+    /// decision was reached and is not a risk level; the prompt was showing it as one, which
+    /// put an enum rawValue in the operator's face.
+    let riskClass: CapabilityRisk
+    /// What the grant silently includes, beyond the capability being asked for. The design
+    /// draws this as the implication, and it was being sent and then dropped.
+    let impliedCapabilities: [String]
     let requiresBiometric: Bool
     let biometricReason: String?
-    let offered: [OptionRow.Kind]
+    /// The options the server offered, each with ITS OWN SCOPE.
+    ///
+    /// It was `[OptionRow.Kind]`, which kept the kind and threw the scope away, and the
+    /// prompt then named the options by `OptionRow.Kind.title` — a STATIC string that reads
+    /// "Allow for TextEdit" whatever the target is. In the render it promised "Allow for
+    /// TextEdit" directly under a scope line reading "every application". The scope is the
+    /// whole of what distinguishes one option from another, so it is kept.
+    let offered: [Offered]
+
+    struct Offered: Equatable {
+        let kind: OptionRow.Kind
+        /// The server's own description of what this option would permit, e.g. "this exact
+        /// request", "one application", "every app this agent touches".
+        let scope: String
+    }
+
+    /// The options, as kinds, for the call sites that only need to choose one.
+    var offeredKinds: [OptionRow.Kind] {
+        offered.map(\.kind)
+    }
+
+    /// How long the operator has. The design draws a countdown, and the prompt was passing
+    /// nil, so nothing on screen said the request would expire.
+    let consentTimeoutSeconds: Int
+    /// Whether this is the revoke-everything decision, which is the one request whose
+    /// consequence is not a capability at all.
+    let isRevokeAll: Bool
 
     struct Ancestor: Equatable {
         let processIdentifier: Int32
@@ -627,6 +669,7 @@ struct PendingRequest: Equatable {
         requestDigest = consent.requestDigest
         rpcName = consent.request.rpcName
         capability = consent.request.capability
+        consequence = consent.request.capabilityConsequence
         scopeDescription = consent.request.scopeDescription
         argumentSummary = consent.request.argumentSummary
         agentReason = consent.request.agentReason
@@ -644,12 +687,22 @@ struct PendingRequest: Equatable {
         }
         isAncestryTruncated = consent.identity.isAncestryTruncated
         basis = consent.decision.basis
+        riskClass = CapabilityRisk(serverValue: consent.request.riskClass)
+        // THE CAPABILITY BEING ASKED FOR IS NOT AN IMPLICATION OF ITSELF, so it is removed
+        // here rather than in the composition: "this also permits clipboard.read" beside a
+        // clipboard.read request is the exact duplication this work exists to remove.
+        impliedCapabilities = consent.request.effectiveCapabilities
+            .filter { $0 != consent.request.capability }
         requiresBiometric = consent.decision.requiresBiometric
         biometricReason = consent.decision.biometricReason
+        consentTimeoutSeconds = consent.decision.consentTimeoutSeconds
+        isRevokeAll = consent.request.isRevokeAll
         // MAPPED FROM THE SERVER'S NAMES, and an unrecognised one becomes Deny rather than
         // being dropped: dropping it would leave the operator with no primary option at all, and
         // a missing option is a worse failure than a wrong one the server will re-check.
-        offered = consent.decision.offered.map { OptionRow.Kind(serverValue: $0.kind) }
+        offered = consent.decision.offered.map {
+            Offered(kind: OptionRow.Kind(serverValue: $0.kind), scope: $0.scopeDescription)
+        }
     }
 
     /// The caller tree, in the order the design draws it: nearest ancestor first and the
@@ -675,5 +728,95 @@ struct PendingRequest: Equatable {
                 isRequester: true,
             ),
         ]
+    }
+
+    /// The prompt's TITLE, and the single most important line on the surface.
+    ///
+    /// IT WAS `"\(capability) · \(rpcName)"` — two identifiers concatenated, so the heading
+    /// read "observation.ax · AXUIElementCopyAttributeValue", which is the shape of a log line
+    /// and not of something an operator can consent to. It is now the consequence the engine
+    /// holds, because that is what the decision is actually about: the design's own example
+    /// is "Read the clipboard in TextEdit".
+    var promptTitle: String {
+        isRevokeAll ? "Revoke every grant" : consequence
+    }
+
+    /// The line under the title, naming the capability TOKEN and the scope it is bounded to.
+    ///
+    /// IT WAS THE CAPABILITY AGAIN, verbatim, directly beneath a title that had just shown
+    /// it — the same information twice in consecutive lines. The token belongs here, where
+    /// the design puts it, and the scope is what makes the token mean something.
+    var promptScopeLine: String {
+        Design.joined([capability, scopeDescription])
+    }
+
+    /// What the grant would also permit, in the operator's words.
+    ///
+    /// NIL when the capability implies nothing beyond itself, which is the common case and is
+    /// why the design's block is absent from most prompts rather than present and empty. The
+    /// capability being asked for is removed from the list at the wire boundary, so this
+    /// cannot read "this also permits clipboard.read" under a clipboard.read request.
+    var implicationText: String? {
+        guard !impliedCapabilities.isEmpty else { return nil }
+        let named = impliedCapabilities.compactMap(CapabilityRisk.consequence(of:))
+        guard !named.isEmpty else { return nil }
+        return "Also permits " + Self.proseList(named)
+    }
+
+    /// An English list, NOT the design's `  ·  ` metadata delimiter.
+    ///
+    /// That delimiter is for SCOPE AND CAPABILITY LINES — it is a field separator, and the
+    /// design uses it everywhere a row names its parts. The implication is a sentence, and
+    /// the design's own example reads "Also permits screen capture and reading the focused
+    /// window's text", joined with "and". One, two, then the Oxford form.
+    private static func proseList(_ items: [String]) -> String {
+        switch items.count {
+        case 1:
+            items[0]
+        case 2:
+            "\(items[0]) and \(items[1])"
+        default:
+            items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+        }
+    }
+
+    /// How long the operator has, or nil when there is no timeout to count down. The design
+    /// draws a countdown and the prompt was passing nil, so nothing on screen said the
+    /// request would expire — and a request that expires silently is one the operator can
+    /// walk away from without knowing it.
+    var clockText: String? {
+        guard consentTimeoutSeconds > 0 else { return nil }
+        return "decides in \(consentTimeoutSeconds)s"
+    }
+
+    /// The biometric sentence, and what it says when no ceremony is required.
+    ///
+    /// THE FALLBACK WAS "No ceremony is required for this option", which is engine vocabulary
+    /// and reads as a missing feature. An approval that needs no sensor is a fact about how
+    /// little this one costs, and it is stated as the absence of a cost.
+    var biometricLine: String {
+        if let biometricReason, !biometricReason.isEmpty {
+            return biometricReason
+        }
+        return requiresBiometric
+            ? "Touch ID will confirm this decision."
+            : "Nothing else is asked of you — this one needs no fingerprint."
+    }
+
+    /// The collapsed disclosure of the wider option set, and what it says rather than "More
+    /// choices", which named no number and no breadth.
+    ///
+    /// The names are the options' own SCOPES — the thing an operator is choosing between —
+    /// and the count is the real one from the server's offer, so a request that arrived
+    /// offering only Deny says nothing here at all.
+    var moreChoicesText: String? {
+        let alternatives = offered.filter { $0.kind != .deny }
+        guard alternatives.count > 1 else { return nil }
+        // THE SCOPES THE SERVER SENT, NOT `OptionRow.Kind.title`. The static title reads
+        // "Allow for TextEdit" for the target-scoped option, which is a LIE whenever the
+        // target is not TextEdit — and in the render it was not: the scope line said "every
+        // application" directly above a disclosure promising "Allow for TextEdit".
+        return "\(alternatives.count) more choices — this exact request, or "
+            + Self.proseList(alternatives.dropFirst().map(\.scope))
     }
 }

@@ -166,6 +166,131 @@ struct RenderTests {
     }
 
     @Test
+    func `the prompt renders what the app actually composes`() throws {
+        // THE ARTEFACT FOR E7'S FIRST HALF, and it is built from a real `PendingRequest`
+        // rather than from literal strings, so it renders the composition the operator
+        // actually gets. Every earlier render of this surface was written by hand and could
+        // therefore show a prompt the product never builds — which is how an alert made of
+        // engine enums passed a review of its own layout.
+        let request = PendingRequest(consent: PendingConsent(
+            request: WireRequest(
+                requestID: "r",
+                rpcName: "exactmac.v1.ExactMac/GetAccessibilityTree",
+                capability: "observation.ax",
+                capabilityConsequence: "Read the accessibility tree of an app",
+                scopeDescription: "every application  ·  until you revoke it",
+                argumentSummary: "AXUIElementCopyAttributeValue(AXFocusedApplication, "
+                    + "kAXFocusedWindowAttribute), walking children to depth 12",
+                agentReason: "Refactoring the view controller, which needs the real layout "
+                    + "rather than the one in the storyboard.",
+                blastRadius: 0.71,
+                riskClass: "high",
+                isRevokeAll: false,
+                operationLimit: nil,
+                effectiveCapabilities: ["observation.ax", "observation.screen", "clipboard.read"],
+            ),
+            identity: WireIdentity(
+                processIdentifier: 4517,
+                effectiveUserIdentifier: 501,
+                executablePath: "/usr/local/bin/exactmac",
+                bundleIdentifier: nil,
+                signature: "unnotarized",
+                designatedRequirement: nil,
+                isFullyResolved: true,
+                ancestors: [
+                    WireAncestor(
+                        processIdentifier: 4400,
+                        executablePath: "/usr/local/lib/node_modules/opencode/bin/cli.js",
+                        bundleIdentifier: nil,
+                        signature: "unsigned",
+                        isFullyResolved: true,
+                    ),
+                    WireAncestor(
+                        processIdentifier: 4390,
+                        executablePath: "/bin/zsh",
+                        bundleIdentifier: nil,
+                        signature: "unresolved",
+                        isFullyResolved: false,
+                    ),
+                ],
+                isAncestryTruncated: false,
+            ),
+            decision: WireDecision(
+                basis: "promptRequired",
+                requiresBiometric: true,
+                biometricReason: "Touch ID will confirm: read the accessibility tree of any "
+                    + "application until you revoke it",
+                offered: [
+                    WireOption(
+                        kind: "allowOnce",
+                        scopeDescription: "this exact request",
+                        durationDescription: "once",
+                        blastRadius: 0.2,
+                        requiresBiometric: false,
+                        isDestructive: false,
+                        isDefault: true,
+                        isPrimary: true,
+                    ),
+                    WireOption(
+                        kind: "allowTargetApplication",
+                        scopeDescription: "one application",
+                        durationDescription: "until revoked",
+                        blastRadius: 0.45,
+                        requiresBiometric: false,
+                        isDestructive: false,
+                        isDefault: false,
+                        isPrimary: false,
+                    ),
+                    WireOption(
+                        kind: "deny",
+                        scopeDescription: "none",
+                        durationDescription: "none",
+                        blastRadius: 0,
+                        requiresBiometric: false,
+                        isDestructive: true,
+                        isDefault: false,
+                        isPrimary: false,
+                    ),
+                ],
+                consentTimeoutSeconds: 45,
+            ),
+            nonce: "n",
+            requestDigest: "d",
+        ))
+
+        let view = ApprovalPrompt(
+            state: .pending,
+            title: request.promptTitle,
+            capabilityLine: request.promptScopeLine,
+            risk: request.riskClass.label,
+            riskDot: request.riskClass.dot,
+            clock: request.clockText,
+            reason: request.agentReason,
+            implication: request.implicationText,
+            tree: CallerTree.rows(for: request),
+            // NIL, as the model composes it: the wire carries one scope string and the
+            // prompt had two places for it. A render that fills the target anyway is
+            // showing a surface the product does not build, which is what this artefact
+            // exists to rule out.
+            target: nil,
+            payload: request.argumentSummary,
+            biometricLine: request.biometricLine,
+            biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
+            moreChoicesLabel: request.moreChoicesText,
+            showOptionsLabel: "Show options",
+            selectedOption: request.offeredKinds.first,
+        )
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: Design.Layout.promptWidth, height: 710),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "prompt-composed\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
     func `the render harness leaves the process appearance unchanged`() throws {
         let initialAppearance = NSAppearance.currentDrawing()
         let prompt = ApprovalPrompt(

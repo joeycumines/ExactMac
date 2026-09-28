@@ -38,7 +38,11 @@ struct CallerTree: View {
         var rows = [Row(
             id: request.processIdentifier,
             name: request.executablePath,
-            role: "wants \(request.capability)",
+            // NOT "wants \(request.capability)". It was, and the capability now appears on
+            // the prompt's own scope line directly above, so the tree said it a third time —
+            // in the one place with no room, which ellipsised it to "wants observatio….".
+            // The row says who is asking; the line above says what for.
+            role: "asking for this",
             depth: 0,
             signature: request.signature,
             isRequester: true,

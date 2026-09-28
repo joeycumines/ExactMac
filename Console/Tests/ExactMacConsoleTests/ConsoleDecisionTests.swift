@@ -31,6 +31,7 @@ struct ConsoleDecisionTests {
                     requestID: requestID,
                     rpcName: "exactmac.v1.ExactMac/GetClipboard",
                     capability: "clipboard.read",
+                    capabilityConsequence: "Read the clipboard and its history",
                     scopeDescription: "every app  ·  until ExactMac quits",
                     argumentSummary: "the clipboard and its history",
                     agentReason: "answering a question about what you copied",
@@ -304,7 +305,8 @@ struct ConsoleDecisionTests {
         let consent = PendingConsent(
             request: WireRequest(
                 requestID: "r", rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                capability: "clipboard.read", scopeDescription: "any", argumentSummary: "x",
+                capability: "clipboard.read", capabilityConsequence: "Read the clipboard",
+                scopeDescription: "any", argumentSummary: "x",
                 agentReason: nil, blastRadius: 0, riskClass: "routine", isRevokeAll: false,
                 operationLimit: nil, effectiveCapabilities: [],
             ),
@@ -407,7 +409,8 @@ struct ServerVocabularyTests {
         let consent = PendingConsent(
             request: WireRequest(
                 requestID: "r", rpcName: "exactmac.v1.ExactMac/GetClipboard",
-                capability: "clipboard.read", scopeDescription: "any", argumentSummary: "x",
+                capability: "clipboard.read", capabilityConsequence: "Read the clipboard",
+                scopeDescription: "any", argumentSummary: "x",
                 agentReason: nil, blastRadius: 0, riskClass: "routine", isRevokeAll: false,
                 operationLimit: nil, effectiveCapabilities: [],
             ),
@@ -438,7 +441,7 @@ struct ServerVocabularyTests {
             nonce: "n", requestDigest: "d",
         )
         let request = PendingRequest(consent: consent)
-        #expect(request.offered == [.session, .deny], "all six were previously collapsed to deny")
-        #expect(request.offered.first == .session, "not the refusal, which is what it was")
+        #expect(request.offeredKinds == [.session, .deny], "all six were previously collapsed to deny")
+        #expect(request.offeredKinds.first == .session, "not the refusal, which is what it was")
     }
 }

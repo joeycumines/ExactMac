@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -29,15 +30,15 @@ import (
 
 // peerIdentityDialer dials one Unix-socket server through a socket this process has named.
 //
-// IT IS UNIX-ONLY AND KNOWS ITS OWN ENDPOINT, and both are consequences of a measured
-// failure. The first version decided the network from the address string gRPC handed it,
-// falling back to TCP for anything not starting with "/". gRPC does not pass a bare path to
-// a custom context dialer — it passes a string that begins with the network, so the check
-// never matched, the TCP branch ran, and the dial resolved the socket path as a HOSTNAME.
-// The symptom was `dial tcp: lookup tcp////Users/.../exactmac.sock: unknown port` on a
-// socket that was present, connectable, and serving. A dialer built for one configured
-// endpoint has no reason to guess at the network, and guessing here made a working server
-// look unreachable.
+// IT NAMES ONE CONFIGURED ENDPOINT, and that is a consequence of a measured failure. The
+// first version decided the network from the address string gRPC handed it, falling back to
+// TCP for anything not starting with "/". gRPC does not pass a bare path to a custom context
+// dialer — it passes a string that begins with the network, so the check never matched, the
+// TCP branch ran, and the dial resolved the socket path as a HOSTNAME. The symptom was `dial
+// tcp: lookup tcp////Users/.../exactmac.sock: unknown port` on a socket that was present,
+// connectable, and serving. Guessing the network from that string made a working server look
+// unreachable, so the network is taken from configuration and the address is used only to
+// CONFIRM the target is that endpoint — see `dial`.
 //
 // A TYPE rather than a bare dial function because the name has to survive from the moment
 // the socket is created to the moment the connection closes.
@@ -69,14 +70,56 @@ func newPeerIdentityDialer(serverSocketPath string) (*peerIdentityDialer, error)
 
 // dial is the shape gRPC's context dialer takes: an address and not a network.
 //
-// THE ADDRESS IS IGNORED, deliberately. gRPC passes a string that begins with the network
-// rather than the bare socket path, so the first version's check for a leading "/" never
-// matched, its TCP branch ran, and the dial resolved the socket path as a HOSTNAME. The
-// symptom was `dial tcp: lookup tcp////Users/.../exactmac.sock: unknown port` against a
-// socket that was present, connectable and serving. This dialer is only ever installed for a
-// configured Unix socket — `grpcClientDialOptions` does not install it otherwise — so the
-// network is already known and the path is held rather than guessed at.
-func (d *peerIdentityDialer) dial(ctx context.Context, _ string) (net.Conn, error) {
+// THE ADDRESS IS NOT IGNORED, and that reverses the first version's central decision. It
+// decided the network from this string, falling back to TCP for anything not starting with
+// "/". gRPC does not pass a bare path to a custom context dialer — it passes a string that
+// begins with the network, so the check never matched, the TCP branch ran, and the dial
+// resolved the socket path as a HOSTNAME. The symptom was `dial tcp: lookup
+// tcp////Users/.../exactmac.sock: unknown port` on a socket that was present, connectable,
+// and serving.
+//
+// IGNORING THE ADDRESS WAS THE WRONG REVERSAL OF THAT FIX, and a test caught it: a target
+// that is NOT this server's socket was still dialled as this server's socket, so a TCP
+// address produced a Unix connection attempt against a path that does not exist. So the
+// address is parsed for a PATH and compared with the configured endpoint. A match is the
+// named Unix dial. Anything else is a plain TCP dial with NO name reserved — binding a Unix
+// name onto a TCP connection would create a node in the cache directory that no server ever
+// reads, which is litter pretending to be evidence.
+func (d *peerIdentityDialer) dial(ctx context.Context, address string) (net.Conn, error) {
+	path, isPath := socketPathFrom(address)
+	if !isPath || path != d.socketPath {
+		return d.fallback.DialContext(ctx, "tcp", address)
+	}
+	return d.dialNamed(ctx)
+}
+
+// socketPathFrom extracts a filesystem path from a gRPC target.
+//
+// The target is a URI and not a bare path, which is the whole trap: the runtime hands this
+// dialer `tcp:///Users/…/exactmac.sock` for a Unix socket, so the scheme says tcp and the
+// body is a path. Every form a path can arrive in is accepted, and anything that is not one
+// — a host:port, a DNS name — is reported as not a path so the caller dials it plainly.
+func socketPathFrom(address string) (string, bool) {
+	switch {
+	case strings.HasPrefix(address, "/"):
+		return address, true
+	case strings.HasPrefix(address, "unix://"):
+		return strings.TrimPrefix(address, "unix://"), true
+	case strings.HasPrefix(address, "tcp://"):
+		return strings.TrimPrefix(address, "tcp://"), true
+	case strings.HasPrefix(address, "unix:"):
+		return strings.TrimPrefix(address, "unix:"), true
+	case strings.HasPrefix(address, "tcp:"):
+		return strings.TrimPrefix(address, "tcp:"), true
+	default:
+		return "", false
+	}
+}
+
+// dialNamed creates the socket, gives it a name the server can identify this caller by, and
+// connects. The name is reserved inside the runtime's `Control` hook because that is the one
+// moment this process owns an unconnected socket that can still be named.
+func (d *peerIdentityDialer) dialNamed(ctx context.Context) (net.Conn, error) {
 	// `Control` runs after the runtime has created the socket and before it connects, which
 	// is the one moment this process owns an unconnected socket that can still be named.
 	// It runs on the calling goroutine, so the name it writes is visible once

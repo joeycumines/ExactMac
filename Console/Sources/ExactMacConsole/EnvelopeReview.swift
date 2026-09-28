@@ -24,6 +24,63 @@ enum CapabilityRisk: String, Equatable, CaseIterable {
         case .high: Design.Ink.danger
         }
     }
+
+    /// The engine's name for this class, written out by hand rather than derived from the
+    /// case, for the same reason `OptionRow.Kind(serverValue:)` and
+    /// `SignatureBadge.State(serverValue:)` are: a derivation is the same mistake in a
+    /// different hat, because a rename on the server would silently change what the operator
+    /// is told. An unrecognised value becomes `.elevated` — the class that escalates rather
+    /// than the one that reassures, and visible on screen as a change rather than a default.
+    init(serverValue: String) {
+        switch serverValue {
+        case "routine": self = .routine
+        case "high": self = .high
+        default: self = .elevated
+        }
+    }
+
+    /// What a capability token MEANS, for the prompt's implication line.
+    ///
+    /// The engine holds the same mapping in `Capability.consequence` and this is its mirror,
+    /// written out by hand for the same reason as the decode above. The keys are the WIRE
+    /// VALUES and not the case names — `clipboard.read`, not `clipboardRead` — which the
+    /// console's own fixture caught: `Capability` declares `case clipboardRead = "clipboard.read"`,
+    /// so a switch written against the case names matched nothing and every implication
+    /// would have silently rendered empty.
+    ///
+    /// THE VALUES ARE GERUNDS, NOT THE ENGINE'S IMPERATIVES, and that is a grammar
+    /// requirement rather than a style one. The engine's `Capability.consequence` reads
+    /// "Read the clipboard and its history" because it stands alone as a title; this string
+    /// follows "Also permits", and "Also permits read the clipboard and its history" is
+    /// broken English on a security prompt. The design's own line is "Also permits screen
+    /// capture and reading the focused window's text".
+    ///
+    /// It returns nil for a token it does not recognise, which is what lets the implication
+    /// line drop a capability it cannot describe INSTEAD OF NAMING A TOKEN AT THE OPERATOR —
+    /// the implication's whole purpose is to say what else is permitted, and a bare
+    /// identifier in that sentence defeats it.
+    static func consequence(of capability: String) -> String? {
+        switch capability {
+        case "script.execute": "running a shell command, AppleScript or JavaScript"
+        case "macro.execute": "replaying a recorded macro"
+        case "observation.ax": "reading the accessibility tree of an app"
+        case "observation.window": "listing and reading your windows and applications"
+        case "observation.screen": "taking a screenshot of the screen"
+        case "observation.stream": "watching accessibility changes as they happen"
+        case "display.read": "reading the display layout"
+        case "clipboard.read": "reading the clipboard and its history"
+        case "clipboard.write": "replacing what is on the clipboard"
+        case "input.synthesize": "typing and clicking as you"
+        case "window.manage": "moving, resizing, closing and focusing your windows"
+        case "application.control": "opening, activating and quitting your applications"
+        case "file.automate": "driving open and save panels"
+        case "transaction.manage": "grouping actions into a transaction"
+        case "session.manage": "creating and inspecting sessions"
+        case "authorization.manage": "seeing what is permitted, and pre-authorizing a batch"
+        case "local.echo": "reading back input this server was already given"
+        default: nil
+        }
+    }
 }
 
 /// The pre-authorization review: a DIFFERENT SURFACE, not a variant of the prompt.
