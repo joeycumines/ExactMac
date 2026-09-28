@@ -28,13 +28,13 @@ target list; the sections are `[ExactMac]`, `[macOS]` and `[Console]`.
                                                   │ gRPC over
                                                   │ Unix socket (0600)
                                                   ▼
-                                      ┌────────────────────────┐
-                                      │ ExactMacConsole.app     │
-                                      │                        │
-                                      │  gRPC server            │
-                                      │  authorization + audit  │
-                                      │  consent prompt  ◄── the operator
-                                      └───────────┬────────────┘
+                                      ┌────────────────────────────────────┐
+                                      │ ExactMacConsole.app                │
+                                      │                                    │
+                                      │  gRPC server                       │
+                                      │  authorization + audit             │
+                                      │  consent prompt  ◄── the operator  │
+                                      └───────────┬────────────────────────┘
                                                   │
                            Accessibility / CGEvent / ScreenCaptureKit
 ```
