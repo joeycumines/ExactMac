@@ -11,7 +11,12 @@ import Foundation
 /// EVERY READ IS DEADLINED. A blocking read on a socket with no data parks the thread
 /// forever, and the caller is the menu-bar app's main actor: a channel that could park it
 /// would freeze the UI for as long as the server had nothing to say.
-final class ConsoleChannelClient: @unchecked Sendable {
+///
+/// It conforms to `ConsoleChannel` rather than being depended on as a concrete type, because
+/// the decision path — the whole function of this program — has to be testable without a
+/// socket, and a model wired to a concrete channel can only be exercised by standing up a
+/// server.
+final class ConsoleChannelClient: ConsoleChannel, @unchecked Sendable {
     private let socketPath: String
     private let token: String
     private let lock = NSLock()

@@ -26,6 +26,43 @@ struct CallerTree: View {
 
     let rows: [Row]
 
+    /// The tree for a pending request: the caller first, then the chain above it.
+    /// /// THE REQUESTER IS THE FIRST ROW AND NOT THE LAST, because the operator is consenting to
+    /// something an AGENT asked for. The thing that wants the capability is the thing the
+    /// prompt is about; its ancestors are context for judging it. A tree that started at the
+    /// login window would bury the one row that matters.
+    /// /// DEPTH IS CAPPED, and the cap is reported by the caller rather than hidden here,
+    /// because a silently truncated ancestry reads as a complete one — the operator would
+    /// conclude they had seen everything when they had not.
+    static func rows(for request: PendingRequest, maximumDepth: Int = 6) -> [Row] {
+        var rows = [Row(
+            id: request.processIdentifier,
+            name: request.executablePath,
+            role: "wants \(request.capability)",
+            depth: 0,
+            signature: request.signature,
+            isRequester: true,
+        )]
+        for (index, ancestor) in request.ancestors.enumerated() {
+            guard index < maximumDepth else { break }
+            rows.append(Row(
+                id: ancestor.processIdentifier,
+                name: ancestor.executablePath,
+                role: ancestorRole(for: ancestor),
+                depth: index + 1,
+                signature: ancestor.signature,
+                isRequester: false,
+            ))
+        }
+        return rows
+    }
+
+    /// What an ancestor's row says about it: "unresolved" is a fact about the evidence and is
+    /// said, because a row that read like every other row would claim more than is known.
+    private static func ancestorRole(for ancestor: PendingRequest.Ancestor) -> String {
+        ancestor.isFullyResolved ? "started it" : "unresolved · started it"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
@@ -128,8 +165,7 @@ struct ApprovalPrompt: View {
 
     // MARK: Content
 
-    //
-    // Every string below is the design's copy, verbatim. A prompt that paraphrases its own
+    // // Every string below is the design's copy, verbatim. A prompt that paraphrases its own
     // warnings is a prompt that says something weaker than the thing it is warning about.
 
     let state: State
@@ -150,6 +186,10 @@ struct ApprovalPrompt: View {
     let selectedOption: OptionRow.Kind?
     var onDecision: (OptionRow.Kind) -> Void = { _ in }
     var onCopyPayload: () -> Void = {}
+    /// Expands the collapsed affordances into the full option set. The model owns the
+    /// transition because it owns the state machine, and a view that held its own expansion
+    /// flag would be a second state machine.
+    var onShowOptions: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -316,7 +356,14 @@ struct ApprovalPrompt: View {
             } else if isSettled {
                 settledOutcome
             } else {
-                CollapsedActions()
+                // THE COLLAPSED PRIMARY ACTION IS THE NARROWEST OFFER, NOT A LABEL. It used
+                // to be a `ConsoleButton` with no action at all, which is why the alert could
+                // be opened, read, and never answered: every request in the running product
+                // timed out and was denied while the screen said "Allow once".
+                CollapsedActions(
+                    primary: selectedOption ?? .once,
+                    onDecision: onDecision,
+                )
             }
 
             NoteField()
@@ -325,7 +372,12 @@ struct ApprovalPrompt: View {
                 Rectangle()
                     .fill(Design.Ink.separator)
                     .frame(height: 1)
-                DenyRow(moreChoicesLabel: moreChoicesLabel)
+                DenyRow(
+                    moreChoicesLabel: moreChoicesLabel,
+                    showOptionsLabel: showOptionsLabel,
+                    onDeny: { onDecision(.deny) },
+                    onShowOptions: onShowOptions,
+                )
             }
         }
         .padding(.top, Design.Space.three)
@@ -381,21 +433,32 @@ struct ApprovalPrompt: View {
 /// a deny at the bottom left, separated by a hairline and the note field, so muscle memory
 /// cannot reach the destructive row from the default one.
 private struct CollapsedActions: View {
+    let primary: OptionRow.Kind
+    let onDecision: (OptionRow.Kind) -> Void
+
     var body: some View {
         HStack {
             Spacer(minLength: 0)
-            ConsoleButton(title: "Allow once", kind: .primary)
-                .frame(width: 150)
+            // LABELLED WITH THE OPTION, not with a fixed "Allow once", because the option the
+            // server put in focus is the one the operator is being offered, and a fixed label
+            // next to a different default is a lie the operator acts on.
+            ConsoleButton(title: primary.title, kind: .primary) {
+                onDecision(primary)
+            }
+            .frame(width: 150)
         }
     }
 }
 
 private struct DenyRow: View {
     let moreChoicesLabel: String?
+    let showOptionsLabel: String?
+    let onDeny: () -> Void
+    let onShowOptions: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: Design.Space.chip) {
-            ConsoleButton(title: "Deny", kind: .deny)
+            ConsoleButton(title: "Deny", kind: .deny, action: onDeny)
                 .frame(width: 96)
             if let moreChoicesLabel {
                 HStack(alignment: .center, spacing: Design.Space.chip) {
@@ -404,9 +467,15 @@ private struct DenyRow: View {
                         .foregroundStyle(Design.Ink.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    Text("Show")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Design.Ink.accentText)
+                    // A BUTTON, because the whole point of the row is that the other
+                    // options are one click away. It was a `Text`, so the options were not
+                    // merely hidden but unreachable.
+                    Button(action: onShowOptions) {
+                        Text(showOptionsLabel ?? "Show options")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Design.Ink.accentText)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.vertical, Design.Space.leading)
                 .padding(.horizontal, Design.Space.three)

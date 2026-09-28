@@ -44,6 +44,29 @@ struct SignatureBadge: View {
         case invalid
         case unresolved
 
+        /// Maps the SERVER's vocabulary, which is not this enum's.
+        ///
+        /// THE TWO DO NOT AGREE AND THE MISMATCH WAS INVISIBLE. The server's `SignatureState`
+        /// raw values are `signedAndValid`, `signedUnnotarized`, `adHoc`, `unsigned`,
+        /// `invalid`, `unresolved`; this enum's are `signed`, `unnotarized` and so on — so
+        /// `init(rawValue:)` returned nil for precisely the two states an operator wants to
+        /// find reassuring, and a `?? .unresolved` fallback reported a fully notarized binary
+        /// as "could not find out". A `RawRepresentable` conformance claims two vocabularies
+        /// are one vocabulary, and here they were not.
+        ///
+        /// WRITTEN OUT rather than derived, because a derivation is the same mistake in a
+        /// different hat: a state added later must fail visibly rather than fall through.
+        init(serverValue: String) {
+            self = switch serverValue {
+            case "signedAndValid": .signed
+            case "signedUnnotarized": .unnotarized
+            case "adHoc": .adHoc
+            case "unsigned": .unsigned
+            case "invalid": .invalid
+            default: .unresolved
+            }
+        }
+
         var label: String {
             switch self {
             case .signed: "Signed"
@@ -335,6 +358,48 @@ struct OptionRow: View {
         case envelope
         case global
         case deny
+
+        /// Maps the SERVER's vocabulary, which is not this enum's.
+        ///
+        /// THIS MISMATCH BROKE THE PRODUCT END TO END. The server's `OfferedDecision.Kind`
+        /// raw values are `allowOnce`, `allowTargetApplication`, `allowSession`,
+        /// `preAuthorizeEnvelope`, `allowGlobalPersistent` and `deny`; this enum's are `once`,
+        /// `target`, `session`, `envelope`, `global` and `deny`. So `init(rawValue:)` matched
+        /// only `deny`, `compactMap` threw the other five away, and every request arrived
+        /// offering exactly one option, which was Deny. The same mismatch ran the other way:
+        /// the console POSTED `once` and the server parsed it as nil, so every approval was
+        /// enforced as a refusal.
+        ///
+        /// It was invisible because the fixture built the wire `offered` array from THIS
+        /// enum's own raw values, so it could never contain a server-shaped name. The mapping
+        /// is written out for the same reason as the signature one: a value that is not in
+        /// this list must not silently become something else.
+        init(serverValue: String) {
+            self = switch serverValue {
+            case "allowOnce": .once
+            case "allowTargetApplication": .target
+            case "allowSession": .session
+            case "preAuthorizeEnvelope": .envelope
+            case "allowGlobalPersistent": .global
+            default: .deny
+            }
+        }
+
+        /// The value the SERVER parses, which is what a decision must carry.
+        ///
+        /// NAMED SEPARATELY from the inbound mapping rather than assumed to be its inverse,
+        /// because posting this enum's own `rawValue` is precisely what made every approval a
+        /// denial.
+        var serverValue: String {
+            switch self {
+            case .once: "allowOnce"
+            case .target: "allowTargetApplication"
+            case .session: "allowSession"
+            case .envelope: "preAuthorizeEnvelope"
+            case .global: "allowGlobalPersistent"
+            case .deny: "deny"
+            }
+        }
 
         var title: String {
             switch self {

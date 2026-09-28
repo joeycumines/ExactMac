@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import os
+import SwiftUI
 
 /// What the popover reads, and the one place the console decides anything.
 ///
@@ -20,7 +21,7 @@ final class ConsoleModel {
     private(set) var pendingNotice: String?
     var pendingPrompt: PendingRequest?
 
-    private let channel: ConsoleChannelClient
+    private let channel: any ConsoleChannel
     private let serviceController: any ServiceControlling
     private let onServiceDisabled: (@Sendable () async throws -> Void)?
     private let logger = Logger(
@@ -28,24 +29,52 @@ final class ConsoleModel {
         category: "console",
     )
 
+    /// The window host and the ceremony are dependencies rather than constructions, so a
+    /// test can drive a decision without a window server or a sensor — which is the only way
+    /// either is testable unattended, and the console has to be testable unattended.
+    /// /// THE HOST IS ALSO READABLE, because the test that proves the operator's button opens a
+    /// window has to be able to see whether one opened; the accessor is the only way out, and
+    /// it is read-only so nothing in the app can drive the host that way.
+    let windows: ConsoleWindowHost
+
+    /// The request whose options are expanded, or nil for the collapsed affordance.
+    /// /// HELD HERE AND NOT IN THE VIEW because the view is rebuilt from the request, and a flag
+    /// inside it would reset every time the window's content was refreshed. It is also the
+    /// only place a second request can be distinguished from the first: a stale window that
+    /// said "options expanded" for a request that is no longer pending is a decision offered
+    /// on the wrong question.
+    private var optionsExpandedFor: String?
+    private let ceremony: (any CeremonyPerforming)?
+
+    /// What the activity window shows. Both are read from the server's reply, and BOTH ARE
+    /// STATE ON THE SERVER'S CLOCK rather than this process's, which is why the console does
+    /// not compute them: the store and the audit own their instants and a display that
+    /// invented its own would disagree with the record it claims to show.
+    private var activityRows: [ActivityRow.Model] = []
+    private var activityIntegrity: IntegrityBadge.State = .unchecked
+    private var activitySubtitle = "No decisions recorded yet"
+
     /// The channel's loop, held so it has an owner to be cancelled by. The model is the
     /// only thing in this app whose lifetime is the process's, which is exactly the lifetime
     /// the channel has.
-    ///
-    /// A BOX rather than a `var`, because a `@MainActor` type's `deinit` is nonisolated and
+    /// /// A BOX rather than a `var`, because a `@MainActor` type's `deinit` is nonisolated and
     /// cannot read or write an isolated property — so a cancellable task held directly would
     /// either not compile or, if it did, could not be stopped.
     private let channelLoop = ChannelLoopBox()
 
     init(
-        channel: ConsoleChannelClient = .live(),
+        channel: any ConsoleChannel = ConsoleChannelClient.live(),
         serviceController: any ServiceControlling = LaunchdServiceController(),
         onServiceDisabled: (@Sendable () async throws -> Void)? = nil,
+        windows: ConsoleWindowHost = ConsoleWindowHost(),
+        ceremony: (any CeremonyPerforming)? = BiometricCeremony(),
         startLoop: Bool = true,
     ) {
         self.channel = channel
         self.serviceController = serviceController
         self.onServiceDisabled = onServiceDisabled
+        self.windows = windows
+        self.ceremony = ceremony
         if startLoop {
             // NOT `.task` ON THE POPOVER: a View task is cancelled when the view leaves the
             // hierarchy, and the popover leaves it every time the operator clicks away — so
@@ -61,20 +90,20 @@ final class ConsoleModel {
     }
 
     /// Holds the channel loop so a nonisolated `deinit` can cancel it.
-private final class ChannelLoopBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var task: Task<Void, Never>?
+    private final class ChannelLoopBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
 
-    func set(_ task: Task<Void, Never>?) {
-        lock.withLock { self.task = task }
+        func set(_ task: Task<Void, Never>?) {
+            lock.withLock { self.task = task }
+        }
+
+        func cancel() {
+            lock.withLock { task }?.cancel()
+        }
     }
 
-    func cancel() {
-        lock.withLock { task }?.cancel()
-    }
-}
-
-// MARK: The service control
+    // MARK: The service control
 
     /// Changes the service enablement state in launchd, revoking standing grants on disable.
     func setServiceEnabled(_ enabling: Bool) async throws {
@@ -142,8 +171,7 @@ private final class ChannelLoopBox: @unchecked Sendable {
     }
 
     /// A toggle that did not take is TOLD TO THE OPERATOR, and that is the whole point.
-    ///
-    /// `setServiceEnabled` already rolls its optimistic state back, so without this the
+    /// /// `setServiceEnabled` already rolls its optimistic state back, so without this the
     /// operator sees the switch spring back and nothing else: no message, no error, and no
     /// way to tell a service that refused to stop from a button that was not pressed. A
     /// control the operator cannot read the result of is a control they will press again,
@@ -151,20 +179,217 @@ private final class ChannelLoopBox: @unchecked Sendable {
     private func handleServiceControlError(_ error: any Error, desiredState: Bool) {
         let wanted = desiredState ? "on" : "off"
         logger.error(
-            "Failed to set service state to \(wanted, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            "Failed to set service state to \(wanted, privacy: .public): \(error.localizedDescription, privacy: .public)",
         )
         pendingNotice = "Could not turn ExactMac \(wanted). \(error.localizedDescription)"
     }
 
     func quit() {
+        windows.closeAll()
         NSApp.terminate(nil)
+    }
+
+    // MARK: The windows
+
+    /// Opens the approval prompt for the request that is waiting.
+    /// /// NOTHING ELSE CAN ANSWER IT, which is why this exists at all. The popover states that
+    /// one request is waiting; before this, there was no way to see it, let alone answer
+    /// it, and a request that cannot be answered becomes a timeout and then a denial.
+    /// /// A NEW WINDOW EACH TIME is wrong and reusing is right: the same request has one nonce,
+    /// and a second window answering the same nonce would leave the operator deciding which
+    /// of two identical prompts they meant.
+    /// Installs a request the operator can be asked about.
+    /// /// THE SAME ENTRY THE CHANNEL USES, so a test that drives this drives the real path
+    /// rather than a parallel one: a second route into `pendingPrompt` would let a test
+    /// pass against state the console could never actually reach.
+    func deliverPending(_ request: PendingRequest) {
+        // A new request COLLAPSES the options, and the expansion was for the previous one.
+        // Leaving it set would offer the new request the previous one's breadth at a glance.
+        optionsExpandedFor = nil
+        pendingPrompt = request
+        pendingNotice = "\(request.executablePath) wants "
+            + "\(request.capability)"
+        apply(.pending)
+        // IT SURFACES ITSELF, AND THAT IS NOT OPTIONAL. A consent request expires, and one
+        // that expires unseen becomes a denial the operator never knew was asked for. Waiting
+        // for the operator to notice the menu bar dot and click it means the request has
+        // already timed out whenever they are not looking at the menu bar, which is almost
+        // always. The window orders front WITHOUT activating: the decision is on screen and
+        // the operator's keystrokes still go where they were going.
+        windows.present(.approval, title: "ExactMac needs your approval") {
+            approvalWindow(for: request)
+        }
+    }
+
+    /// The approval surface for one request.
+    /// /// A SEPARATE FUNCTION from `openApproval` because two callers need the same view and
+    /// they are not the same action: this one is the automatic surfacing when a request
+    /// arrives, and `openApproval` is the operator bringing it forward from the popover. They
+    /// must render identically, so they render the same view.
+    private func approvalWindow(for request: PendingRequest) -> some View {
+        ApprovalPrompt(
+            state: optionsExpandedFor == request.requestID ? .expanded : .pending,
+            title: "\(request.capability) · \(request.rpcName)",
+            capabilityLine: request.capability,
+            risk: request.basis,
+            riskDot: Design.Ink.caution,
+            clock: nil,
+            reason: request.agentReason,
+            implication: nil,
+            tree: CallerTree.rows(for: request),
+            target: request.scopeDescription,
+            payload: request.argumentSummary,
+            biometricLine: request.biometricReason
+                ?? "No ceremony is required for this option",
+            biometricDot: request.requiresBiometric ? Design.Ink.caution : Design.Ink.success,
+            moreChoicesLabel: request.offered.count > 1 ? "More choices" : nil,
+            showOptionsLabel: "Show options",
+            selectedOption: request.offered.first,
+            onDecision: { kind in
+                Task { await self.answer(kind, for: request) }
+            },
+            onCopyPayload: { self.copyToPasteboard(request.argumentSummary) },
+            onShowOptions: { self.expandOptions(for: request) },
+        )
+    }
+
+    /// Answers a request, performing the ceremony first when its option needs one.
+    /// /// Exposed rather than private so a test can drive the whole decision — ceremony, nonce
+    /// and posted decision — without a window server or a sensor. What is asserted is the
+    /// decision, which is the thing that must not be wrong.
+    func answer(_ kind: OptionRow.Kind, for request: PendingRequest) async {
+        await answerWithCeremony(kind, for: request)
+    }
+
+    /// Expands the collapsed affordances into the full option set for this request.
+    func expandOptions(for request: PendingRequest) {
+        optionsExpandedFor = request.requestID
+        refreshApprovalWindow(for: request)
+    }
+
+    /// Rebuilds the window's content, which is the only way an already-open window can come
+    /// to show something new.
+    /// /// REPLACING THE CONTENT VIEW RATHER THAN ORDERING THE WINDOW AGAIN, because the early
+    /// return that avoided a second window also avoided a refresh: a second request arriving
+    /// while the first was open found a window that still showed the first request, and
+    /// answering it would have posted a decision bound to the first request's nonce.
+    private func refreshApprovalWindow(for request: PendingRequest) {
+        windows.setContent(.approval) { self.approvalWindow(for: request) }
+    }
+
+    /// Brings the request the operator was already shown back to the front.
+    func openApproval() {
+        guard let request = pendingPrompt else { return }
+        // The operator clicked it, so it comes forward WITH the application: they asked for
+        // this window, and making them click again to raise it would be a worse answer than
+        // the one they gave.
+        windows.present(.approval, title: "ExactMac needs your approval", activates: true) {
+            approvalWindow(for: request)
+        }
+    }
+
+    /// Answers a request, performing the ceremony FIRST when the option needs one.
+    /// /// THE ORDER IS THE INVARIANT AND IT IS NOT NEGOTIABLE: a biometric success authorises
+    /// exactly one decision, so a decision that was already posted cannot be "upgraded" by a
+    /// ceremony performed afterwards. A failed or unavailable ceremony therefore denies, and
+    /// never downgrades to a weaker check.
+    private func answerWithCeremony(_ kind: OptionRow.Kind, for request: PendingRequest) async {
+        var biometricObtained = false
+        if request.requiresBiometric, kind != .deny {
+            // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
+            // console is frontmost, so the app has to come forward — but only once the
+            // operator has committed to an option that needs a sensor, which is the moment
+            // taking focus stops being an interruption and starts being the response to
+            // something they did.
+            windows.activateForCeremony()
+            guard let ceremony else {
+                await postDecision(kind, for: request, biometricObtained: false)
+                return
+            }
+            let outcome = await ceremony.perform(
+                requestID: AuthorizationRequestID(rawValue: request.requestID),
+                nonce: request.nonce,
+                reason: CeremonyReason.compose(request: request, option: kind),
+            )
+            switch outcome {
+            case .performed:
+                biometricObtained = true
+            case let .unavailable(failure):
+                // A CEREMONY THAT FAILED IS A DENIAL, and saying so is the whole point: the
+                // operator is not offered a cheaper path and is not left believing the
+                // weaker one was accepted.
+                pendingNotice = "The request was not approved: \(failure.explanation)"
+                logger.error(
+                    "A ceremony failed for \(request.requestID, privacy: .private): \(String(describing: failure), privacy: .public)",
+                )
+                await postDecision(.deny, for: request, biometricObtained: false)
+                return
+            }
+        }
+        await postDecision(kind, for: request, biometricObtained: biometricObtained)
+    }
+
+    private func postDecision(
+        _ kind: OptionRow.Kind,
+        for request: PendingRequest,
+        biometricObtained: Bool,
+    ) async {
+        windows.close(.approval)
+        await decide(
+            kind,
+            note: "",
+            for: request,
+            biometricObtained: biometricObtained,
+        )
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// The grants list, which is NOT YET AVAILABLE and says so rather than showing a lie.
+    /// /// The store persists each grant's expiry as nanoseconds on the SERVER's monotonic
+    /// timeline, so the countdown the row shows cannot be computed in this process: those
+    /// instants mean nothing here, and a chip counting down from a number it cannot
+    /// interpret is worse than no list. The server has to send display-ready rows, and until
+    /// it does the operator is told that instead of being shown a plausible wrong one.
+    func openGrants() {
+        Task { [weak self] in
+            guard let self else { return }
+            do { try await channel.query(.grants) } catch {
+                logger.warning("The grants query failed: \(error.localizedDescription, privacy: .public)")
+            }
+            pendingNotice = "The grants list needs a display shape the server does not send yet."
+        }
+    }
+
+    func openActivity() {
+        Task { [weak self] in
+            guard let self else { return }
+            do { try await channel.query(.activity) } catch {
+                logger.warning("The activity query failed: \(error.localizedDescription, privacy: .public)")
+            }
+            windows.present(.activity, title: "Activity") {
+                ActivityTimeline(
+                    rows: activityRows,
+                    integrity: activityIntegrity,
+                    subtitle: activitySubtitle,
+                )
+            }
+        }
+    }
+
+    func openSettings() {
+        windows.present(.settings, title: "Settings") {
+            SettingsWindow()
+        }
     }
 
     // MARK: The channel's whole lifecycle
 
     /// How long to wait before trying the server again, after a failed attempt.
-    ///
-    /// Long enough not to spin a menu-bar app against a server that is not there, short
+    /// /// Long enough not to spin a menu-bar app against a server that is not there, short
     /// enough that starting the server afterwards is noticed while the operator is still
     /// looking at the menu bar.
     static let reconnectDelay = Duration.seconds(2)
@@ -174,20 +399,17 @@ private final class ChannelLoopBox: @unchecked Sendable {
     private var lastConnectFailure: String?
 
     /// Connects, reads, and reconnects, for as long as the console is running.
-    ///
-    /// IT EXISTED NOWHERE, and that is not a detail. `ConsoleChannelClient.connect()` is
+    /// /// IT EXISTED NOWHERE, and that is not a detail. `ConsoleChannelClient.connect()` is
     /// written and tested, `poll()` is written and tested, and NOTHING CALLED EITHER: the
     /// console built a model whose `serviceState` was its initialiser default, drew a
-    /// plausible popover from it, and never spoke to the server at all. Every symptom
-    /// followed from that — the popover opened and showed rows that were not true, the
-    /// service toggle was the only live control, and the server refused every
-    /// consent-requiring capability with `consoleUnreachable` forever because no console
-    /// was ever authenticated.
-    ///
-    /// The loop is the whole design and it is deliberately dull: connect when not connected,
+    /// plausible popover from it, and never spoke to the server. Every symptom followed from
+    /// that — the popover showed rows that were not true, the service toggle was the only
+    /// live control, and the server refused every consent-requiring capability with
+    /// `consoleUnreachable` forever because no console was ever authenticated.
+    /// /// THE LOOP IS THE WHOLE DESIGN and it is deliberately dull: connect when not connected,
     /// read while connected, and treat a read failure as a disconnection so the next turn
-    /// reconnects. There is no state to reconcile because every state transition here is
-    /// driven by something that either succeeded or did not.
+    /// reconnects. There is no state to reconcile because every transition here is driven by
+    /// something that either succeeded or did not.
     func run() async {
         logger.info("Console channel loop started")
         while !Task.isCancelled {
@@ -201,13 +423,15 @@ private final class ChannelLoopBox: @unchecked Sendable {
                     // app with no server is a normal state for as long as the operator has
                     // not started one, so one line every two seconds would bury everything
                     // else — but an operator whose console never connects has to be able to
-                    // find out WHY, and "nothing in the log" is not an answer. The reason
-                    // changing is worth a line in its own right: "no server" and "the server
-                    // refused us" are different faults with different fixes.
+                    // find out WHY, and "nothing in the log" is not an answer. A changed
+                    // reason is worth its own line: "no server" and "the server refused us"
+                    // are different faults with different fixes.
                     let reason = String(describing: error)
                     if reason != lastConnectFailure {
                         lastConnectFailure = reason
-                        logger.notice("Console could not reach the server: \(reason, privacy: .public)")
+                        logger.notice(
+                            "Console could not reach the server: \(reason, privacy: .public)",
+                        )
                     }
                     apply(.unreachable)
                     try? await Task.sleep(for: Self.reconnectDelay)
@@ -221,8 +445,7 @@ private final class ChannelLoopBox: @unchecked Sendable {
     // MARK: Reading from the channel
 
     /// Pulls the next frame and folds it into the state the popover draws.
-    ///
-    /// A channel that is not connected is the `unreachable` state and the words say
+    /// /// A channel that is not connected is the `unreachable` state and the words say
     /// everything: the console is not running, so every consent-requiring capability is
     /// being denied, and that is the safe direction rather than a fault.
     func poll() async {
@@ -283,9 +506,7 @@ private final class ChannelLoopBox: @unchecked Sendable {
     private func handle(_ frame: ConsoleFrame) throws {
         switch frame {
         case let .pending(consent):
-            pendingPrompt = PendingRequest(consent: consent)
-            pendingNotice = "\(consent.identity.executablePath) wants "
-                + "\(consent.request.capability)"
+            deliverPending(PendingRequest(consent: consent))
             // THROUGH `apply`, like every other state change. It used to assign
             // `serviceState` directly, which meant a prompt arriving — the ONE transition
             // the operator most needs to see — produced no log line and no fail-closed
@@ -310,19 +531,44 @@ private final class ChannelLoopBox: @unchecked Sendable {
     /// operator agreed to a prompt nobody can see.
     func decide(_ kind: OptionRow.Kind, note: String) async {
         guard let prompt = pendingPrompt else { return }
-        defer { pendingPrompt = nil; pendingNotice = nil; serviceState = .running }
+        await decide(kind, note: note, for: prompt, biometricObtained: false)
+    }
+
+    /// Posts a decision for a SPECIFIC request.
+    /// /// The request is a parameter rather than read from `pendingPrompt` because a decision is
+    /// bound to one request's nonce and digest: a path that read whatever happened to be
+    /// pending could answer a different request than the one the operator was shown, which is
+    /// the confused deputy in its narrowest form.
+    func decide(
+        _ kind: OptionRow.Kind,
+        note: String,
+        for prompt: PendingRequest,
+        biometricObtained: Bool,
+    ) async {
+        // Only the request being answered stops being pending, so a second request that
+        // arrived while the operator was deciding is not silently discarded.
+        if pendingPrompt?.requestID == prompt.requestID {
+            pendingPrompt = nil
+            pendingNotice = nil
+            optionsExpandedFor = nil
+        }
+        apply(.running)
         let decision = ConsentDecision(
             requestID: prompt.requestID,
             nonce: prompt.nonce,
             requestDigest: prompt.requestDigest,
             isApproved: kind != .deny,
-            selected: kind.rawValue,
+            selected: kind.serverValue,
             note: note,
-            biometricObtained: false,
+            biometricObtained: biometricObtained,
         )
         do {
             try await channel.post(decision)
         } catch {
+            // A decision that could not be delivered is NOT a decision, and the operator has
+            // to be told so: the request is still waiting on the server, and pretending
+            // otherwise would leave them believing they had answered it.
+            pendingNotice = "The decision could not be delivered: \(error.localizedDescription)"
             logger.error(
                 "The decision could not be delivered: \(error.localizedDescription, privacy: .public)",
             )
@@ -333,6 +579,10 @@ private final class ChannelLoopBox: @unchecked Sendable {
 /// A request waiting on the operator, carrying the whole disclosure.
 struct PendingRequest: Equatable {
     let requestID: String
+    /// The pid the kernel named for the connection. Carried because the tree's first row IS
+    /// this process and a tree that could not name it would be asking the operator to trust
+    /// a row with no identity in it.
+    let processIdentifier: Int32
     let nonce: String
     let requestDigest: String
     let rpcName: String
@@ -360,6 +610,7 @@ struct PendingRequest: Equatable {
 
     init(consent: PendingConsent) {
         requestID = consent.request.requestID
+        processIdentifier = consent.identity.processIdentifier
         nonce = consent.nonce
         requestDigest = consent.requestDigest
         rpcName = consent.request.rpcName
@@ -369,13 +620,13 @@ struct PendingRequest: Equatable {
         agentReason = consent.request.agentReason
         executablePath = consent.identity.executablePath
         bundleIdentifier = consent.identity.bundleIdentifier
-        signature = SignatureBadge.State(rawValue: consent.identity.signature) ?? .unresolved
+        signature = SignatureBadge.State(serverValue: consent.identity.signature)
         isFullyResolved = consent.identity.isFullyResolved
         ancestors = consent.identity.ancestors.map {
             Ancestor(
                 processIdentifier: $0.processIdentifier,
                 executablePath: $0.executablePath,
-                signature: SignatureBadge.State(rawValue: $0.signature) ?? .unresolved,
+                signature: SignatureBadge.State(serverValue: $0.signature),
                 isFullyResolved: $0.isFullyResolved,
             )
         }
@@ -383,7 +634,10 @@ struct PendingRequest: Equatable {
         basis = consent.decision.basis
         requiresBiometric = consent.decision.requiresBiometric
         biometricReason = consent.decision.biometricReason
-        offered = consent.decision.offered.compactMap { OptionRow.Kind(rawValue: $0.kind) }
+        // MAPPED FROM THE SERVER'S NAMES, and an unrecognised one becomes Deny rather than
+        // being dropped: dropping it would leave the operator with no primary option at all, and
+        // a missing option is a worse failure than a wrong one the server will re-check.
+        offered = consent.decision.offered.map { OptionRow.Kind(serverValue: $0.kind) }
     }
 
     /// The caller tree, in the order the design draws it: nearest ancestor first and the

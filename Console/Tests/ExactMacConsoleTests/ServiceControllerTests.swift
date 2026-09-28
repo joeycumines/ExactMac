@@ -304,8 +304,8 @@ struct ServiceControllerTests {
 /// a pipe buffer here rather than mocked.
 @Suite("Launchctl executor")
 struct ProcessLaunchctlExecutorTests {
-    @Test("A child that outruns a pipe buffer still returns")
-    func testAChildLargerThanAPipeBufferStillReturns() async throws {
+    @Test
+    func `a child that outruns a pipe buffer still returns`() async throws {
         // Half a megabyte on both streams: more than twice the 64 KiB a pipe holds, so the
         // child blocks writing unless something is draining while it runs. Reading after
         // `waitUntilExit()` — what this replaced — deadlocks here, and it deadlocks SILENTLY.
@@ -319,8 +319,8 @@ struct ProcessLaunchctlExecutorTests {
         #expect(result.stderr == payload)
     }
 
-    @Test("The real launchctl answers print-disabled for this domain")
-    func testTheRealLaunchctlAnswers() async throws {
+    @Test
+    func `the real launchctl answers printdisabled for this domain`() async throws {
         let executor = ProcessLaunchctlExecutor()
         let result = try await executor.execute(arguments: ["print-disabled", "gui/\(getuid())"])
         #expect(result.exitCode == 0, "stderr: \(result.stderr)")
@@ -339,8 +339,8 @@ struct ProcessLaunchctlExecutorTests {
 @Suite("Console channel loop")
 struct ConsoleChannelLoopTests {
     @MainActor
-    @Test("The loop reports the safe state when there is no server")
-    func testTheLoopReportsUnreachableWhenThereIsNoServer() async throws {
+    @Test
+    func `the loop reports the safe state when there is no server`() async throws {
         let model = ConsoleModel(
             channel: ConsoleChannelClient(
                 socketPath: "/tmp/exactmac-no-such-console-\(UUID().uuidString).sock",
@@ -366,8 +366,8 @@ struct ConsoleChannelLoopTests {
     }
 
     @MainActor
-    @Test("Cancelling the loop stops it")
-    func testCancellingTheLoopStopsIt() async throws {
+    @Test
+    func `cancelling the loop stops it`() async throws {
         let model = ConsoleModel(
             channel: ConsoleChannelClient(
                 socketPath: "/tmp/exactmac-no-such-console-\(UUID().uuidString).sock",

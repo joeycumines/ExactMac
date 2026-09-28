@@ -154,13 +154,13 @@ final class ProductionRuntimeTests: XCTestCase {
         XCTAssertFalse(token.isEmpty, "the console token must not be empty")
 
         let connected = expectation(description: "the console channel accepted a connection")
-        let poll = Task { () -> Void in
+        let poll = Task { () in
             let client = ConsoleChannelClient(
                 socketPath: socketPath,
                 token: .shared(token),
             )
             while !Task.isCancelled {
-                if (try? await client.connect()) != nil {
+                if await (try? client.connect()) != nil {
                     // The handshake completing at all is the assertion: the server read the
                     // token, the console read the server's, and the peer uid matched.
                     XCTAssertTrue(client.isConnected)

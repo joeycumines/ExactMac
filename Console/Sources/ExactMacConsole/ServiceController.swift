@@ -76,8 +76,13 @@ private final class OutputCollector: @unchecked Sendable {
     private var out = ""
     private var err = ""
 
-    var stdout: String { lock.withLock { out } }
-    var stderr: String { lock.withLock { err } }
+    var stdout: String {
+        lock.withLock { out }
+    }
+
+    var stderr: String {
+        lock.withLock { err }
+    }
 
     func store(_ value: String, isStandardOutput: Bool) {
         lock.withLock {

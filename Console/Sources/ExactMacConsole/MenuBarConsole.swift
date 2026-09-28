@@ -103,8 +103,7 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
     /// The security footnote. The TCP card is the only one that abandons the
     /// `Unix socket · owner-only` shape, and that is the point: it is the one state
     /// where the system is exposed to a network.
-    ///
-    /// The strings are the design's, corrected in `docs/design.fig` first. They said
+    /// /// The strings are the design's, corrected in `docs/design.fig` first. They said
     /// "launchd-managed", which stopped being true when the server began binding its own
     /// socket and holding the pathname under a lock the kernel releases when it dies;
     /// launchd supervises the process and nothing else. `owner-only` is what the operator
@@ -132,8 +131,14 @@ struct MenuBarPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.component) {
             head
-            if let notice = model.pendingNotice {
-                PendingNotice(text: notice)
+            if let notice = model.pendingNotice, model.pendingPrompt != nil {
+                // A BUTTON, and that is the whole change. This row used to be a `VStack` of
+                // `Text`: the console displayed that a request was waiting and there was
+                // nothing to click, which is the state the operator reported as "it does
+                // nothing". It is the request's only entry point, so it is presented as one.
+                PendingNotice(text: notice) { model.openApproval() }
+            } else if let notice = model.pendingNotice {
+                PendingNotice(text: notice) {}
             } else if let band = model.failClosed {
                 FailClosedBand(title: band.title, text: band.body)
             }
@@ -180,9 +185,20 @@ struct MenuBarPopover: View {
 
     private var menu: some View {
         VStack(spacing: Design.Space.hair) {
-            MenuRow(title: "Grants", detail: model.activeGrantCount.map { "\($0) active" })
-            MenuRow(title: "Activity", detail: model.activityCount.map { formatted($0) })
-            MenuRow(title: "Settings", detail: nil)
+            // ACTIONS, where there were none. `MenuRow` has always been a `Button`; every
+            // call site passed the default no-op, so three rows that look like navigation
+            // did nothing at all.
+            MenuRow(
+                title: "Grants",
+                detail: model.activeGrantCount.map { "\($0) active" },
+                action: { model.openGrants() },
+            )
+            MenuRow(
+                title: "Activity",
+                detail: model.activityCount.map { formatted($0) },
+                action: { model.openActivity() },
+            )
+            MenuRow(title: "Settings", detail: nil, action: { model.openSettings() })
         }
     }
 
@@ -204,8 +220,16 @@ struct MenuBarPopover: View {
 /// know is open.
 private struct PendingNotice: View {
     let text: String
+    var onOpen: () -> Void = {}
 
     var body: some View {
+        Button(action: onOpen) {
+            pendingBody
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var pendingBody: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
             Text("1 request waiting for you")
                 .font(.system(size: 13, weight: .semibold))
