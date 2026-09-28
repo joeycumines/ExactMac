@@ -20,7 +20,8 @@ JavaScript, reads the accessibility tree of every application, captures the scre
 keeps a clipboard history, and synthesizes input as the user. **It performs no authentication and no
 authorization.** Any process that can reach its socket gets all of it.
 
-The socket is 0600 and launchd-activated, which is a real boundary against other user accounts and against
+The socket is created by the server, held under an advisory lock the kernel releases when the holder
+dies, and is 0600, which is a real boundary against other user accounts and against
 the network. It is not a boundary against the threat that matters, because the intended consumer of this
 product is an AI agent, and an AI agent runs as the same user as everything else. Any malware that has
 achieved execution as the user can reach the socket.

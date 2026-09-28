@@ -152,12 +152,12 @@ enum UnixSocketPeerEvidence {
 
     /// The peer's bound pathname, which is `getpeername` as SwiftNIO already read it.
     private static func token(for channel: any Channel) -> PeerConnectionToken? {
-        guard let peer = Self.pathname(of: channel.remoteAddress), !peer.isEmpty else { return nil }
+        guard let peer = pathname(of: channel.remoteAddress), !peer.isEmpty else { return nil }
         return PeerConnectionToken(peerDescription: "unix:\(peer)")
     }
 
     private static func listenerPathname(_ channel: any Channel) -> String? {
-        Self.pathname(of: channel.localAddress)
+        pathname(of: channel.localAddress)
     }
 
     /// The `sun_path` of a Unix socket address, or nil for any other address family.
@@ -182,14 +182,14 @@ enum UnixSocketPeerEvidence {
 /// manage and it has to decide what to do about one it did not create.
 ///
 /// THE DECISION IS AN ADVISORY LOCK, NOT A PROBE, and that choice was bought by measurement.
-/// The first version asked whether anything was listening by calling `connect(2)`, and a
-/// C probe on this machine showed that cannot answer the question: with the accept queue
-/// full, a non-blocking connect to a LIVE Unix listener returns `ECONNREFUSED` — the same
-/// errno a socket with no listener returns — and a blocking one does not return at all. So
-/// a probe both mistakes a busy server for a dead one, which would unlink a live server's
-/// node, and can hang the startup path on one. `flock(2)` answers it exactly, because the
-/// kernel releases the lock when the holder dies, so a node left behind by a crash is
-/// present and unlocked while a live server's is present and held.
+/// The first version asked whether anything was listening by calling `connect(2)`, and a C
+/// probe on this machine showed it cannot answer the question: with the accept queue full, a
+/// connect to a LIVE Unix listener returns `ECONNREFUSED` in under a millisecond, whether it
+/// is blocking or not — the same errno a socket with no listener returns, for the same reason
+/// the server is not reading. A probe therefore reports a busy server as a dead one, and the
+/// reclaim it drives would unlink a live server's node. `flock(2)` answers it exactly, because
+/// the kernel releases the lock when the holder dies: a node left behind by a crash is present
+/// and unlocked, while a live server's is present and held.
 enum UnixSocketNodeError: Error, Equatable, CustomStringConvertible {
     case pathIsNotASocket(String)
     case pathIsNotOwnedByThisUser(String, actual: uid_t)
@@ -228,7 +228,9 @@ enum UnixSocketNodeError: Error, Equatable, CustomStringConvertible {
 /// the kernel closes it if this process dies without releasing.
 final class SocketPathClaim: @unchecked Sendable {
     /// Beside the socket, so it is on the same filesystem and in the same owner-only place.
-    static func ownerNodePath(forSocketPath path: String) -> String { path + ".owner" }
+    static func ownerNodePath(forSocketPath path: String) -> String {
+        path + ".owner"
+    }
 
     let path: String
     private let ownerNodePath: String
@@ -240,6 +242,10 @@ final class SocketPathClaim: @unchecked Sendable {
         self.descriptor = descriptor
     }
 
+    /// The ONLY close of the lock descriptor, and it is here rather than in `release()`
+    /// because a second close is not an error the kernel reports: the number it closes is
+    /// whatever the process has been handed since, so a stale close of a released number
+    /// succeeds by destroying an unrelated live descriptor. One close, in the deinitializer.
     deinit {
         _ = Darwin.close(descriptor)
     }
@@ -255,15 +261,14 @@ final class SocketPathClaim: @unchecked Sendable {
         try UnixSocketNode.unlinkSocketNode(at: path)
         if unlink(ownerNodePath) != 0, errno != ENOENT {
             // A lock node this process cannot remove is a leftover, not a safety failure:
-            // the lock itself is released when the descriptor closes below, and the next
-            // start opens or replaces the node.
+            // the lock itself is released when this object goes, and the next start opens
+            // or replaces the node.
             throw UnixSocketNodeError.systemCall(
                 operation: "unlink",
                 path: ownerNodePath,
                 code: errno,
             )
         }
-        _ = Darwin.close(descriptor)
     }
 }
 
@@ -304,9 +309,19 @@ enum UnixSocketNode {
             // served by a process that is still alive.
             throw UnixSocketNodeError.pathAlreadyClaimed(path)
         }
+        // From here the lock is HELD, and it is released when the descriptor is closed. A
+        // throw below must still close it, or the pathname stays unclaimable for the life
+        // of a process that is about to carry on without a claim.
+        var locked = true
+        defer {
+            if locked {
+                _ = Darwin.close(descriptor)
+            }
+        }
         // Holding the claim is what makes removing a leftover node safe, so the removal
         // comes after it and not before.
         try unlinkSocketNode(at: path)
+        locked = false
         return SocketPathClaim(path: path, ownerNodePath: ownerNodePath, descriptor: descriptor)
     }
 
@@ -338,7 +353,9 @@ enum UnixSocketNode {
     static func unlinkSocketNode(at path: String) throws {
         var status = stat()
         guard path.withCString({ lstat($0, &status) }) == 0 else {
-            if errno == ENOENT { return }
+            if errno == ENOENT {
+                return
+            }
             throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
         }
         try requireOwnedSocketIgnoringMode(status, path: path)
@@ -360,14 +377,22 @@ enum UnixSocketNode {
     private static func requireOwnerOnlyLockNode(_ path: String) throws {
         var status = stat()
         guard path.withCString({ lstat($0, &status) }) == 0 else {
-            if errno == ENOENT { return }
+            if errno == ENOENT {
+                return
+            }
             throw UnixSocketNodeError.systemCall(operation: "lstat", path: path, code: errno)
         }
         guard status.st_mode & mode_t(0o170000) == mode_t(0o100000) else {
             throw UnixSocketNodeError.ownerNodeIsNotARegularFile(path)
         }
+        // OWNER-ONLY, NOT EXACTLY 0600, and the reason is the same as for the socket node:
+        // `open(3)` masks the mode it is given, so a process whose umask is 0277 or 0777
+        // creates this node as 0400 or 0000, and requiring exactly 0600 would make the
+        // pathname unclaimable on every subsequent start for a server that merely ran once
+        // under a permissive umask. The mode carries no evidence about a lock; the held
+        // lock does.
         let permissions = status.st_mode & 0o777
-        guard permissions == 0o600 else {
+        guard permissions & 0o077 == 0 else {
             throw UnixSocketNodeError.ownerNodeIsNotOwnerOnly(path, actual: permissions)
         }
     }
@@ -432,13 +457,19 @@ final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory
         connectionConfigurator: HTTP2ServerTransport.ConnectionConfigurator,
     ) async throws -> NIOAsyncChannel<ConnectionChannel, Never> {
         let held = try UnixSocketNode.claim(socketPath)
+        // The listening channel itself, so a failure AFTER the bind can close it. It is
+        // captured from the server channel initializer because `NIOAsyncChannel` exposes no
+        // close of its own, and a listener left open behind a released claim is a listener
+        // still accepting on a pathname nobody owns.
+        let listeningChannel = ListeningChannelReference()
         do {
             let channel = try await ServerBootstrap(group: eventLoopGroup)
                 .serverChannelInitializer { channel in
+                    listeningChannel.record(channel)
                     // The quiescing handler the listener configurator installs is what makes
                     // `beginGracefulShutdown` close the LISTENER; omitting it would leave the
                     // process accepting connections it has already stopped serving.
-                    listenerConfigurator.configure(channel: channel)
+                    return listenerConfigurator.configure(channel: channel)
                 }
                 .bind(
                     unixDomainSocketPath: socketPath,
@@ -448,12 +479,22 @@ final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory
                         connectionConfigurator.configure(channel: channel, tls: .none)
                     }
                 }
-            // After the bind, because before it there is no node to check, and after it there
-            // is no second chance: a listener left accessible to another user is a listener
-            // this server cannot honestly call owner-only.
-            try UnixSocketNode.hardenBoundNode(at: socketPath)
-            // Only now, once the node exists and is this process's, does the claim become
-            // the fact the shutdown path is allowed to act on.
+            // HOISTED, and hoisted because of what used to be here. A throw after the bind
+            // left the listening channel open and unreachable, and the claim it then released
+            // unlinked the pathname out from under a socket that was still accepting. The
+            // channel is now in scope for the failure path, so a post-bind failure closes the
+            // listener before it drops the claim.
+            do {
+                // After the bind, because before it there is no node to check, and after it
+                // there is no second chance: a listener left accessible to another user is a
+                // listener this server cannot honestly call owner-only.
+                try UnixSocketNode.hardenBoundNode(at: socketPath)
+            } catch {
+                try? await listeningChannel.close()
+                throw error
+            }
+            // Only now, once the node exists and is this process's, does the claim become the
+            // fact the shutdown path is allowed to act on.
             claim.withLock { $0 = held }
             logger.info("gRPC listener bound at \(self.socketPath, privacy: .public)")
             return channel
@@ -483,6 +524,10 @@ final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory
             .flatMapThrowing { identification -> any Channel in
                 switch identification {
                 case let .identified(token, evidence):
+                    // A REFUSED REGISTRATION IS NOT AN IDENTIFIED CONNECTION. Past the
+                    // ceiling the entry does not exist, so every capability on this
+                    // connection resolves to nothing and denies, which is the fail-closed
+                    // answer and not the alternative of attributing it to another.
                     let registration = registry.register(token, evidence: evidence)
                     try channel.pipeline.syncOperations.addHandler(
                         PeerConnectionLifetime(registry: registry, registration: registration),
@@ -516,10 +561,35 @@ final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory
 
 /// Retires a connection's token when that connection closes.
 ///
+/// The listening channel, for the one failure path that needs to close it.
+private final class ListeningChannelReference: @unchecked Sendable {
+    private let channel = Mutex<(any Channel)?>(nil)
+
+    func record(_ channel: any Channel) {
+        self.channel.withLock { $0 = channel }
+    }
+
+    func close() async throws {
+        guard let channel = channel.withLock({ $0 }) else { return }
+        try await channel.close().get()
+    }
+}
+
+/// Retires a connection's token when that connection closes.
+///
 /// A `ChannelInboundHandler` installed ahead of the HTTP/2 and gRPC handlers, and it
 /// forwards everything it sees, so it changes nothing about the byte stream. The inbound
 /// type is `ByteBuffer` because an accepted `SocketChannel` has an empty pipeline when the
 /// child initializer runs and the socket channel's own read type is what reaches it.
+///
+/// IT DEPENDS ON THE IDENTIFICATION BEING SYNCHRONOUS, which is a real constraint on future
+/// edits rather than an incidental detail. `unsafeGetSocketOption` completes its promise
+/// inline when it is already on the event loop, so the whole identification runs inside the
+/// child initializer and this handler is installed before the child can become inactive. A
+/// future step that hops threads would let a peer disconnect before the handler existed, and
+/// `channelInactive` would fire into a pipeline this handler is not in — silently leaking a
+/// live registration. The fix then is to retire from `channel.closeFuture` in the accept
+/// path rather than from a pipeline event.
 final class PeerConnectionLifetime: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     typealias InboundOut = ByteBuffer
@@ -541,9 +611,5 @@ final class PeerConnectionLifetime: ChannelInboundHandler, @unchecked Sendable {
             registry.retire(registration)
         }
         context.fireChannelInactive()
-    }
-
-    func errorCaught(context: ChannelHandlerContext, error: any Error) {
-        context.fireErrorCaught(error)
     }
 }

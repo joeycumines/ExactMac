@@ -123,9 +123,9 @@ private func performGracefulShutdown(
 /// accommodate that would put two copies of the shutdown ordering on this file. The
 /// transport is therefore chosen by `main()` before anything is built.
 @MainActor
-func serve<Transport: ServerTransport>(
-    config: ServerConfig,
-    transport: Transport,
+func serve(
+    config _: ServerConfig,
+    transport: some ServerTransport,
     authorizationRuntime: AuthorizationRuntime,
     listenerFactory: PeerIdentifyingListenerFactory?,
 ) async throws {
@@ -354,4 +354,15 @@ func main() async throws {
     )
 }
 
-try await main()
+// A STARTUP FAILURE IS A CLEAN ERROR, NOT A TRAP. `try await main()` at top level turns any
+// throw into a Swift runtime error, which prints a stack-ish "Fatal error: Error raised at
+// top level" to stderr and aborts. The most likely startup failure in this system is a
+// pathname another server already holds, and an operator who hits it deserves the sentence
+// the server actually has — "is claimed by a running server; refusing to take the pathname
+// over" — rather than a trap that hides it behind a transport error.
+do {
+    try await main()
+} catch {
+    logger.error("ExactMacServer failed to start: \(String(describing: error), privacy: .public)")
+    Foundation.exit(1)
+}

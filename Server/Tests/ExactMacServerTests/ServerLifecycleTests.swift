@@ -139,6 +139,13 @@ struct ServerLifecycleTests {
         #expect(throws: UnixSocketNodeError.pathAlreadyClaimed(path)) {
             _ = try UnixSocketNode.claim(path)
         }
+        // The sentence an operator reads when a second server will not start. Asserted here
+        // because os.Logger writes to the unified log rather than to the process's stderr,
+        // so a subprocess test cannot read it.
+        #expect(
+            UnixSocketNodeError.pathAlreadyClaimed(path).description
+                == "\(path) is claimed by a running server; refusing to take the pathname over",
+        )
         #expect(FileManager.default.fileExists(atPath: path))
         #expect(canConnect(to: path))
     }
@@ -163,6 +170,13 @@ struct ServerLifecycleTests {
         #expect(throws: UnixSocketNodeError.pathAlreadyClaimed(path)) {
             _ = try UnixSocketNode.claim(path)
         }
+        // The sentence an operator reads when a second server will not start. Asserted here
+        // because os.Logger writes to the unified log rather than to the process's stderr,
+        // so a subprocess test cannot read it.
+        #expect(
+            UnixSocketNodeError.pathAlreadyClaimed(path).description
+                == "\(path) is claimed by a running server; refusing to take the pathname over",
+        )
         #expect(FileManager.default.fileExists(atPath: path))
     }
 

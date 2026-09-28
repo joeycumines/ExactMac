@@ -108,7 +108,10 @@ func (d *peerIdentityDialer) dial(ctx context.Context, address string) (net.Conn
 		_ = connection.Close()
 		return nil, fmt.Errorf("the client socket was created without a name, so the server cannot identify this caller")
 	}
-	return &namedConn{Conn: connection, name: name, remove: d.remove}, nil
+	return &namedConn{
+		Conn:   connection,
+		forget: func() { d.remove(name) },
+	}, nil
 }
 
 // reserveName picks a name this socket can take. A name that is already in use is not a
@@ -148,16 +151,21 @@ func (d *peerIdentityDialer) remove(name string) {
 // server would then see two live connections presenting one token and attribute the first's
 // calls to the second's identity. A blocking connect is not an option either — the token has
 // to disappear before Close returns, and the socket has to be closed first for that to hold.
+// forget removes THIS connection's socket name, once and only once. It is a closure rather
+// than a stored name and a remover because the name has no other reader, and the struct
+// carries one pointer-bearing field fewer for it.
 type namedConn struct {
+	// ORDERED FOR GC SCAN WORK, NOT FOR READING. The pointer-bearing fields are adjacent and
+	// the pointer-free one trails, which is what `go.betteralign` measures; reordering this
+	// is a lint failure, so do not "tidy" it.
+	forget func()
 	net.Conn
-	name   string
-	remove func(string)
-	once   sync.Once
+	once sync.Once
 }
 
 func (c *namedConn) Close() error {
 	err := c.Conn.Close()
-	c.once.Do(func() { c.remove(c.name) })
+	c.once.Do(c.forget)
 	return err
 }
 

@@ -89,9 +89,8 @@ final class PeerIdentificationTests: XCTestCase {
     /// carried, and the RPC was refused, so carrying it bought the caller nothing.
     func testAnUnnamedPeerCarriesRealTrafficAndIsRefused() async throws {
         try await withHarness { harness in
-
-            let client = GRPCClient(
-                transport: try .http2NIOPosix(
+            let client = try GRPCClient(
+                transport: .http2NIOPosix(
                     target: .unixDomainSocket(path: harness.socketPath),
                     transportSecurity: .plaintext,
                 ),
@@ -140,7 +139,6 @@ final class PeerIdentificationTests: XCTestCase {
     /// attribution poisons the next connection.
     func testTheListenerKeepsIdentifyingAfterAnUnnamedPeer() async throws {
         try await withHarness { harness in
-
             let anonymous = try UnixClient(connectTo: harness.socketPath, bindingPeerNameTo: nil)
             defer { anonymous.close() }
             let named = harness.directory.appending("after-anonymous.sock")
@@ -170,7 +168,7 @@ final class PeerIdentificationTests: XCTestCase {
         do {
             _ = try await interceptor.intercept(
                 request: Self.request(Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" }),
-                context: try await Self.context(peer: "unix:/some/listener.sock"),
+                context: Self.context(peer: "unix:/some/listener.sock"),
                 next: { _, _ in
                     handler.wasEntered = true
                     throw RPCError(code: .internalError, message: "the handler was reached")
@@ -220,8 +218,8 @@ final class PeerIdentificationTests: XCTestCase {
         let first = PeerProcessEvidence(processIdentifier: 100, effectiveUserIdentifier: 501)
         let second = PeerProcessEvidence(processIdentifier: 200, effectiveUserIdentifier: 501)
 
-        let firstRegistration = registry.register(token, evidence: first)
-        let secondRegistration = registry.register(token, evidence: second)
+        let firstRegistration = try XCTUnwrap(registry.register(token, evidence: first))
+        let secondRegistration = try XCTUnwrap(registry.register(token, evidence: second))
         registry.retire(firstRegistration)
 
         XCTAssertEqual(
@@ -230,6 +228,47 @@ final class PeerIdentificationTests: XCTestCase {
         )
         registry.retire(secondRegistration)
         XCTAssertNil(registry.evidence(forPeerDescription: "unix:/tmp/token"))
+    }
+
+    /// The live map is bounded, and the answer past the ceiling is that the connection is not
+    /// identified — which is a denial, not a degraded attribution.
+    func testTheLiveMapIsBoundedAndRefusesPastTheCeiling() throws {
+        let registry = ConnectionPeerRegistry()
+        for index in 0 ..< ConnectionPeerRegistry.maximumLiveConnections {
+            let token = try XCTUnwrap(
+                PeerConnectionToken(peerDescription: "unix:/tmp/holder-\(index)"),
+            )
+            XCTAssertNotNil(
+                registry.register(token, evidence: PeerProcessEvidence(
+                    processIdentifier: Int32(index + 1),
+                    effectiveUserIdentifier: 501,
+                )),
+                "connection \(index) was refused below the ceiling",
+            )
+        }
+        let overflow = try XCTUnwrap(PeerConnectionToken(peerDescription: "unix:/tmp/overflow"))
+        XCTAssertNil(
+            registry.register(overflow, evidence: PeerProcessEvidence(
+                processIdentifier: 9999,
+                effectiveUserIdentifier: 501,
+            )),
+            "a connection past the ceiling must not be attributed to anyone",
+        )
+        XCTAssertEqual(registry.liveCount, ConnectionPeerRegistry.maximumLiveConnections)
+        XCTAssertNil(registry.evidence(forPeerDescription: "unix:/tmp/overflow"))
+
+        // Closing one frees exactly one slot, which is what makes the ceiling a bound rather
+        // than a permanent shutdown.
+        let holder = try XCTUnwrap(PeerConnectionToken(peerDescription: "unix:/tmp/holder-0"))
+        let firstRegistration = try XCTUnwrap(registry.register(holder, evidence: PeerProcessEvidence(
+            processIdentifier: 1,
+            effectiveUserIdentifier: 501,
+        )))
+        registry.retire(firstRegistration)
+        XCTAssertNotNil(registry.register(overflow, evidence: PeerProcessEvidence(
+            processIdentifier: 9999,
+            effectiveUserIdentifier: 501,
+        )))
     }
 
     /// A token is only ever looked up in the Unix-socket form. A TCP-shaped description has no
@@ -249,7 +288,7 @@ final class PeerIdentificationTests: XCTestCase {
     /// A TCP connection is not an authentic Unix stream, and accepting it would be claiming
     /// an identity the kernel gives no standing for.
     func testATCPConnectionIsRefusedAtAccept() async throws {
-        try await withHarness { harness in
+        try await withHarness { _ in
             let refused = Counter()
             let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
             defer { group.shutdownGracefully { _ in } }
@@ -358,7 +397,9 @@ private func XCTAssertEventually(
 ) async throws {
     let deadline = ContinuousClock.now.advanced(by: timeout)
     while ContinuousClock.now < deadline {
-        if (try? condition()) == true { return }
+        if (try? condition()) == true {
+            return
+        }
         try await Task.sleep(for: .milliseconds(20))
     }
     XCTFail(message, file: file, line: line)
@@ -377,7 +418,7 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
     /// Named rather than written inline: `GRPCServer` is generic over its TRANSPORT, and an
     /// empty service list would give the compiler nothing to infer that parameter from.
     typealias Transport = PublicRequestValidatingServerTransport<
-        HTTP2ServerTransport.Custom<PeerIdentifyingListenerFactory>
+        HTTP2ServerTransport.Custom<PeerIdentifyingListenerFactory>,
     >
 
     let socketPath: String
@@ -428,7 +469,7 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
             socketPath: socketPath,
             registry: registry,
         )
-        let server: GRPCServer<Transport> = GRPCServer(
+        let server: GRPCServer<Transport> = try GRPCServer(
             transport: productionServerTransport(
                 HTTP2ServerTransport.Custom(listenerFactory: listener),
             ),
@@ -436,7 +477,7 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
             interceptors: productionServerInterceptors(
                 AuthorizationInterceptor(
                     runtime: .unixSocket(
-                        descriptorPolicy: try PublicRequestDescriptorPolicy.load(),
+                        descriptorPolicy: PublicRequestDescriptorPolicy.load(),
                         isConsoleReachable: true,
                         peerEvidence: .registry(registry),
                     ),

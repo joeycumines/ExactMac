@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"maps"
 	"net"
 	"os"
@@ -129,41 +130,187 @@ func TestSwiftServerLifecycle_PreexistingUnixDirectoryAndSymlinkArePreserved(t *
 	})
 }
 
-// Manual runs must omit GRPC_UNIX_SOCKET (DEPLOYMENT.md). Without launchd
-// socket activation the server fails closed and must not create the pathname.
-func TestSwiftServerLifecycle_UnixSocketWithoutLaunchdFailsClosedWithoutCreatingPath(t *testing.T) {
+// The server binds its OWN Unix socket. It has to: reading the caller's pid is the only
+// way it can know who is calling, that read happens at accept, and SwiftNIO can only accept
+// from a socket it bound itself. So a manual run with GRPC_UNIX_SOCKET set and no launchd
+// serves, and the node it creates is owner-only with a lock node beside it — which is what
+// the launchd-owned socket used to guarantee for free.
+func TestSwiftServerLifecycle_UnixSocketBindsItsOwnOwnerOnlyNode(t *testing.T) {
 	socketPath := newShortSwiftSocketPath(t)
 	cmd, logs := startSwiftLifecycleProcess(t, map[string]string{
 		"GRPC_UNIX_SOCKET": socketPath,
 	})
-	waitErr, forced := integrationfixture.WaitChild(cmd, swiftServerLifecycleTimeout)
-	if forced {
-		t.Fatalf("server stayed alive without launchd activation; logs=%q", logs.String())
+	waitForSwiftUnixSocket(t, socketPath, logs)
+
+	if err := assertOwnerOnlySocketNode(socketPath); err != nil {
+		t.Fatalf("bound socket node: %v; logs=%q", err, logs.String())
 	}
-	if waitErr == nil || cmd.ProcessState == nil || cmd.ProcessState.Success() {
-		t.Fatalf("Unix-socket exit=%v state=%v, want prompt nonzero without launchd; logs=%q", waitErr, cmd.ProcessState, logs.String())
+	lockPath := socketPath + ".owner"
+	info, err := os.Lstat(lockPath)
+	if err != nil {
+		t.Fatalf("the pathname claim node is missing: %v; logs=%q", err, logs.String())
 	}
-	if _, err := os.Lstat(socketPath); !os.IsNotExist(err) {
-		t.Fatalf("fail-closed activation created pathname (err=%v); logs=%q", err, logs.String())
+	if !info.Mode().IsRegular() {
+		t.Fatalf("the claim node is not a regular file: mode=%v", info.Mode())
 	}
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("the claim node is mode %#o; owner-only is required", info.Mode().Perm())
+	}
+
+	// A clean SIGTERM removes both nodes: the socket outlives its descriptor, and a node with
+	// no listener behind it is what the next start has to reclaim. SIGTERM, not a kill:
+	// integrationfixture.StopChild SIGKILLs, and a process that cannot run its own shutdown
+	// is the crash case, which the next test covers.
+	if err := integrationfixture.StopChildGracefully(cmd, swiftServerLifecycleTimeout); err != nil {
+		t.Fatalf("stop the server with SIGTERM: %v; logs=%q", err, logs.String())
+	}
+	assertPathAbsentAfterExit(t, socketPath)
+	assertPathAbsentAfterExit(t, lockPath)
 }
 
-func TestSwiftServerLifecycle_UnixSocketFailClosedReportsLaunchdActivationRequired(t *testing.T) {
+// A server that is KILLED cannot remove anything, so both nodes survive. What must not
+// survive is the lock: the kernel releases it with the process, so the next start reclaims
+// the pathname with no operator clearing it by hand. That is the whole reason the claim is
+// an advisory lock rather than a live probe.
+func TestSwiftServerLifecycle_KilledServerLeavesNodesTheNextStartReclaims(t *testing.T) {
 	socketPath := newShortSwiftSocketPath(t)
-	cmd, logs := startSwiftLifecycleProcess(t, map[string]string{
+	killed, killedLogs := startSwiftLifecycleProcess(t, map[string]string{
 		"GRPC_UNIX_SOCKET": socketPath,
 	})
-	waitErr, forced := integrationfixture.WaitChild(cmd, swiftServerLifecycleTimeout)
-	if forced || waitErr == nil || cmd.ProcessState == nil || cmd.ProcessState.Success() {
-		t.Fatalf("Unix-socket exit=%v forced=%t state=%v, want prompt nonzero; logs=%q", waitErr, forced, cmd.ProcessState, logs.String())
+	waitForSwiftUnixSocket(t, socketPath, killedLogs)
+	stopSwiftLifecycleProcess(t, killed) // SIGKILL
+
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatalf("a killed server's socket node should survive: %v", err)
 	}
-	message := logs.String()
-	if !bytes.Contains([]byte(message), []byte("launchdActivationRequired")) {
-		t.Fatalf("missing launchdActivationRequired in logs: %q", message)
+	if _, err := os.Lstat(socketPath + ".owner"); err != nil {
+		t.Fatalf("a killed server's claim node should survive: %v", err)
 	}
-	if !bytes.Contains([]byte(message), []byte(socketPath)) {
-		t.Fatalf("missing configured socket path in logs: %q", message)
+
+	nodeBefore, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("stat the killed server's node: %v", err)
 	}
+	restarted, restartedLogs := startSwiftLifecycleProcess(t, map[string]string{
+		"GRPC_UNIX_SOCKET": socketPath,
+	})
+	// The node is ALREADY there, because the killed server could not remove it, so waiting
+	// for it to exist would prove nothing. Waiting for it to be REPLACED is what proves the
+	// new server reclaimed the pathname.
+	waitForSwiftUnixNodeToBeReplaced(t, socketPath, nodeBefore, restartedLogs)
+	if err := integrationfixture.StopChildGracefully(restarted, swiftServerLifecycleTimeout); err != nil {
+		t.Fatalf("stop the restarted server: %v; logs=%q", err, restartedLogs.String())
+	}
+	assertPathAbsentAfterExit(t, socketPath)
+	assertPathAbsentAfterExit(t, socketPath+".owner")
+}
+
+// A pathname a LIVE server is already serving is refused, and refusing is non-destructive:
+// the second server must leave both nodes in place, because they belong to the first.
+func TestSwiftServerLifecycle_LiveUnixSocketIsRefusedNonDestructively(t *testing.T) {
+	socketPath := newShortSwiftSocketPath(t)
+	first, firstLogs := startSwiftLifecycleProcess(t, map[string]string{
+		"GRPC_UNIX_SOCKET": socketPath,
+	})
+	waitForSwiftUnixSocket(t, socketPath, firstLogs)
+	if err := assertOwnerOnlySocketNode(socketPath); err != nil {
+		t.Fatalf("first server's node: %v", err)
+	}
+	// Identity, not contents: a socket node cannot be read, and what matters is that the
+	// refused server did not replace the node it was refused.
+	nodeBefore, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("stat the first server's node before the second starts: %v", err)
+	}
+	lockBefore, err := os.Lstat(socketPath + ".owner")
+	if err != nil {
+		t.Fatalf("stat the first server's claim node: %v", err)
+	}
+
+	second, secondLogs := startSwiftLifecycleProcess(t, map[string]string{
+		"GRPC_UNIX_SOCKET": socketPath,
+	})
+	waitErr, forced := integrationfixture.WaitChild(second, swiftServerLifecycleTimeout)
+	if forced || waitErr == nil || second.ProcessState == nil || second.ProcessState.Success() {
+		t.Fatalf("second server exit=%v forced=%t state=%v, want prompt nonzero; logs=%q",
+			waitErr, forced, second.ProcessState, secondLogs.String())
+	}
+	// The REASON is asserted where it is directly reachable, in the unit suite for
+	// UnixSocketNodeError; os.Logger writes to the unified log rather than to the process's
+	// stderr, so a subprocess test cannot read the sentence and asserting on an empty buffer
+	// would prove nothing. What is asserted here is the behaviour the reason describes: a
+	// prompt nonzero exit, with both nodes still belonging to the first server.
+	nodeAfter, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("the refused server removed the live server's node: %v", err)
+	}
+	if !os.SameFile(nodeBefore, nodeAfter) {
+		t.Fatalf("the refused server replaced the live server's node")
+	}
+	lockAfter, err := os.Lstat(socketPath + ".owner")
+	if err != nil {
+		t.Fatalf("the refused server removed the live server's claim node: %v", err)
+	}
+	if !os.SameFile(lockBefore, lockAfter) {
+		t.Fatalf("the refused server replaced the live server's claim node")
+	}
+	// And the first server is still serving it.
+	stopSwiftLifecycleProcess(t, first)
+}
+
+func waitForSwiftUnixSocket(t *testing.T, path string, logs *bytes.Buffer) {
+	t.Helper()
+	deadline := time.Now().Add(swiftServerLifecycleTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Lstat(path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("the server never bound %q; logs=%q", path, logs.String())
+}
+
+// assertOwnerOnlySocketNode asserts the bound node is a socket this user owns, and that only
+// the owner can connect to it — the property launchd's SockPathMode used to provide.
+func assertOwnerOnlySocketNode(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("not a socket: mode=%v", info.Mode())
+	}
+	if info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("mode is %#o, want 0600", info.Mode().Perm())
+	}
+	if info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+		return fmt.Errorf("owned by uid %d, want %d", info.Sys().(*syscall.Stat_t).Uid, os.Geteuid())
+	}
+	return nil
+}
+
+func waitForSwiftUnixNodeToBeReplaced(t *testing.T, path string, before os.FileInfo, logs *bytes.Buffer) {
+	t.Helper()
+	deadline := time.Now().Add(swiftServerLifecycleTimeout)
+	for time.Now().Before(deadline) {
+		if current, err := os.Lstat(path); err == nil && !os.SameFile(before, current) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("the restarted server never replaced the stale node at %q; logs=%q", path, logs.String())
+}
+
+func assertPathAbsentAfterExit(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(swiftServerLifecycleTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("%q survived the server's exit", path)
 }
 
 func TestSwiftServerLifecycle_SIGTERMDrainsAndExitsZero(t *testing.T) {

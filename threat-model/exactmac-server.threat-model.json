@@ -6,7 +6,7 @@
   "frozen": false,
   "scope": {
     "title": "ExactMac gRPC automation server and its consent plane",
-    "description": "ExactMac is a macOS automation server. It exposes 68 gRPC methods on exactmac.v1.ExactMac and, by design, performs work that ordinary applications are not permitted to perform: it executes arbitrary AppleScript, JavaScript for Automation, and shell commands; it reads the accessibility tree of every running application; it captures the screen; it reads and writes the system clipboard and keeps a clipboard history; and it synthesizes mouse and keyboard input, acting as the user. The server runs as a launchd-activated daemon, holds the Accessibility TCC grant, and therefore holds the ambient authority of the logged-in user. The product's purpose is to let AI agents drive a Mac, so the requesting party is normally an untrusted-by-default automated process rather than a human operator. This model covers the server, the authorization and consent plane being built around it, and the exact trust story of its two deployment variants. It does not cover the Go MCP proxy except as a calling peer, nor the macOS kernel, nor physical access to the machine.",
+    "description": "ExactMac is a macOS automation server. It exposes 68 gRPC methods on exactmac.v1.ExactMac and, by design, performs work that ordinary applications are not permitted to perform: it executes arbitrary AppleScript, JavaScript for Automation, and shell commands; it reads the accessibility tree of every running application; it captures the screen; it reads and writes the system clipboard and keeps a clipboard history; and it synthesizes mouse and keyboard input, acting as the user. The server runs as a per-user LaunchAgent under launchd, holds the Accessibility TCC grant, and therefore holds the ambient authority of the logged-in user. The product's purpose is to let AI agents drive a Mac, so the requesting party is normally an untrusted-by-default automated process rather than a human operator. This model covers the server, the authorization and consent plane being built around it, and the exact trust story of its two deployment variants. It does not cover the Go MCP proxy except as a calling peer, nor the macOS kernel, nor physical access to the machine.",
     "business_criticality": "maximal",
     "data_sensitivity": [
       "pii",
@@ -18,13 +18,13 @@
     "exposure": "external",
     "tier": "mission_critical"
   },
-  "description": "WHY EXPOSURE IS EXTERNAL. ServerConfig.fromEnvironment reads GRPC_LISTEN_ADDRESS, which defaults to 127.0.0.1 but is not constrained to it, and the transport is constructed as HTTP2ServerTransport.Posix with transportSecurity .plaintext in BOTH the Unix-socket and the TCP branch of main.swift. A supported configuration therefore produces a network-reachable, unencrypted, unauthenticated endpoint on a process that can execute shell commands. That single fact is why this is modelled as external exposure rather than a purely local service.\n\nWHY BUSINESS CRITICALITY IS MAXIMAL. The server's authority is the user's authority. Shell execution is a documented feature, not a bug. Screen capture and accessibility reads will routinely encounter passwords, one-time codes, private correspondence, banking interfaces, and source code. Compromise of this process is equivalent to full compromise of the user's desktop session, with no additional privilege required to act.\n\nTHE CENTRAL SECURITY FACT, WHICH THE REST OF THIS MODEL ORGANIZES AROUND. There is no authentication in the server today. Grepping the server sources for authorization, consent, grant, approval, or principal returns nothing; the only permission handling is macOS TCC messaging. The Unix socket pathname is 0600 and launchd-activated, so reaching it requires running as the owning user. That is a real boundary against other accounts and against the network, and it is the intended authentication for the production variant. It is NOT a boundary against the dominant threat, because the legitimate consumer of this product is an AI agent, and an AI agent runs as the same user as everything else the user runs. Any malware that has achieved execution as the user can reach the socket. The honest consequence is that this system cannot cryptographically distinguish the user's own agent from malware running as the user, and must instead make the human a well-informed, low-friction judge. Every control below is chosen in service of that.",
+  "description": "WHY EXPOSURE IS EXTERNAL. ServerConfig.fromEnvironment reads GRPC_LISTEN_ADDRESS, which defaults to 127.0.0.1 but is not constrained to it, and the transport is constructed as HTTP2ServerTransport.Posix with transportSecurity .plaintext in BOTH the Unix-socket and the TCP branch of main.swift. A supported configuration therefore produces a network-reachable, unencrypted, unauthenticated endpoint on a process that can execute shell commands. That single fact is why this is modelled as external exposure rather than a purely local service.\n\nWHY BUSINESS CRITICALITY IS MAXIMAL. The server's authority is the user's authority. Shell execution is a documented feature, not a bug. Screen capture and accessibility reads will routinely encounter passwords, one-time codes, private correspondence, banking interfaces, and source code. Compromise of this process is equivalent to full compromise of the user's desktop session, with no additional privilege required to act.\n\nTHE CENTRAL SECURITY FACT, WHICH THE REST OF THIS MODEL ORGANIZES AROUND. There is no authentication in the server today. Grepping the server sources for authorization, consent, grant, approval, or principal returns nothing; the only permission handling is macOS TCC messaging. The Unix socket pathname is created by the server, held under an advisory lock the kernel releases when the holder dies, and chmod-ed to 0600, so reaching it requires running as the owning user. That is a real boundary against other accounts and against the network, and it is the intended authentication for the production variant. It is NOT a boundary against the dominant threat, because the legitimate consumer of this product is an AI agent, and an AI agent runs as the same user as everything else the user runs. Any malware that has achieved execution as the user can reach the socket. The honest consequence is that this system cannot cryptographically distinguish the user's own agent from malware running as the user, and must instead make the human a well-informed, low-friction judge. Every control below is chosen in service of that.",
   "diagrams": [
     {
       "title": "Trust boundaries by deployment variant",
       "type": "mermaid",
       "description": "The two supported deployment variants have materially different trust stories, and conflating them is the central modelling error this model avoids.",
-      "source": "flowchart TB\n  subgraph variant_socket[Unix socket variant - supported production mode]\n    AG[agent-process-zone<br/>AI agent, MCP client,<br/>any process as the owning user]\n    OS[os-platform-zone<br/>launchd, TCC, Security.framework]\n    SRV[exactmac-server-zone<br/>gRPC listener, authorization plane,<br/>script executor, capture, input, clipboard]\n    CON[consent-console-zone<br/>ExactMacConsole, LocalAuthentication]\n    DESK[user-desktop-zone<br/>user applications and their data]\n    AG -->|AF_UNIX, pathname 0600, no TLS,<br/>socket access IS the authentication| SRV\n    SRV -->|AF_UNIX + shared token + peer uid,<br/>mutually authenticated| CON\n    CON -->|LAContext biometrics| OS\n    CON -->|prompts the human| DESK\n    SRV -->|AX / CG / pasteboard under TCC grant| DESK\n    SRV -->|launchd socket activation| OS\n  end\n  subgraph variant_tcp[TCP variant - retained for compatibility, not a production mode]\n    NET[network-zone<br/>any remote host]\n    SRV2[exactmac-server-zone<br/>same server, reduced posture]\n    NET -->|plaintext HTTP/2, NO authentication,<br/>NO consent path, NO process verification| SRV2\n  end"
+      "source": "flowchart TB\n  subgraph variant_socket[Unix socket variant - supported production mode]\n    AG[agent-process-zone<br/>AI agent, MCP client,<br/>any process as the owning user]\n    OS[os-platform-zone<br/>launchd, TCC, Security.framework]\n    SRV[exactmac-server-zone<br/>gRPC listener, authorization plane,<br/>script executor, capture, input, clipboard]\n    CON[consent-console-zone<br/>ExactMacConsole, LocalAuthentication]\n    DESK[user-desktop-zone<br/>user applications and their data]\n    AG -->|AF_UNIX, pathname 0600, no TLS,<br/>the kernel names the peer pid and the peer socket,<br/>so socket access AND the accept identify the caller| SRV\n    SRV -->|AF_UNIX + shared token + peer uid,<br/>mutually authenticated| CON\n    CON -->|LAContext biometrics| OS\n    CON -->|prompts the human| DESK\n    SRV -->|AX / CG / pasteboard under TCC grant| DESK\n    SRV -->|binds its own socket; holds the pathname under a lock<br/>the kernel releases when the process dies| OS\n  end\n  subgraph variant_tcp[TCP variant - retained for compatibility, not a production mode]\n    NET[network-zone<br/>any remote host]\n    SRV2[exactmac-server-zone<br/>same server, reduced posture]\n    NET -->|plaintext HTTP/2, NO authentication,<br/>NO consent path, NO process verification| SRV2\n  end"
     },
     {
       "title": "Sensitive data flows",
@@ -57,7 +57,7 @@
     {
       "symbolic_name": "os-platform-zone",
       "title": "macOS platform zone",
-      "description": "launchd socket activation, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, and the kernel. Treated as a trusted platform under the explicit assumption that the host is not already compromised."
+      "description": "launchd for process supervision, the kernel for peer credentials and advisory locks, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, and the kernel. Treated as a trusted platform under the explicit assumption that the host is not already compromised."
     },
     {
       "symbolic_name": "network-zone",
@@ -161,7 +161,7 @@
     {
       "symbolic_name": "second-local-user",
       "title": "Second local user",
-      "description": "Another human account on a shared or family Mac. Excluded by the 0600 socket pathname and by launchd ownership, and modelled so that the exclusion is an explicit, tested property rather than an accident.",
+      "description": "Another human account on a shared or family Mac. Excluded by the 0600 socket pathname, which the server sets on the node it creates, and modelled so that the exclusion is an explicit, tested property rather than an accident.",
       "type": "user",
       "permissions": "None over this server, provided the socket mode and ownership checks hold.",
       "trust_zone": "user-desktop-zone"
@@ -243,9 +243,9 @@
       "trust_zone": "consent-console-zone"
     },
     {
-      "symbolic_name": "launchd-socket-owner",
-      "title": "launchd socket owner",
-      "description": "Existing. UnixSocketPathOwner activates the launchd-owned Unix socket and validates that the pathname is a socket with 0600 permissions, so the descriptor rather than a later pathname lookup is the ownership boundary. Direct pathname binding is disabled because Darwin offers no persistent pathname-to-descriptor identity for a mutable AF_UNIX path.",
+      "symbolic_name": "unix-socket-owner",
+      "title": "Unix socket owner",
+      "description": "Existing. UnixSocketNode claims the socket pathname with an advisory lock the kernel releases when the holder dies, checks the node it finds is a socket this user owns, removes a leftover node only under that lock, and hardens the node the bind creates to 0600. The claim is the ownership boundary in both directions: a server that never claimed the pathname removes nothing on the way out, and a server holding the claim knows no other live server is on the name. The server binds its own socket because reading the caller\u2019s pid happens at accept and SwiftNIO can only accept from a socket it bound itself.",
       "trust_zone": "os-platform-zone"
     },
     {
@@ -311,7 +311,7 @@
     {
       "symbolic_name": "os-platform-services",
       "title": "macOS platform services",
-      "description": "The platform facilities the server depends on and also attacks through: launchd socket activation, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, the pasteboard, and CoreGraphics event injection.",
+      "description": "The platform facilities the server depends on and also attacks through: launchd for process supervision, the kernel for LOCAL_PEERPID, LOCAL_PEERCRED and advisory locks, the TCC privacy database, the Security framework for code signature inspection, LocalAuthentication for biometrics, the pasteboard, and CoreGraphics event injection.",
       "trust_zone": "os-platform-zone"
     },
     {
@@ -720,9 +720,9 @@
       "validity": "unconfirmed"
     },
     {
-      "description": "The Unix socket pathname is 0600 and is created and owned by launchd, so only processes running as the owning user can reach it. Verified against UnixSocketPathOwner.activateLaunchdSocket, which validates the permissions of the activated pathname.",
+      "description": "The Unix socket pathname is created by the server, held under an advisory lock the kernel releases when the holder dies, and is 0600, so only processes running as the owning user can reach it. Verified against UnixSocketNode.hardenBoundNode and claim, and by TestSwiftServerLifecycle_UnixSocketBindsItsOwnOwnerOnlyNode, which reads the mode of the node the running server created.",
       "topics": [
-        "launchd-socket-owner",
+        "unix-socket-owner",
         "agent-process-zone"
       ],
       "validity": "confirmed"
@@ -755,10 +755,10 @@
       "validity": "unconfirmed"
     },
     {
-      "description": "A second local user account on a shared machine obtains no access, by virtue of the socket mode and launchd ownership rather than by any check this application performs.",
+      "description": "A second local user account on a shared machine obtains no access, by virtue of the 0600 socket node the server creates and the pathname lock it holds, rather than by any check this application performs.",
       "topics": [
         "second-local-user",
-        "launchd-socket-owner"
+        "unix-socket-owner"
       ],
       "validity": "unconfirmed"
     }
@@ -1309,9 +1309,9 @@
   ],
   "controls": [
     {
-      "symbolic_name": "launchd-socket-mode",
-      "title": "Owner-only launchd-activated Unix socket",
-      "description": "The socket pathname is created and owned by launchd and validated as 0600, so only processes running as the owning user can reach the server. This is the intended authentication for the production variant and a real boundary against other accounts and against the network. It is explicitly NOT a boundary against same-uid malware, and no part of this design treats it as one.",
+      "symbolic_name": "owner-only-unix-socket",
+      "title": "Owner-only Unix socket held under a lock",
+      "description": "The socket pathname is created by the server under an advisory lock the kernel releases when the holder dies, and the node is chmod-ed to 0600 immediately after the bind, so only processes running as the owning user can reach the server. The lock is what makes a leftover node recoverable without an operator, and what stops a second server taking a pathname that is being served. This is the intended authentication for the production variant and a real boundary against other accounts and against the network. It is explicitly NOT a boundary against same-uid malware, and no part of this design treats it as one.",
       "threats": [
         "remote-code-execution-on-exposed-tcp"
       ],
@@ -1434,7 +1434,7 @@
     {
       "symbolic_name": "mutually-authenticated-consent-channel",
       "title": "Mutually authenticated server-to-console channel",
-      "description": "A second owner-only Unix socket, launchd-activated like the listener, with both peers verifying the other's uid and a shared secret read from an owner-private file rather than the environment, and every decision bound to a single-use request id derived from the request bytes. The residual is documented rather than hidden: the secret defends against a process that merely located the channel, not against same-uid malware that can read the operator's private files.",
+      "description": "A second owner-only Unix socket the console itself binds, with both peers verifying the other's uid and a shared secret read from an owner-private file rather than the environment, and every decision bound to a single-use request id derived from the request bytes. The residual is documented rather than hidden: the secret defends against a process that merely located the channel, not against same-uid malware that can read the operator's private files.",
       "threats": [
         "consent-channel-impersonation"
       ],

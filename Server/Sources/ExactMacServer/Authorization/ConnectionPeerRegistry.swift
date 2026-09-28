@@ -24,7 +24,9 @@ import Synchronization
 struct PeerConnectionToken: Sendable, Hashable, CustomStringConvertible {
     let pathname: String
 
-    var description: String { "PeerConnectionToken(\(pathname))" }
+    var description: String {
+        "PeerConnectionToken(\(pathname))"
+    }
 
     /// - Returns: nil unless `peerDescription` is the transport's `unix:` form with a
     ///   non-empty pathname.
@@ -74,24 +76,48 @@ final class ConnectionPeerRegistry: Sendable {
         category: "authorization.peers",
     )
 
-    /// - Returns: the registration to hand back when the connection closes.
+    /// A hard ceiling on connections held at once.
+    ///
+    /// THE MAP IS BOUNDED BY COUNT AS WELL AS BY TIME, and the ceiling is 128 because it has
+    /// to be a number rather than a policy: entries are removed when a connection closes, so
+    /// an earlier version was bounded only by how long a caller holds a connection open — and
+    /// a same-uid process opening 129 of them and holding them is a same-uid process, which is
+    /// the adversary this whole system is built around. The standing invariant is that every
+    /// growing server-side resource is bounded, and a map that shrinks is not a bound.
+    static let maximumLiveConnections = 128
+
+    /// - Returns: the registration to hand back when the connection closes, or nil when the
+    ///   ceiling is reached.
+    ///
+    /// NIL IS A REFUSAL, not a degraded answer. The alternative — overwriting an existing
+    /// entry — would silently attribute one connection's calls to another, so a caller past
+    /// the ceiling is not identified at all, and an unidentified caller is denied.
     ///
     /// THE MAP IS THE WHOLE OF THE STATE, and that is a deliberate bound. An earlier version
     /// also kept a set of retired tokens, so that a closed connection's token resolved to
     /// nothing even if an entry for it somehow survived. Removing the entry under the same
     /// lock that adds it already guarantees that, and the set grew by one entry per closed
-    /// connection for the life of a long-lived process with no cap — which is a
-    /// same-uid process looping connect-and-close, and a breach of the standing invariant
-    /// that every growing server-side resource is bounded.
+    /// connection for the life of a long-lived process with no cap.
     func register(
         _ token: PeerConnectionToken,
         evidence: PeerProcessEvidence,
-    ) -> PeerConnectionRegistration {
-        let registration = state.withLock { state -> PeerConnectionRegistration in
+    ) -> PeerConnectionRegistration? {
+        let registration = state.withLock { state -> PeerConnectionRegistration? in
+            if state.live[token] == nil, state.live.count >= Self.maximumLiveConnections {
+                return nil
+            }
             let identifier = state.nextIdentifier
             state.nextIdentifier += 1
             state.live[token] = (identifier, evidence)
             return PeerConnectionRegistration(token: token, identifier: identifier)
+        }
+        guard let registration else {
+            logger.error(
+                """
+                Refused a connection: \(Self.maximumLiveConnections, privacy: .public) live                 connections is the ceiling; every capability on the new connection will be denied
+                """,
+            )
+            return nil
         }
         logger.info(
             """

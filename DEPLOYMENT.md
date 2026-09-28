@@ -226,42 +226,45 @@ Lifecycle commands use modern launchctl operations:
 
 `KeepAlive=true` keeps the server resident and already implies `RunAtLoad`, so a
 separate `RunAtLoad` key is unnecessary. The plist sets an integer `63` umask
-(`0077` octal) and declares the Unix listener in `Sockets` with owner-only mode
-`384` (`0600` octal). The `0077` umask keeps files and directories owner-only
-while preserving the execute/search bit required by macOS framework cache trees.
-launchd creates the socket before activation; the Swift server validates the
-activated descriptor and does not repair permissions through a replaceable
-pathname. `ThrottleInterval=10` bounds `KeepAlive` restarts so a repeated fatal
-error cannot spin a tight crash loop.
+(`0077` octal), which keeps files and directories owner-only while preserving
+the execute/search bit required by macOS framework cache trees, and passes
+`GRPC_UNIX_SOCKET`. There is deliberately **no `Sockets` key**: launchd
+supervises the process, and the server binds its own socket.
+`ThrottleInterval=10` bounds `KeepAlive` restarts so a repeated fatal error
+cannot spin a tight crash loop.
 
-### What happens when the socket path already exists
+### Why the server binds its own socket, and what that changes
 
-The server never blindly deletes the configured socket path and never binds it
-through a mutable pathname in the application. The LaunchAgent declares the
-socket in its `Sockets` dictionary; `exactmac.launchd` validates all
-user-supplied XML values before writing the temporary plist, then launchd
-creates and owns that pathname and passes the already-bound descriptor to the process through
-`launch_activate_socket("Listener", ...)`. The server validates that the
-activated descriptor is an owner-readable Unix socket, then hands that exact
-descriptor to gRPC. gRPC owns and closes the descriptor after transport
-construction. Shutdown does not unlink the pathname.
+Reading the caller's identity is the only way the server can know who is
+calling, that read happens when a connection is accepted, and SwiftNIO can only
+accept from a socket it bound itself. So the accept is the server's, and the
+pathname with it.
 
-Direct application pathname binding is rejected. Separate `bind`, `lstat`, and
-`fstat` calls cannot prove that a mutable pathname remains the same socket after
-an unlink/rebind or rename race. Darwin's AF_UNIX descriptor metadata is
-synthetic on supported local runtimes, and `F_GETPATH`, advisory locks, and
-`unlinkat(..., AT_NODELETEBUSY)` do not provide a persistent pathname lease.
-Launchd socket activation is therefore the server's descriptor ownership
-boundary; it does not make the filesystem pathname an immutable capability. A
-same-user process can still unlink and rebind a pathname after activation, so
-clients that connect by pathname must trust the protected deployment directory
-and same-user operator boundary. The verifier rejects symlink endpoints and
-checks owner/mode, but those checks are point-in-time observations rather than
-a persistent pathname lease. If that same-user boundary is not acceptable, use
-loopback TCP with an independently protected port or a separately managed
-endpoint. If the process is not launchd-managed or activation fails, Unix
-startup fails closed. To run manually outside the LaunchAgent, omit
-`GRPC_UNIX_SOCKET` and use matching loopback settings for both processes:
+The server's first step is to **claim** the pathname: it creates
+`<socket>.owner` and takes an exclusive `flock(2)` on it. The kernel releases
+that lock when the holder dies, which is what makes the claim a fact rather
+than a guess:
+
+- a node left behind by a crash is present and **unlocked**, so the next start
+  reclaims it and no operator has to clear it by hand;
+- a pathname a live server holds is present and **locked**, so a second server
+  refuses — and refusing removes nothing, because a server that never claimed
+  the pathname also never unlinks it.
+
+`lstat` describes the node itself and `O_NOFOLLOW` refuses to open through a
+symlink, so a symlink, a regular file, a directory, or another user's node is
+reported rather than removed. The node the bind creates is `chmod`-ed to `0600`
+immediately afterwards, so it is owner-only from the moment it exists.
+
+What this does **not** buy is a persistent pathname lease. A same-user process
+can still unlink and rebind a pathname, so clients that connect by pathname
+must trust the protected deployment directory and the same-user operator
+boundary. The verifier rejects symlink endpoints and checks owner and mode, but
+those are point-in-time observations. If that same-user boundary is not
+acceptable, use loopback TCP — which has no principal at all and therefore
+denies every consent-requiring capability by design — or a separately managed
+endpoint. To run manually outside the LaunchAgent, set `GRPC_UNIX_SOCKET` to a
+short path and start the server directly; it binds and cleans up on `SIGTERM`:
 ```sh
 GRPC_LISTEN_ADDRESS=127.0.0.1 GRPC_PORT=50051 \
   Server/.build/release/ExactMacServer &
@@ -592,17 +595,17 @@ gmake exactmac.launchd
 
 They address the service as `gui/<uid>/io.github.joeycumines.exactmac.server`, boot out the
 exact LaunchAgent identity, and wait for that identity to disappear before
-bootstrapping. launchd recreates and owns the declared `Listener` socket; the
+bootstrapping. launchd supervises the process; the server binds its own socket;
 server receives it through socket activation. The targets never unlink the
 configured path.
 
 ### The service restarts repeatedly (`KeepAlive` backoff / crash loop)
 
-A failed launchd activation is treated as a startup failure: inspect the
+A failed pathname claim is treated as a startup failure: inspect the
 crash reason and service state rather than deleting the socket by hand. The
 LaunchAgent owns the declared socket and recreates it when the service is
 reloaded. If the server is started manually with `GRPC_UNIX_SOCKET` set, it
-reports that launchd activation is required; unset that variable and configure
+reports that the pathname is held by a running server; stop the other server and configure
 matching loopback TCP settings instead. If restarts persist, inspect the crash reason:
 
 ```sh
@@ -612,7 +615,7 @@ gmake exactmac.verify
 ```
 
 If an unmanaged object occupies the configured `GRPC_UNIX_SOCKET` path,
-launchd activation fails rather than replacing it. Stop the owning LaunchAgent
+another server's claim fails rather than replacing it. Stop the owning process
 before any separately controlled maintenance. Do not unlink the path from the
 server or deployment targets. `ThrottleInterval=10` in the LaunchAgent bounds
 the restart rate while the underlying error is fixed.
@@ -646,11 +649,12 @@ to an app you built from source and whose signature you inspected.
 
 The default local design keeps the trust boundary narrow:
 
-- launchd owns and activates the Unix socket instead of the application binding
-  a mutable pathname;
-- launchd uses an owner-only `0077` umask, preserving directory traversal for
-  macOS framework caches, and declares socket mode `0600`;
-- the server validates the activated descriptor before handing it to gRPC;
+- the server binds the Unix socket itself and holds the pathname under a lock
+  the kernel releases when the process dies;
+- the process runs under an owner-only `0077` umask, preserving directory
+  traversal for macOS framework caches, and the socket node is `0600`;
+- the server claims the pathname under a lock and hardens the node it creates,
+  so a crash is recoverable and a live holder is never displaced;
 - the service runs as the logged-in user, not as root;
 - the MCP proxy runs over stdio via `exactmac mcp` (HTTP is the separate `exactmac http` subcommand); and
 - shell-command execution is disabled by default.
