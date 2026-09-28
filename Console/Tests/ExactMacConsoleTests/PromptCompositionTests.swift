@@ -126,19 +126,28 @@ struct PromptCompositionTests {
     }
 
     @Test
-    func `The scope line names the token once, with the scope that bounds it`() {
+    func `The scope line is the scope, and the token is on no operator-facing line at all`() {
         let request = Self.request()
         #expect(
-            request.promptScopeLine.contains(request.capability),
-            "the design puts the capability token on this line and nowhere else",
+            request.promptScopeLine == request.scopeDescription,
+            "the line under the title says how wide the grant reaches, and nothing else",
         )
-        #expect(
-            request.promptScopeLine.contains(request.scopeDescription),
-            "a token with no scope beside it does not say how far the grant reaches",
-        )
-        // The duplication this replaces: the title showed the capability and the line
-        // underneath showed it again, verbatim, in consecutive lines.
-        #expect(request.promptTitle != request.promptScopeLine)
+        // INVARIANT 17, ASSERTED ON THE THREE LINES AN OPERATOR READS AS A WHOLE. The title
+        // already says what the capability IS in words, so a token anywhere else restates
+        // that fact in a form nobody can act on. The test this replaced asserted the token
+        // WAS here, on the strength of a design that has since changed; keeping the assertion
+        // and flipping its sign would pin nothing, so the property is stated instead: the
+        // token is on none of them.
+        for (name, line) in [
+            ("the title", request.promptTitle),
+            ("the scope line", request.promptScopeLine),
+            ("the implication", request.implicationText ?? ""),
+        ] {
+            #expect(
+                !line.contains(request.capability),
+                "\(name) exposes the capability token: \(line)",
+            )
+        }
     }
 
     @Test

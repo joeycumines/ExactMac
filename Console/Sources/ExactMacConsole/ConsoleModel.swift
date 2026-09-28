@@ -746,13 +746,17 @@ struct PendingRequest: Equatable {
         isRevokeAll ? "Revoke every grant" : consequence
     }
 
-    /// The line under the title, naming the capability TOKEN and the scope it is bounded to.
+    /// The line under the title, naming what the grant is bounded to.
     ///
-    /// IT WAS THE CAPABILITY AGAIN, verbatim, directly beneath a title that had just shown
-    /// it — the same information twice in consecutive lines. The token belongs here, where
-    /// the design puts it, and the scope is what makes the token mean something.
+    /// IT NAMED THE CAPABILITY TOKEN TOO, and that is a standing invariant broken: the title
+    /// directly above already says what the capability IS in words -- "Read the accessibility
+    /// tree of an app" -- so the token under it restates the same fact in a form the operator
+    /// cannot act on. The design had it, with the reasoning that the token is what makes the
+    /// scope mean something; the token is gone from the design for the same reason, and the
+    /// scope stands on its own. The scope is the half that is new information here: the title
+    /// says what, this says how wide.
     var promptScopeLine: String {
-        Design.joined([capability, scopeDescription])
+        scopeDescription
     }
 
     /// What the grant would also permit, in the operator's words.
