@@ -233,6 +233,7 @@ struct ApprovalPrompt: View {
                 UntrustedField(
                     caption: state == .noReason ? .caller : .agentReason,
                     value: reason,
+                    maximumHeight: Self.maximumReasonHeight,
                 )
             } else {
                 reasonMissing
@@ -321,7 +322,38 @@ struct ApprovalPrompt: View {
         }
         .frame(height: Design.Layout.promptScrollHeight)
         .background(Design.Ink.surfaceSunken)
+        // THE RAIL, because this region is CUT ON PURPOSE and the cut was silent. The design
+        // draws a scrollbar here in every body-scroll it draws; without one the payload
+        // block simply stops, under a caption that says nothing is truncated, and a reader
+        // is right to conclude the rest of the request was withheld.
+        .overlay(alignment: .trailing) {
+            ScrollRail(geometry: disclosureGeometry)
+        }
+        .onScrollGeometryChange(for: ScrollRail.Measurement.self) { geometry in
+            ScrollRail.Measurement(geometry: geometry)
+        } action: { _, measurement in
+            disclosureGeometry = measurement
+        }
     }
+
+    @State private var disclosureGeometry: ScrollRail.Measurement?
+
+    /// The tallest the agent's reason may grow before it scrolls in its own box.
+    ///
+    /// DERIVED BY MEASUREMENT, and the derivation is recorded because a bare constant is a
+    /// number a later edit invalidates silently. The tall state is the prompt with all six
+    /// options out and a reason long enough to reach the cap, and with a cap of 160 it
+    /// measured 1061pt against the window ceiling of 1008 — 53pt over, which would push the
+    /// last option and the note field past the bottom of the window again. 96pt puts that
+    /// state at 997pt. `the prompt's tallest state fits inside the window ceiling` is a test,
+    /// so a footer that grows without this being re-derived fails loudly rather than quietly
+    /// reintroducing the defect.
+    ///
+    /// The cap is on the FIELD and not on the reason, so the text is never shortened or
+    /// elided: an operator can still read every character of what the agent said, which is
+    /// what the field is for. The design's own single-line field is 56pt, so 96pt is still
+    /// room for five lines before anything scrolls.
+    static let maximumReasonHeight: CGFloat = 96
 
     // MARK: Footer — hugs, and carries the decision
 

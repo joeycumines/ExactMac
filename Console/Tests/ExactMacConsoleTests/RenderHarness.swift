@@ -112,6 +112,60 @@ struct RenderTests {
     }
 
     @Test
+    func `the prompt renders its scroll rails in both schemes`() throws {
+        // THE ARTEFACT, because a rail is a visual claim and the two states differ only in
+        // whether a thumb is drawn: with a short reason the reason field hugs and shows
+        // nothing, while the disclosure's 329pt of content in a 236pt viewport always
+        // overflows and always shows one. A regression that silently removed the rail
+        // would leave every assertion in the suite green.
+        let longReason = String(
+            repeating: "The agent must walk the accessibility tree to confirm the layout "
+                + "before it rewrites the view controller, and it needs the focused "
+                + "window's role, title and value at every level to do that. ",
+            count: 6,
+        )
+        for (name, reason) in [("short", "Refactoring the parser."), ("long", longReason)] {
+            let view = ApprovalPrompt(
+                state: .pending,
+                title: "Read the accessibility tree of any application",
+                capabilityLine: "observation.ax  ·  every application  ·  continuous",
+                risk: "High",
+                riskDot: Design.Ink.danger,
+                clock: "decides in 1:28",
+                reason: reason,
+                implication: "Also permits screen capture and reading the focused window's text.",
+                tree: [
+                    .init(id: 1, name: "Terminal", role: "host", depth: 0, signature: .signed, isRequester: false),
+                    .init(id: 2, name: "/bin/zsh", role: "login shell", depth: 1, signature: .unresolved, isRequester: false),
+                    .init(id: 3, name: "/usr/local/bin/node", role: "agent host", depth: 2, signature: .unsigned, isRequester: false),
+                    .init(id: 5, name: "/usr/local/bin/exactmac", role: "requesting", depth: 3, signature: .unnotarized, isRequester: true),
+                ],
+                target: "/Users/joeyc/secret-project/notes.txt",
+                payload: "AXUIElementCopyAttributeValue(AXFocusedApplication, "
+                    + "kAXFocusedWindowAttribute), walking children to depth 12 and returning "
+                    + "role, title, value and enabled for every node whose role is in "
+                    + "{AXTextField, AXTextArea, AXStaticText}",
+                biometricLine: "Touch ID will confirm: allow one clipboard read in TextEdit",
+                biometricDot: Design.Ink.success,
+                moreChoicesLabel: "4 more choices — scope, session, batch, always",
+                showOptionsLabel: "Show options",
+                selectedOption: .once,
+            )
+            let hosting = NSHostingView(rootView: view)
+            hosting.layoutSubtreeIfNeeded()
+            let fitted = hosting.fittingSize
+            for mode in RenderHarness.AppearanceMode.allCases {
+                try RenderHarness.png(
+                    view,
+                    size: fitted,
+                    appearance: mode,
+                    to: RenderHarness.outputDirectory + "prompt-rails-\(name)\(mode.suffix)",
+                )
+            }
+        }
+    }
+
+    @Test
     func `the render harness leaves the process appearance unchanged`() throws {
         let initialAppearance = NSAppearance.currentDrawing()
         let prompt = ApprovalPrompt(

@@ -211,6 +211,14 @@ struct UntrustedField: View {
 
     let caption: Caption
     let value: String
+    /// The tallest this field may grow. nil grows to fit, which is right where the value is
+    /// short by construction — an activity row's note, the operator's own words. The
+    /// approval prompt's reason is NOT short by construction: it is caller-supplied text of
+    /// any length, and an uncapped field grew the prompt's header without limit until the
+    /// options, the biometric line and the Deny row were pushed past the bottom of the
+    /// window with nothing to scroll them back into reach. A control the operator cannot
+    /// see is a control they cannot deny with.
+    var maximumHeight: CGFloat?
 
     var body: some View {
         HStack(alignment: .center, spacing: Design.Space.component) {
@@ -221,8 +229,7 @@ struct UntrustedField: View {
                 .frame(width: 3, height: 40)
             VStack(alignment: .leading, spacing: Design.Space.tight) {
                 Design.Font.eyebrow(caption.text)
-                Design.Font.value(value)
-                    .fixedSize(horizontal: false, vertical: true)
+                valueField
             }
         }
         .padding(.top, Design.Space.chip)
@@ -241,6 +248,139 @@ struct UntrustedField: View {
             RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
                 .strokeBorder(Design.Ink.separator, lineWidth: 1),
         )
+        .overlay(alignment: .trailing) { rail }
+    }
+
+    /// The value itself. Uncapped it grows to fit; capped it hugs the text below the cap and
+    /// scrolls inside it above, with the rail drawn in the field's own gutter so the reason
+    /// stays fully readable while the prompt's height stays bounded.
+    ///
+    /// `maxHeight` AND NOT `height`, which was the first attempt: a fixed height made a
+    /// one-line reason sit in a 160pt box, where the design draws 56pt. Measured both:
+    /// `height` reports 160 for short text, `maxHeight` reports 14 for the same text and 160
+    /// for text that overflows.
+    @ViewBuilder
+    private var valueField: some View {
+        if let maximumHeight {
+            ScrollView {
+                Design.Font.value(value)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: maximumHeight)
+            .onScrollGeometryChange(for: ScrollRail.Measurement.self) { geometry in
+                ScrollRail.Measurement(geometry: geometry)
+            } action: { _, measurement in
+                reasonGeometry = measurement
+            }
+        } else {
+            Design.Font.value(value)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var rail: some View {
+        if maximumHeight != nil {
+            ScrollRail(geometry: reasonGeometry)
+        }
+    }
+
+    @State private var reasonGeometry: ScrollRail.Measurement?
+}
+
+/// The scroll affordance for a region that scrolls, which the app was missing entirely.
+///
+/// A cut with no affordance reads as content that is simply absent. The prompt's disclosure
+/// is DELIBERATELY cut mid-block so the operator can see there is more, and macOS overlay
+/// scrollbars are invisible at rest, so the region looked like a static card: the mechanism
+/// worked and nothing said it did.
+///
+/// THE DESIGN DRAWS THIS RAIL in all five of its `body-scroll` frames — 4pt wide at x=412,
+/// inset 12pt top and bottom, filled with the separator token, inside the 16pt gutter the
+/// content padding leaves on the right. The implementation draws a PROPORTIONED thumb in
+/// that rail rather than the solid 212pt block the design draws, because a rail that does
+/// not move tells the operator a scrollbar exists without telling them where they are in
+/// it. The design's 212pt is its own approximation and not a measurement of this content;
+/// the thumb here is derived from the scroll geometry the framework reports, so it cannot
+/// claim a position the content is not at.
+struct ScrollRail: View {
+    /// What the framework last reported about the region's geometry, or nil before it has.
+    ///
+    /// Nil draws nothing. A rail that claims a scroll position nobody can verify is worse
+    /// than no rail, and an unverified indicator is the same failure as a claim with no
+    /// render behind it.
+    let geometry: ScrollRail.Measurement?
+
+    /// One read of the region's geometry, so the three numbers cannot come from different
+    /// frames and describe a scroll position that never existed.
+    struct Measurement: Equatable {
+        var contentHeight: CGFloat = 0
+        var viewportHeight: CGFloat = 0
+        var offset: CGFloat = 0
+
+        /// Written out rather than left to the memberwise synthesiser, because declaring
+        /// the reading init below suppresses it — and a measurement that cannot be built
+        /// outside the framework is a measurement that cannot be asserted.
+        init(contentHeight: CGFloat = 0, viewportHeight: CGFloat = 0, offset: CGFloat = 0) {
+            self.contentHeight = contentHeight
+            self.viewportHeight = viewportHeight
+            self.offset = offset
+        }
+
+        init(geometry: ScrollGeometry) {
+            contentHeight = geometry.contentSize.height
+            viewportHeight = geometry.visibleRect.height
+            offset = geometry.contentOffset.y
+        }
+    }
+
+    /// Where the thumb goes, or nil when the region does not overflow and there is nothing
+    /// to indicate.
+    ///
+    /// A PURE FUNCTION of one measurement, so it can be asserted without a render, and so
+    /// the view cannot draw a thumb the arithmetic does not support. Returning nil until
+    /// the framework has reported geometry is deliberate: a rail that claims a position
+    /// nobody can verify is worse than no rail.
+    static func thumb(for geometry: Measurement?) -> (height: CGFloat, offset: CGFloat)? {
+        guard let geometry, geometry.contentHeight > geometry.viewportHeight + 0.5 else {
+            return nil
+        }
+        // The design's rail is 12pt inset top and bottom.
+        let track = max(geometry.viewportHeight - inset * 2, 1)
+        // Proportional to what is visible, with a floor so the thumb stays grabbable. The
+        // floor is a choice, not a measurement: a 4pt-wide thumb a few points long cannot
+        // be caught with a pointer, and an ungrabbable indicator is worse than none.
+        let proportional = track * geometry.viewportHeight / geometry.contentHeight
+        let height = min(max(proportional, minimumThumbLength), track)
+        // The thumb TRAVELS (track - height) over the whole scroll range, not `track`. With
+        // `track` the formula puts the thumb's top at the end of the track when scrolled to
+        // the bottom, which hangs it outside the rail it is supposed to be inside. Caught by
+        // asserting the bottom position against the top one.
+        let travel = track - height
+        let offset = travel * (geometry.offset / (geometry.contentHeight - geometry.viewportHeight))
+        return (height, offset)
+    }
+
+    static let minimumThumbLength: CGFloat = 24
+
+    /// The design's rail is 12pt inset top and bottom.
+    private static let inset = Design.Space.three
+    /// The design's rail is 4pt wide, 4pt from the trailing edge of a 420pt surface whose
+    /// content column is 388pt.
+    private static let width: CGFloat = 4
+    private static let trailingInset: CGFloat = 4
+
+    var body: some View {
+        if let thumb = Self.thumb(for: geometry) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(Design.Ink.separator)
+                .frame(width: Self.width, height: thumb.height)
+                .offset(y: Self.inset + thumb.offset)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, Self.trailingInset)
+                .allowsHitTesting(false)
+        }
     }
 }
 
