@@ -233,15 +233,6 @@ struct ApprovalPrompt: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Design.Ink.textTertiary)
             }
-            if let reason {
-                UntrustedField(
-                    caption: state == .noReason ? .caller : .agentReason,
-                    value: reason,
-                    maximumHeight: Self.maximumReasonHeight,
-                )
-            } else {
-                reasonMissing
-            }
             if let implication, state == .pending || state == .expanded {
                 // Same geometry as the untrusted field, and separable from it ONLY by the
                 // rule's colour: orange means someone else wrote this, grey means the
@@ -267,9 +258,26 @@ struct ApprovalPrompt: View {
         .padding(.leading, Design.Space.frame)
     }
 
+    /// The agent's reason, or the state its absence puts the operator in.
+    @ViewBuilder
+    private var reasonBlock: some View {
+        if let reason {
+            UntrustedField(
+                caption: state == .noReason ? .caller : .agentReason,
+                value: reason,
+                maximumHeight: Self.maximumReasonHeight,
+            )
+        } else {
+            reasonMissing
+        }
+    }
+
     /// The state an agent that gave NO reason puts the operator in. Not a shorter prompt: a
     /// different one, with a neutral rule rather than a warning-coloured one, and an
-    /// instruction that steers toward the narrowest grant.
+    /// instruction that steers toward the narrowest grant. It sits with the reason in the
+    /// disclosure for the same reason the reason does: it is the agent's silence, which is a
+    /// fact about the caller and not a system finding, so it does not belong in the header
+    /// either.
     private var reasonMissing: some View {
         HStack(alignment: .center, spacing: Design.Space.component) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -299,7 +307,7 @@ struct ApprovalPrompt: View {
         )
     }
 
-    // MARK: Disclosure — the only fixed height in the prompt
+    // MARK: Disclosure — the evidence, and the one scroll region
 
     private var disclosure: some View {
         ScrollView {
@@ -317,6 +325,15 @@ struct ApprovalPrompt: View {
                     }
                     .frame(height: 35)
                 }
+                // THE REASON, HERE AND NOT IN THE HEADER. It is caller-written and the design
+                // marks it unverified with an orange rule and a NOT VERIFIED caption, so the
+                // layout used to be the one place that rule did not hold: it promoted the
+                // agent's own prose above the fold while the verified request bytes sat
+                // entirely below the cut, measured at 0pt of 134pt visible. The header now
+                // carries only what the system derived — the risk, the consequence, the
+                // reach, what the grant silently includes — and this stays fully readable,
+                // still marked, subordinate by position.
+                reasonBlock
                 PayloadBlock(text: payload, onCopy: onCopyPayload)
             }
             .padding(.top, Design.Space.three)

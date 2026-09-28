@@ -203,9 +203,28 @@ enum Design {
         static let promptWidth: CGFloat = 420
         /// 420 minus 16pt of padding either side. Every row in the prompt is this wide.
         static let promptContent: CGFloat = 388
-        /// The ONE fixed height in the prompt, and the number that makes the reason visible
-        /// without scrolling: the reason sits in the non-scrolling header above it.
-        static let promptScrollHeight: CGFloat = 236
+        /// The ONE fixed height in the prompt, and the number that decides how much of the
+        /// request the operator sees before scrolling.
+        ///
+        /// IT WAS 236, and the number's stated purpose was "makes the reason visible without
+        /// scrolling" because the reason sat in the non-scrolling header above it. MEASURED on
+        /// that arrangement: the payload block's visible portion was 0pt of 134pt — the fold
+        /// fell at its first pixel — so what was visible without scrolling was the agent's own
+        /// unverified prose and none of the verified request. The reason now lives IN this
+        /// region, subordinate and still marked, and what must be visible without scrolling is
+        /// the system's own summary, which the hugging header above carries in full.
+        ///
+        /// 348 IS MEASURED, and the first attempt at it was not. 320 came from arithmetic and
+        /// the render showed a control bisected again — the Copy row ends at 335.5 — which is
+        /// the exact defect D1 was opened to fix, reintroduced by my own arithmetic in the
+        /// same file an hour later. The boundaries, measured: caption 283..297.5, Copy
+        /// 305.5..335.5, the payload body's first line 343.5..360.9. The payload block
+        /// separates its caption, its Copy row and its body by 8pt, so the window in which
+        /// the cut bisects NOTHING is 8pt wide. 348 sits 12.5pt clear of the Copy row and
+        /// slices the body's first line, which is what the cut is for: the operator has to be
+        /// able to see that the request text continues rather than ends. The card is
+        /// 169 + 348 + 238 = 755pt.
+        static let promptScrollHeight: CGFloat = 348
         static let popoverWidth: CGFloat = 360
         static let popoverContent: CGFloat = 332
         static let windowWidth: CGFloat = 720
