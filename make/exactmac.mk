@@ -730,16 +730,21 @@ exactmac.stop: ## Stop and unload the service; preserve app, plist, MCP, and TCC
 	printf '%s\n' 'Service stopped.'
 
 .PHONY: exactmac.tcc-reset
-exactmac.tcc-reset: ## Reset Accessibility and ScreenCapture TCC records for this bundle ID.
-	@printf 'Resetting TCC records for %s...\n' "$(EXACTMAC_BUNDLE_ID)"; \
+exactmac.tcc-reset: ## Reset the Accessibility and ScreenCapture TCC records, for both the app and the retired server id.
+	@# BOTH IDENTITIES, because the one-time migration means a machine can still hold a
+	@# record for the old server bundle. Resetting only the new one leaves the stale record
+	@# behind, and resetting only the old one would do nothing on a fresh install.
+	@printf 'Resetting TCC records...\n'; \
+	reset_one() { \
+		if tccutil reset "$$1" "$$2"; then printf '  reset %s for %s\n' "$$1" "$$2"; \
+		else printf '  warning: no %s record for %s (nothing to reset)\n' "$$1" "$$2" >&2; fi; \
+	}; \
 	for tcc_service in Accessibility ScreenCapture; do \
-		if tccutil reset "$$tcc_service" "$(EXACTMAC_BUNDLE_ID)"; then \
-			printf '  reset %s\n' "$$tcc_service"; \
-		else \
-			printf '  warning: could not reset %s (there may be no matching record)\n' "$$tcc_service" >&2; \
-		fi; \
+		reset_one "$$tcc_service" "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
+		reset_one "$$tcc_service" "$(EXACTMAC_BUNDLE_ID)"; \
 	done; \
-	printf '%s\n' 'Re-grant permissions in System Settings, then run gmake exactmac.restart.'
+	printf '%s\n' ''; \
+	printf '%s\n' 'Re-grant both in System Settings > Privacy & Security, then launch the app again.'
 
 .PHONY: exactmac.logs
 exactmac.logs: ## Show recent stdout, stderr, and unified-log entries.
@@ -915,9 +920,11 @@ exactmac.console-install: ## Build, sign, install and register the app, then ret
 	printf 'Installed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.retire-launchagents
 	@printf '%s\n' ''
-	@printf '%s\n' 'Launch it from Applications. It registers itself for start-at-login through'
-	@printf '%s\n' 'ServiceManagement.SMAppService.mainApp the first time you do, which macOS may'
-	@printf '%s\n' 'ask you to approve in System Settings > General > Login Items.'
+	@printf '%s\n' 'Launch it from Applications. To have it start at login, turn on the toggle in'
+	@printf '%s\n' 'its menu bar item once; the app registers itself through'
+	@printf '%s\n' 'ServiceManagement.SMAppService.mainApp, and macOS may ask you to approve that in'
+	@printf '%s\n' 'System Settings > General > Login Items. There is no LaunchAgent any more, so'
+	@printf '%s\n' 'nothing starts it until you ask for that.'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Accessibility and Screen Recording are granted to a bundle identity, and this is'
 	@printf '%s\n' 'the one change of identity, so macOS will ask for both again exactly once.'
@@ -1114,7 +1121,7 @@ exactmac.retire-launchagents: ## Unload and archive the superseded LaunchAgents.
 	if [ "$$changed" -eq 0 ]; then \
 		printf '%s\n' 'Nothing to retire; both LaunchAgents were already retired.'; \
 	else \
-		printf 'Retired. The app now starts ExactMac and registers itself through SMAppService.'; \
+		printf 'Retired. The app is the service now; turn on its menu bar toggle to have it start at login.'; \
 		printf 'To put them back: gmake exactmac.restore-launchagents\n'; \
 	fi
 

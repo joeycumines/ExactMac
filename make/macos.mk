@@ -269,7 +269,8 @@ macos.register-login-item-check: ## Report whether the assembled .app is eligibl
 	else \
 		printf 'ERROR: the bundle is not correctly signed, so SMAppService cannot register it.\n' >&2; exit 1; \
 	fi
-	@printf '%s\n' 'The app registers itself through ServiceManagement.SMAppService.mainApp at runtime.'
+	@printf '%s\n' 'The app registers itself through ServiceManagement.SMAppService.mainApp when you turn'
+	@printf '%s\n' 'on the toggle in its menu bar item. Nothing is registered until you do.'
 	@printf '%s\n' 'Nothing is registered by this module: it builds a bundle and starts nothing.'
 
 ##@ [macOS] Other Targets
