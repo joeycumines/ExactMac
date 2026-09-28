@@ -40,6 +40,12 @@ EXACTMAC_REQUIRED_RESOURCE_BUNDLE := $(EXACTMAC_SERVER_BUILD_DIR)/$(EXACTMAC_RES
 
 EXACTMAC_PLIST          ?= $(HOME)/Library/LaunchAgents/$(EXACTMAC_BUNDLE_ID).plist
 EXACTMAC_SOCKET         ?= $(HOME)/Library/Caches/exactmac.sock
+# The consent channel, in the same owner-only state directory as the grant store and the audit
+# log. It is set HERE and not defaulted in the server, because an absent channel is a
+# deliberate fail-closed configuration: a server without one refuses every consent-requiring
+# capability, and a server that went looking for a channel nobody configured would bind a
+# socket it had no reason to own.
+EXACTMAC_CONSOLE_SOCKET  ?= $(HOME)/.exactmac/console.sock
 EXACTMAC_STDOUT_LOG     ?= $(HOME)/Library/Logs/exactmac.log
 EXACTMAC_STDERR_LOG     ?= $(HOME)/Library/Logs/exactmac.error.log
 
@@ -135,6 +141,8 @@ define EXACTMAC_LAUNCHD_PLIST
     <dict>
         <key>GRPC_UNIX_SOCKET</key>
         <string>$(EXACTMAC_SOCKET)</string>
+        <key>EXACTMAC_CONSOLE_SOCKET</key>
+        <string>$(EXACTMAC_CONSOLE_SOCKET)</string>
     </dict>
     <key>KeepAlive</key>
     <true/>
@@ -182,6 +190,7 @@ $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_APP_DIR))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_APP_EXECUTABLE))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_PLIST))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_SOCKET))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_SOCKET))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDOUT_LOG))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDERR_LOG))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_SERVER_BUILD_DIR))
@@ -212,7 +221,7 @@ export EXACTMAC_LAUNCHD_PLIST_E := $(EXACTMAC_LAUNCHD_PLIST)
 # Export user-configurable XML inputs as data; recipes read these through shell
 # variables after the make-time safety gate above.
 export EXACTMAC_APP_NAME EXACTMAC_BUNDLE_ID EXACTMAC_VERSION EXACTMAC_BUILD_VERSION
-export EXACTMAC_MIN_MACOS EXACTMAC_APP_EXECUTABLE EXACTMAC_SOCKET
+export EXACTMAC_MIN_MACOS EXACTMAC_APP_EXECUTABLE EXACTMAC_SOCKET EXACTMAC_CONSOLE_SOCKET
 export EXACTMAC_STDOUT_LOG EXACTMAC_STDERR_LOG
 
 # Only the two piped build recipes need Bash's pipefail.  `private` prevents
@@ -392,7 +401,7 @@ exactmac.launchd: ## Write, bootstrap, and wait for the per-user LaunchAgent.
 		exit 1; \
 	fi; \
 	if ! codesign --verify --deep --strict "$(EXACTMAC_APP_DIR)"; then printf '%s\n' 'ERROR: app signature verification failed.' >&2; exit 1; fi; \
-	if ! mkdir -p "$(dir $(EXACTMAC_PLIST))" "$(dir $(EXACTMAC_SOCKET))" "$(dir $(EXACTMAC_STDOUT_LOG))" "$(dir $(EXACTMAC_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(dir $(EXACTMAC_PLIST))" "$(dir $(EXACTMAC_SOCKET))" "$(dir $(EXACTMAC_CONSOLE_SOCKET))" "$(dir $(EXACTMAC_STDOUT_LOG))" "$(dir $(EXACTMAC_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
 	plist_tmp=$$(mktemp "$(EXACTMAC_PLIST).tmp.XXXXXX") || { printf '%s\n' 'ERROR: failed to create temporary LaunchAgent plist.' >&2; exit 1; }; \
 	cleanup_plist_tmp() { rm -f "$$plist_tmp"; }; \
 	trap cleanup_plist_tmp EXIT INT TERM; \

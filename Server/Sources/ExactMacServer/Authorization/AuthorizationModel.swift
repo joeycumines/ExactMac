@@ -809,6 +809,9 @@ enum DenialReason: String, Sendable, Equatable, CaseIterable {
     case grantStoreUnreadable
     case postureLockedDown
     case biometricUnavailable
+    /// The decision could not be put on the record, and an unrecordable decision is not one
+    /// this system will act on: the log is what the operator afterwards asks.
+    case auditUnavailable
     case notPermitted
 }
 

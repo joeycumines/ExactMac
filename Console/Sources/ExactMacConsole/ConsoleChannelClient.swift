@@ -28,15 +28,22 @@ final class ConsoleChannelClient: @unchecked Sendable {
     }
 
     /// The production client, configured the way the deployment documents it.
-    static func live() -> ConsoleChannelClient {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+    ///
+    /// THE PATHS ARE THE SERVER'S, spelled the same way and read from the same environment
+    /// override, because two processes disagreeing about where the channel is produces a
+    /// console that is connected to nothing and a server that is reachable by no one, and
+    /// neither of them can say so. `EXACTMAC_STATE_DIRECTORY` is the single override; the
+    /// default is `~/.exactmac`, which is short because `sun_path` is 104 bytes.
+    static func live(environment: [String: String] = ProcessInfo.processInfo.environment) -> ConsoleChannelClient {
+        let state = environment["EXACTMAC_STATE_DIRECTORY"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? NSHomeDirectory() + "/.exactmac"
         return ConsoleChannelClient(
-            socketPath: "\(home.path)/Library/Application Support/ExactMac/console.sock",
+            socketPath: state + "/console.sock",
             // Read from the owner-private file, never from the environment: an environment
             // variable is readable from the environment of every process the operator starts
             // and is inherited by every child, which is a far larger surface than a 0600 file.
             token: (try? String(
-                contentsOfFile: "\(home.path)/Library/Application Support/ExactMac/console.token",
+                contentsOfFile: state + "/console.token",
                 encoding: .utf8,
             ))?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? "",

@@ -176,7 +176,15 @@ struct AuthorizationRuntime: Sendable {
     var posture: Posture
     /// A bounded wait for the operator. Past it, deny.
     var consentTimeout: Duration
-    var isConsoleReachable: Bool
+    /// Whether a console is connected AND has authenticated, asked at the moment a request
+    /// needs one rather than captured at construction.
+    ///
+    /// A FUNCTION because a constant is wrong in both directions here. Captured `true` when
+    /// no console is running makes the interceptor take the consent path and then deny on the
+    /// timeout, which the caller experiences as a slow refusal; captured `false` when one is
+    /// running makes a working service permanently unusable. A test still passes a literal,
+    /// because the factory wraps it.
+    var isConsoleReachable: @Sendable () -> Bool
     var biometric: AuthorizationContext.BiometricAvailability
     var highConsequenceTargets: Set<String>
     /// The application resolver C2 needs to turn an opaque application name into the
@@ -192,6 +200,20 @@ struct AuthorizationRuntime: Sendable {
     /// has closed, a caller that never registered — is an UNRESOLVED identity, which the
     /// engine escalates and which denies.
     var peerEvidence: PeerProcessResolution
+    /// Where every decision goes on the record.
+    ///
+    /// NIL IS NOT A SHORTCUT, IT IS A STATED POSTURE: a runtime with no recorder is one
+    /// where nothing can be audited, which is a test fixture and never production. The
+    /// production runtime supplies one, and `auditRequired` below turns a missing or failing
+    /// recorder into a refusal rather than a silent gap, because Invariant 1 is that no RPC
+    /// reaches a handler without a decision on the record.
+    var audit: (any DecisionRecording)?
+    /// Whether a decision that could not be recorded may still be enforced.
+    ///
+    /// FALSE IN PRODUCTION, and the refusal it produces is `auditUnavailable`: an
+    /// unrecordable decision is not a decision this system is willing to act on, because the
+    /// whole point of the log is that the operator can afterwards ask what was permitted.
+    var auditRequired: Bool
 
     /// The Unix-socket variant, which is the only one with an identity and the only one
     /// that can consent.
@@ -208,6 +230,8 @@ struct AuthorizationRuntime: Sendable {
         highConsequenceTargets: Set<String> = [],
         applicationResolver: any ApplicationTargetResolving = UnresolvableApplicationTarget(),
         peerEvidence: PeerProcessResolution = .unavailable,
+        audit: (any DecisionRecording)? = nil,
+        auditRequired: Bool = false,
     ) -> AuthorizationRuntime {
         AuthorizationRuntime(
             descriptorPolicy: descriptorPolicy,
@@ -220,11 +244,13 @@ struct AuthorizationRuntime: Sendable {
             clock: clock,
             posture: posture,
             consentTimeout: consentTimeout,
-            isConsoleReachable: isConsoleReachable,
+            isConsoleReachable: { isConsoleReachable },
             biometric: biometric,
             highConsequenceTargets: highConsequenceTargets,
             applicationResolver: applicationResolver,
             peerEvidence: peerEvidence,
+            audit: audit,
+            auditRequired: auditRequired,
         )
     }
 
@@ -248,11 +274,16 @@ struct AuthorizationRuntime: Sendable {
             consentTimeout: .seconds(120),
             // The console is irrelevant here: the posture denies before anything is asked,
             // and reporting it reachable would let a caller infer a working consent path.
-            isConsoleReachable: false,
+            isConsoleReachable: { false },
             biometric: .unavailable(reason: "the reduced unauthenticated posture has no ceremony"),
             highConsequenceTargets: [],
             applicationResolver: UnresolvableApplicationTarget(),
             peerEvidence: .unavailable,
+            // The reduced posture records nothing, because there is nothing to record: the
+            // TCP variant denies every consent-requiring capability in the engine before any
+            // of this is reached, and a log of denials nobody can influence is noise.
+            audit: nil,
+            auditRequired: false,
         )
     }
 
@@ -431,7 +462,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         let snapshot = await runtime.grants.snapshot()
         var context = AuthorizationContext(
             transport: runtime.transport,
-            isConsoleReachable: runtime.isConsoleReachable,
+            isConsoleReachable: runtime.isConsoleReachable(),
             // The peer is authenticated by socket access in the Unix-socket variant. In the
             // TCP variant there is no principal at all, and the transport check in the
             // engine denies before this is consulted.
@@ -456,11 +487,63 @@ struct AuthorizationInterceptor: ServerInterceptor {
 
         switch decision.basis {
         case .noConsentRequired, .grant, .envelope:
-            return decision
+            return try recorded(decision, for: request, identity: identity)
         case .promptRequired:
-            return try await prompt(request: request, identity: identity, decision: decision)
+            let answered = try await prompt(request: request, identity: identity, decision: decision)
+            return try recorded(
+                answered.decision,
+                for: request,
+                identity: identity,
+                answer: answered.answer,
+            )
         case let .denied(reason):
+            // A refusal is recorded too. A log that records what was permitted cannot be
+            // asked what was refused, and the refusals are the half an operator reads when
+            // something did not work.
+            try record(decision, for: request, identity: identity)
             throw AuthorizationDenial(reason: reason, capability: request.capability)
+        }
+    }
+
+    /// Puts a decision on the record, and refuses the RPC when the runtime requires the
+    /// record and the decision could not be written.
+    private func recorded(
+        _ decision: AuthorizationDecision,
+        for request: AuthorizationRequest,
+        identity: CallerIdentity,
+        answer: ConsentAnswer? = nil,
+    ) throws -> AuthorizationDecision {
+        try record(decision, for: request, identity: identity, answer: answer)
+        return decision
+    }
+
+    private func record(
+        _ decision: AuthorizationDecision,
+        for request: AuthorizationRequest,
+        identity: CallerIdentity,
+        answer: ConsentAnswer? = nil,
+    ) throws {
+        guard let recorder = runtime.audit else {
+            if runtime.auditRequired {
+                throw AuthorizationDenial(
+                    reason: .auditUnavailable,
+                    capability: request.capability,
+                )
+            }
+            return
+        }
+        let written = recorder.record(
+            request: request,
+            identity: identity,
+            decision: decision,
+            operatorNote: answer?.note,
+            biometricObtained: answer?.biometricObtained ?? false,
+        )
+        guard written || !runtime.auditRequired else {
+            throw AuthorizationDenial(
+                reason: .auditUnavailable,
+                capability: request.capability,
+            )
         }
     }
 
@@ -513,8 +596,8 @@ struct AuthorizationInterceptor: ServerInterceptor {
         request: AuthorizationRequest,
         identity: CallerIdentity,
         decision: AuthorizationDecision,
-    ) async throws -> AuthorizationDecision {
-        guard runtime.isConsoleReachable else {
+    ) async throws -> (decision: AuthorizationDecision, answer: ConsentAnswer) {
+        guard runtime.isConsoleReachable() else {
             throw AuthorizationDenial(reason: .consoleUnreachable, capability: request.capability)
         }
         // Whether a ceremony is required is NOT checked here. It is checked against the
@@ -550,13 +633,14 @@ struct AuthorizationInterceptor: ServerInterceptor {
             )
         }
 
-        return try await runtime.issuance.authorize(
+        let issued = try await runtime.issuance.authorize(
             answer: answer,
             request: request,
             identity: identity,
             offered: decision.offeredDecisions,
             now: runtime.clock.now(),
         )
+        return (decision: issued, answer: answer)
     }
 
     /// Races the broker against the bound, and CANCELS the broker's work when the bound

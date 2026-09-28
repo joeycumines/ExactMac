@@ -36,12 +36,18 @@ private func setServerProcessUmask() -> mode_t {
 private func performGracefulShutdown(
     listenerFactory: PeerIdentifyingListenerFactory?,
     serviceLifetime: ServiceLifetime,
+    consoleEndpoint: ConsoleServerEndpoint?,
 ) async throws {
     logger.info("Initiating graceful shutdown...")
 
     await serviceLifetime.shutdown()
     logger.info("Composition-owned service work drained")
 
+    // BEFORE the listener claim, so a console that is still attached cannot be told the
+    // channel has gone while the socket it is answering on is still up.
+    if let consoleEndpoint {
+        consoleEndpoint.stop()
+    }
     if let listenerFactory {
         try listenerFactory.releaseClaim()
         logger.info("Released the Unix socket claim: \(listenerFactory.socketPath, privacy: .private)")
@@ -128,6 +134,7 @@ func serve(
     transport: some ServerTransport,
     authorizationRuntime: AuthorizationRuntime,
     listenerFactory: PeerIdentifyingListenerFactory?,
+    consoleEndpoint: ConsoleServerEndpoint? = nil,
 ) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 1: NSApplication.shared
@@ -233,16 +240,31 @@ func serve(
     }
     var lifecycleError: (any Error)?
     do {
-        healthService.provider.updateStatus(.serving, forService: "exactmac.v1.ExactMac")
+        healthService.provider.updateStatus(.serving, forService: RPCAuthorizationMap.serviceName)
         healthService.provider.updateStatus(.serving, forService: "")
+        // The consent path is a NAMED status rather than a qualifier on the service status,
+        // because `ServingStatus` has no "degraded" and reporting the service itself as
+        // not serving would be the other kind of false: the TCP variant does serve, and every
+        // consent-requiring capability on it is denied. A health checker that asks about the
+        // service gets the truth; one that asks about consent gets the posture.
+        healthService.provider.updateStatus(
+            ProductionAuthorizationRuntime.consentServingStatus(
+                isConsoleReachable: authorizationRuntime.isConsoleReachable(),
+            ),
+            forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+        )
         logger.info("Health service status set to SERVING")
 
         try await waitForServerTermination(
             serverTask: serverTask,
             shutdownSignals: signalSource.stream,
             beginGracefulShutdown: {
-                healthService.provider.updateStatus(.notServing, forService: "exactmac.v1.ExactMac")
+                healthService.provider.updateStatus(.notServing, forService: RPCAuthorizationMap.serviceName)
                 healthService.provider.updateStatus(.notServing, forService: "")
+                healthService.provider.updateStatus(
+                    .notServing,
+                    forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+                )
                 server.beginGracefulShutdown()
                 await composition.serviceLifetime.shutdown()
             },
@@ -254,12 +276,20 @@ func serve(
         healthService.provider.updateStatus(.notServing, forService: "exactmac.v1.ExactMac")
         healthService.provider.updateStatus(.notServing, forService: "")
         server.beginGracefulShutdown()
+        healthService.provider.updateStatus(
+            .notServing,
+            forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+        )
         await composition.serviceLifetime.shutdown()
         _ = try? await serverTask.value
     }
 
-    healthService.provider.updateStatus(.notServing, forService: "exactmac.v1.ExactMac")
+    healthService.provider.updateStatus(.notServing, forService: RPCAuthorizationMap.serviceName)
     healthService.provider.updateStatus(.notServing, forService: "")
+    healthService.provider.updateStatus(
+        .notServing,
+        forService: ProductionAuthorizationRuntime.consentHealthServiceName,
+    )
     logger.info("Health service status set to NOT_SERVING")
 
     var cleanupError: (any Error)?
@@ -267,6 +297,7 @@ func serve(
         try await performGracefulShutdown(
             listenerFactory: listenerFactory,
             serviceLifetime: composition.serviceLifetime,
+            consoleEndpoint: consoleEndpoint,
         )
     } catch {
         cleanupError = error
@@ -321,20 +352,36 @@ func main() async throws {
     if let socketPath = config.unixSocketPath {
         logger.info("Will listen on Unix socket: \(socketPath, privacy: .private)")
         logger.info("Authorization: unix-socket variant; the owning user is the principal.")
-        let registry = ConnectionPeerRegistry()
+
+        // THE STATE THE SERVER OWNS, assembled here rather than inside the interceptor, so
+        // that every refusing default is a decision visible in this function instead of a
+        // consequence of a nil somewhere else. Each of these has a real implementation
+        // behind it; the versions the interceptor defaults to deny, and the point of this
+        // wiring is that production is not running on them.
+        let runtime = try ProductionAuthorizationRuntime.make(config: config)
+        let registry = runtime.registry
         let listener = PeerIdentifyingListenerFactory(
             eventLoopGroup: MultiThreadedEventLoopGroup.singleton,
             socketPath: socketPath,
             registry: registry,
         )
+        logger.info("State directory: \(ExactMacRuntimePaths.stateDirectory(), privacy: .private)")
+        logger.info("Decision audit: \(runtime.auditPath, privacy: .private)")
+        logger.info("Grant store: \(runtime.grantStorePath, privacy: .private)")
+        if let consoleSocketPath = runtime.consoleSocketPath {
+            logger.info("Console channel: \(consoleSocketPath, privacy: .private)")
+        } else {
+            logger.warning(
+                "No console socket is configured, so the server never enters the consent path and every consent-requiring capability is denied. That is the safe answer and it is also a service that can do nothing.",
+            )
+        }
+
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
-            authorizationRuntime: .unixSocket(
-                descriptorPolicy: descriptorPolicy,
-                peerEvidence: .registry(registry),
-            ),
+            authorizationRuntime: runtime.authorizationRuntime,
             listenerFactory: listener,
+            consoleEndpoint: runtime.consoleEndpoint,
         )
         return
     }

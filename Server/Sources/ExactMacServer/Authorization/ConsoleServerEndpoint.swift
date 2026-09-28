@@ -28,6 +28,24 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
     private let lock = NSLock()
     private var listening: Int32 = -1
     private var connections: [Int32] = []
+    /// Connections that have completed the handshake, as opposed to merely being open.
+    ///
+    /// A CONNECTION IS NOT A CONSOLE until it has produced the token, so the count is
+    /// separate from `connections`: reachability is what the authorization layer asks before
+    /// it decides that a request needs a prompt, and answering that from a socket that has
+    /// not authenticated would report a consent path that does not exist.
+    private var authenticatedPeers = 0
+
+    /// Whether a console is connected and has authenticated.
+    ///
+    /// THE ANSWER THE AUTHORIZATION LAYER ASKS, and the reason it is a live answer rather
+    /// than a constant: `true` when no console is running means the interceptor takes the
+    /// consent path and then denies on the timeout, and a console that is running means the
+    /// operator is actually prompted. The stale-true direction is a prompt that never
+    /// appears; the stale-false direction is a permanently unusable service.
+    var hasAuthenticatedConsole: Bool {
+        lock.withLock { authenticatedPeers > 0 }
+    }
 
     /// - Parameter responder: what a console query is answered with. The CHANNEL carries
     ///   queries; what is in an answer belongs to the store, the audit and the settings, and
@@ -135,6 +153,7 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
         let (descriptor, open) = lock.withLock { () -> (Int32, [Int32]) in
             let open = connections
             connections = []
+            authenticatedPeers = 0
             return (listening, open)
         }
         for connection in open {
@@ -189,6 +208,9 @@ final class ConsoleServerEndpoint: @unchecked Sendable {
             logger.notice("A console connection was refused: it did not authenticate.")
             return
         }
+
+        lock.withLock { authenticatedPeers += 1 }
+        defer { lock.withLock { authenticatedPeers -= 1 } }
 
         // CAUGHT UP FIRST: anything raised before this console authenticated is sent to it
         // now, so a request that was already waiting is not lost to a late connection.

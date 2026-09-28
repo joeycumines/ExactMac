@@ -73,6 +73,12 @@ public struct ServerConfig {
         let socket = environment["GRPC_UNIX_SOCKET"]
         let socketValue = socket?.isEmpty == false ? socket : nil
 
+        // NIL BY DEFAULT, and that is the fail-closed rule the rest of this block follows: a
+        // server started with nothing configured is the one least able to do anything. The
+        // deployment states `EXACTMAC_CONSOLE_SOCKET` explicitly, and a server without it
+        // refuses every consent-requiring capability with `consoleUnreachable` — which is the
+        // correct answer, and a server that quietly went looking for a channel nobody
+        // configured would be a server that bound a socket it had no reason to own.
         let consoleSocket = environment["EXACTMAC_CONSOLE_SOCKET"]
         // An unparseable duration is the DURATION'S DEFAULT rather than its maximum, and the
         // default is the shorter one. A typo in a consent timeout must not double it.
