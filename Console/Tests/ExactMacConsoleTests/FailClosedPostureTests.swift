@@ -117,17 +117,35 @@ struct FailClosedPostureTests {
     }
 
     @Test
-    func `A server that could not start is reported with its reason, not as switched off`() {
-        // The distinction matters to whoever reads it: the operator turned nothing off, so
-        // a state inviting them to toggle something would send them after the wrong cause.
+    func `A server that could not start is reported as not serving, not as unable to ask`() {
+        // THE FAULT HAS ITS OWN STATE, and conflating the two sent an operator after the
+        // wrong fix. "Nothing can put the question in front of you" and "the server is not
+        // running" are different facts with different remedies, and the start-failure path
+        // used to report the first while meaning the second. The notice carries the reason;
+        // the state says only what is true of the server.
         let subject = model(presentation: .application)
 
         subject.reportServerStartFailure(reason: "the socket pathname is held by another server")
 
-        #expect(subject.serviceState != .stopped)
-        #expect(subject.serviceState != .running)
+        #expect(subject.serviceState == .stopped, "a server that is not running is not serving")
+        // And it is DISTINCT from the state that means this process cannot prompt, which is
+        // the whole point: conflating them is what the assertion is guarding.
+        #expect(subject.serviceState != .unreachable)
         #expect(subject.failClosed != nil)
         #expect(subject.pendingNotice?.contains("held by another server") == true)
+    }
+
+    @Test
+    func `The not-serving band does not blame a toggle the operator may not have touched`() throws {
+        // IT USED TO READ "You turned ExactMac off", and this state is reached when the
+        // app's own server failed to start — so an operator who had touched nothing was told
+        // they had. The band names the state; the reason is the notice and the log.
+        let subject = model(presentation: .application)
+        subject.reportServerStartFailure(reason: "boom")
+
+        let band = try #require(subject.failClosed)
+        #expect(band.title != "The service is off")
+        #expect(!band.body.contains("You turned"), "got \(band.body)")
     }
 
     @Test

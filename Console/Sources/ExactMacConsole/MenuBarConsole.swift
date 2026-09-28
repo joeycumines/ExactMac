@@ -212,14 +212,19 @@ struct MenuBarPopover: View {
             // ACTIONS, where there were none. `MenuRow` has always been a `Button`; every
             // call site passed the default no-op, so three rows that look like navigation
             // did nothing at all.
+            // NO COUNTS, AND SAYING WHY. Both rows used to show a number that arrived over
+            // the console socket; the socket is gone and this process cannot ask the server
+            // it hosts for either figure yet, so `nil` is the honest detail. A number
+            // computed here from something other than the store would be a guess about how
+            // much of the operator's own history is exposed.
             MenuRow(
                 title: "Grants",
-                detail: model.activeGrantCount.map { "\($0) active" },
+                detail: nil,
                 action: { model.openGrants() },
             )
             MenuRow(
                 title: "Activity",
-                detail: model.activityCount.map { formatted($0) },
+                detail: nil,
                 action: { model.openActivity() },
             )
             MenuRow(title: "Settings", detail: nil, action: { model.openSettings() })

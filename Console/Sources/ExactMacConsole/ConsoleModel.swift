@@ -23,8 +23,6 @@ final class ConsoleModel {
         startAtLogin.status == .enabled
     }
 
-    private(set) var activeGrantCount: Int?
-    private(set) var activityCount: Int?
     /// `.none` when there is nothing wrong, and the band when there is. An OPTIONAL SLOT at a
     /// fixed index, which is why the popover's height is driven by it and nothing else.
     private(set) var failClosed: (title: String, body: String)?
@@ -71,13 +69,11 @@ final class ConsoleModel {
     private var optionsExpandedFor: String?
     private let ceremony: (any CeremonyPerforming)?
 
-    /// What the activity window shows. Both are read from the server's reply, and BOTH ARE
-    /// STATE ON THE SERVER'S CLOCK rather than this process's, which is why the console does
-    /// not compute them: the store and the audit own their instants and a display that
-    /// invented its own would disagree with the record it claims to show.
-    private var activityRows: [ActivityRow.Model] = []
-    private var activityIntegrity: IntegrityBadge.State = .unchecked
-    private var activitySubtitle = "No decisions recorded yet"
+    // The activity rows, the integrity badge and the subtitle are GONE rather than left at
+    // their initial values. They were read from a reply that arrived over the console socket,
+    // and the socket is gone: the audit log is the server library's, behind an API this
+    // module cannot call. Keeping three properties that nothing writes and a window that
+    // renders them is the shape of a lie that compiles.
 
     init(
         startAtLogin: StartAtLogin = StartAtLogin(),
@@ -180,7 +176,13 @@ final class ConsoleModel {
     func reportServerStartFailure(reason: String) {
         logger.error("The hosted server did not start: \(reason, privacy: .public)")
         pendingNotice = "ExactMac could not start its server: \(reason)"
-        apply(.unreachable)
+        // `.stopped` RATHER THAN `.unreachable`, and the two are not interchangeable. The
+        // unreachable band says nothing can put a question in front of the operator, which
+        // is a claim about this process's ability to present. A server that failed to start
+        // is a different fault with a different fix, and sending an operator after the wrong
+        // one is worse than saying nothing — its own comment said the distinction mattered,
+        // and the state it chose did not make it.
+        apply(.stopped)
     }
 
     // MARK: The service control
@@ -458,21 +460,22 @@ final class ConsoleModel {
         pendingNotice = "The grants list needs a display shape the server does not send yet."
     }
 
-    /// The decision timeline, which this process does not yet have rows for.
+    /// The decision timeline, WHICH THIS PROCESS CANNOT SHOW AND SAYS SO.
     ///
-    /// IT PRESENTS THE EMPTY STATE AND SAYS WHY rather than asking a transport for rows and
-    /// rendering whatever came back. The timeline's two columns are instants on the server's
-    /// clock and the verdict from the hash-chained audit, both of which the server owns;
-    /// inventing either here would put a plausible wrong record in front of an operator
-    /// deciding whether to trust the log.
+    /// IT USED TO OPEN A WINDOW, and the window made two claims that were both false. Its
+    /// subtitle said "No decisions recorded yet" when the log is written on this very
+    /// machine and this process simply cannot read it, and its footer promised that a
+    /// tampered chain "is shown here rather than hidden" while showing nothing at all. An
+    /// operator who opened that window and saw an empty list would conclude they had never
+    /// approved anything — the opposite of the truth, and the most dangerous direction a
+    /// security record can be wrong in.
+    ///
+    /// The app hosts the server, but hosting is not reading: the audit log is the server
+    /// library's, behind an API this module cannot call, so there is nothing to render. A
+    /// window that admits it is empty is still a lie; this says the log exists and is not
+    /// shown here.
     func openActivity() {
-        windows.present(.activity, title: "Activity") {
-            ActivityTimeline(
-                rows: activityRows,
-                integrity: activityIntegrity,
-                subtitle: activitySubtitle,
-            )
-        }
+        pendingNotice = "The decision log is on this Mac and is not shown here yet."
     }
 
     func openSettings() {
@@ -481,7 +484,7 @@ final class ConsoleModel {
         }
     }
 
-    // MARK: The channel's whole lifecycle
+    // MARK: What this process reports about itself
 
     /// The state this process is actually able to report.
     ///
@@ -561,10 +564,15 @@ final class ConsoleModel {
                     + "every consent-requiring capability is denied.",
             )
         case .stopped:
+            // IT DOES NOT SAY "YOU TURNED IT OFF". It used to, and the state is reached when
+            // this process's own server failed to start — so an operator who had touched
+            // nothing would have been told they had. Naming the state rather than the cause
+            // is also the honest answer: the cause is the log line, and the operator's next
+            // move is the same either way.
             failClosed = (
-                "The service is off",
-                "You turned ExactMac off. Nothing is served and nothing is exposed until "
-                    + "you turn it back on.",
+                "ExactMac is not serving",
+                "Nothing is being served and nothing is exposed. Quitting and opening "
+                    + "ExactMac again will not help on its own — the reason is in the log.",
             )
         case .running, .pending:
             failClosed = nil
