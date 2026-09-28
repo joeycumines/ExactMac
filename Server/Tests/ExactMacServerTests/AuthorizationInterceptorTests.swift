@@ -822,7 +822,7 @@ enum ServerFixture {
         for decision: AuthorizationDecision,
         requestID: String,
         nonce: String? = nil,
-        decidedAt: MonotonicInstant = MonotonicInstant(nanoseconds: 1_000),
+        decidedAt: MonotonicInstant = MonotonicInstant(nanoseconds: 1000),
         expiresAt: MonotonicInstant = MonotonicInstant(nanoseconds: 900_000_000_000),
     ) -> BiometricProof? {
         guard let expected = nonce ?? decision.ceremonyNonce else { return nil }
@@ -929,11 +929,15 @@ extension AuthorizationInterceptorTests {
     }
 }
 
-
 /// A clock that does not move, so an expiry is expired because the test said so rather than
 /// because the machine was slow.
 private final class FrozenClock: MonotonicClock, @unchecked Sendable {
     private let instant: MonotonicInstant
-    init(now: MonotonicInstant) { instant = now }
-    func now() -> MonotonicInstant { instant }
+    init(now: MonotonicInstant) {
+        instant = now
+    }
+
+    func now() -> MonotonicInstant {
+        instant
+    }
 }

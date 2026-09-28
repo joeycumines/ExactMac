@@ -82,7 +82,9 @@ public struct ConsentAnswer: Sendable, Equatable {
     /// DERIVED, because a boolean stored next to a proof is a second source of truth: a `true`
     /// beside a nil proof would claim a ceremony the server can see did not happen, which is
     /// the exact state a downgrade produces.
-    public var biometricObtained: Bool { ceremonyProof != nil }
+    public var biometricObtained: Bool {
+        ceremonyProof != nil
+    }
 
     /// A host constructs the answer it hands back to the server that asked, and the
     /// memberwise initialiser of a public struct is internal, so this is the seam.
