@@ -393,6 +393,7 @@ exactmac.build-server: ## Build the release Swift server and its resource bundle
 	EXACTMAC_SERVER_PRODUCT="$(EXACTMAC_SERVER_PRODUCT)"; export EXACTMAC_SERVER_PRODUCT; \
 	if ! swift build --configuration release --product "$$EXACTMAC_SERVER_PRODUCT" 2>&1 | tee "$(EXACTMAC_SERVER_BUILD_LOG)" | tail -n 40; then printf '%s\n' 'ERROR: Swift server build failed.' >&2; exit 1; fi; \
 	test -x "$(EXACTMAC_SERVER_BIN)" || { printf 'ERROR: server binary missing: %s\n' "$(EXACTMAC_SERVER_BIN)" >&2; exit 1; }; \
+	ln -sf "$$EXACTMAC_SERVER_PRODUCT" "$(EXACTMAC_SERVER_BUILD_DIR)/ExactMacServer"; \
 	if [ ! -d "$(EXACTMAC_REQUIRED_RESOURCE_BUNDLE)" ]; then \
 		printf 'ERROR: SwiftPM resource bundle missing: %s\n' "$(EXACTMAC_REQUIRED_RESOURCE_BUNDLE)" >&2; \
 		exit 1; \
