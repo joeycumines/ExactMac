@@ -46,6 +46,12 @@ EXACTMAC_SOCKET         ?= $(HOME)/Library/Caches/exactmac.sock
 # capability, and a server that went looking for a channel nobody configured would bind a
 # socket it had no reason to own.
 EXACTMAC_CONSOLE_SOCKET  ?= $(HOME)/.exactmac/console.sock
+# The state directory, derived from the console socket so the two cannot disagree. It holds
+# the grant store, the audit log and the console token, and the server REFUSES to start
+# against a directory that is not 0700 — which it correctly refused against a `mkdir -p`
+# made at the shell's umask. Creating it is therefore this module's job, at the right mode,
+# not a side effect of whichever target happened to need the path first.
+EXACTMAC_STATE_DIR       := $(dir $(EXACTMAC_CONSOLE_SOCKET))
 EXACTMAC_STDOUT_LOG     ?= $(HOME)/Library/Logs/exactmac.log
 EXACTMAC_STDERR_LOG     ?= $(HOME)/Library/Logs/exactmac.error.log
 
@@ -59,6 +65,7 @@ EXACTMAC_WAIT_INTERVAL  ?= 1
 
 EXACTMAC_UID            := $(shell id -u)
 EXACTMAC_LAUNCH_DOMAIN  := gui/$(EXACTMAC_UID)
+EXACTMAC_CONSOLE_SERVICE_TARGET := $(EXACTMAC_LAUNCH_DOMAIN)/$(EXACTMAC_CONSOLE_BUNDLE_ID)
 EXACTMAC_SERVICE_TARGET := $(EXACTMAC_LAUNCH_DOMAIN)/$(EXACTMAC_BUNDLE_ID)
 
 # Go installs commands into GOBIN, or the first GOPATH/bin when GOBIN is empty.
@@ -71,8 +78,34 @@ EXACTMAC_GO_BIN_DIR ?= $(strip $(shell \
 		gobin="$${gopath%%:*}/bin"; \
 	fi; \
 	if [ -n "$$gobin" ]; then printf '%s' "$$gobin"; else printf '%s' "$(HOME)/go/bin"; fi))
+# The console's own product paths. A SEPARATE bundle identifier from the server's on
+# purpose: the two are separately signed, separately granted TCC access, and separately
+# launched, and a shared identifier would make one process's permissions the other's.
+EXACTMAC_CONSOLE_APP_NAME         ?= ExactMacConsole
+EXACTMAC_CONSOLE_BUNDLE_ID        ?= com.exactmac.console
+EXACTMAC_CONSOLE_VERSION          ?= $(EXACTMAC_VERSION)
+EXACTMAC_CONSOLE_BUILD_VERSION    ?= $(EXACTMAC_BUILD_VERSION)
+# macOS 15, matching Console/Package.swift's own deployment target. Declaring anything
+# lower would advertise a platform the binary does not build for.
+EXACTMAC_CONSOLE_MIN_MACOS        ?= 15.0
+EXACTMAC_CONSOLE_APP_DIR          ?= $(HOME)/Applications/$(EXACTMAC_CONSOLE_APP_NAME).app
+EXACTMAC_CONSOLE_APP_EXECUTABLE  := $(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS/$(EXACTMAC_CONSOLE_APP_NAME)
+EXACTMAC_CONSOLE_STAGING_DIR      := $(EXACTMAC_CONSOLE_APP_DIR).staging
+EXACTMAC_CONSOLE_BUILD_DIR       ?= $(PROJECT_ROOT)/Console/.build/release
+EXACTMAC_CONSOLE_BIN             := $(EXACTMAC_CONSOLE_BUILD_DIR)/$(EXACTMAC_CONSOLE_APP_NAME)
+EXACTMAC_CONSOLE_RESOURCE_BUNDLE_NAME := $(EXACTMAC_CONSOLE_APP_NAME)_$(EXACTMAC_CONSOLE_APP_NAME).bundle
+EXACTMAC_CONSOLE_REQUIRED_RESOURCE_BUNDLE := $(EXACTMAC_CONSOLE_BUILD_DIR)/$(EXACTMAC_CONSOLE_RESOURCE_BUNDLE_NAME)
+EXACTMAC_CONSOLE_PLIST           ?= $(HOME)/Library/LaunchAgents/$(EXACTMAC_CONSOLE_BUNDLE_ID).plist
+EXACTMAC_CONSOLE_BUILD_LOG        ?= $(EXACTMAC_BUILD_LOG_DIR)/exactmac-console.log
+# Runtime logs, in the operator's own log directory rather than the repository's build log
+# directory: a build artefact directory is not somewhere a service should keep state, and
+# `gmake clean` would take the operator's diagnostics with it.
+EXACTMAC_CONSOLE_STDOUT_LOG       ?= $(HOME)/Library/Logs/exactmac-console.log
+EXACTMAC_CONSOLE_STDERR_LOG       ?= $(HOME)/Library/Logs/exactmac-console.error.log
+
 EXACTMAC_MCP_BIN ?= $(EXACTMAC_GO_BIN_DIR)/exactmac
 EXACTMAC_MCP_BIN_DIR := $(patsubst %/,%,$(dir $(EXACTMAC_MCP_BIN)))
+EXACTMAC_CONSOLE_SERVICE_TARGET := $(EXACTMAC_LAUNCH_DOMAIN)/$(EXACTMAC_CONSOLE_BUNDLE_ID)
 
 # LaunchServices registration tool supplied by macOS.
 EXACTMAC_LSREGISTER ?= /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -112,6 +145,91 @@ define EXACTMAC_INFO_PLIST
 </dict>
 </plist>
 endef
+
+# The console's bundle. LSUIElement for the same reason as the server's and for a stronger
+# one: the operator's way in is the menu bar, so a Dock icon would be a second, worse door.
+define EXACTMAC_CONSOLE_INFO_PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>$(EXACTMAC_CONSOLE_APP_NAME)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXACTMAC_CONSOLE_APP_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(EXACTMAC_CONSOLE_APP_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(EXACTMAC_CONSOLE_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(EXACTMAC_CONSOLE_BUILD_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(EXACTMAC_CONSOLE_MIN_MACOS)</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+endef
+
+# The console's LaunchAgent. A LaunchAgent rather than a LaunchDaemon because
+# LocalAuthentication — the ceremony the prompt is built on — and the menu bar both belong
+# to the logged-in user's GUI session, and a daemon in another session could neither prompt
+# nor be seen.
+#
+# IT IS DELIBERATELY NOT KEEPALIVE-PAIRED WITH THE SERVER. The console supervises itself; the
+# server's own enable/disable is the operator's, through the menu bar item, and a console
+# that resurrected the server behind their back would be a control that fought itself.
+define EXACTMAC_CONSOLE_LAUNCHD_PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(EXACTMAC_CONSOLE_APP_EXECUTABLE)</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>EXACTMAC_STATE_DIRECTORY</key>
+        <string>$(dir $(EXACTMAC_CONSOLE_SOCKET))</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>$(EXACTMAC_CONSOLE_STDOUT_LOG)</string>
+    <key>StandardErrorPath</key>
+    <string>$(EXACTMAC_CONSOLE_STDERR_LOG)</string>
+</dict>
+</plist>
+endef
+
+export EXACTMAC_CONSOLE_INFO_PLIST_E := $(EXACTMAC_CONSOLE_INFO_PLIST)
+export EXACTMAC_CONSOLE_LAUNCHD_PLIST_E := $(EXACTMAC_CONSOLE_LAUNCHD_PLIST)
+export EXACTMAC_CONSOLE_APP_NAME EXACTMAC_CONSOLE_BUNDLE_ID EXACTMAC_CONSOLE_VERSION
+export EXACTMAC_CONSOLE_BUILD_VERSION EXACTMAC_CONSOLE_MIN_MACOS EXACTMAC_CONSOLE_APP_EXECUTABLE
+export EXACTMAC_CONSOLE_BUILD_LOG EXACTMAC_CONSOLE_STDOUT_LOG EXACTMAC_CONSOLE_STDERR_LOG
 
 # This is a LaunchAgent, not a LaunchDaemon: ScreenCaptureKit, AppKit,
 # Accessibility, Vision, and Metal must run in the logged-in user's GUI domain.
@@ -190,6 +308,17 @@ $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_APP_DIR))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_APP_EXECUTABLE))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_PLIST))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_SOCKET))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUILD_LOG))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BIN))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUILD_DIR))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_PLIST))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_APP_EXECUTABLE))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_APP_DIR))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_MIN_MACOS))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUILD_VERSION))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_VERSION))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUNDLE_ID))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_APP_NAME))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_SOCKET))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDOUT_LOG))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDERR_LOG))
@@ -212,6 +341,8 @@ $(eval $(call EXACTMAC_VALIDATE_CONFIG,PROJECT_ROOT))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_APP_EXECUTABLE),EXACTMAC_APP_EXECUTABLE))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_PLIST),EXACTMAC_PLIST))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_STAGING_DIR),EXACTMAC_STAGING_DIR))
+$(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_CONSOLE_STAGING_DIR),EXACTMAC_CONSOLE_STAGING_DIR))
+$(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_CONSOLE_REQUIRED_RESOURCE_BUNDLE),EXACTMAC_CONSOLE_REQUIRED_RESOURCE_BUNDLE))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_REQUIRED_RESOURCE_BUNDLE),EXACTMAC_REQUIRED_RESOURCE_BUNDLE))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_MCP_BIN_DIR),EXACTMAC_MCP_BIN_DIR))
 $(eval $(call EXACTMAC_VALIDATE_VALUE,$(EXACTMAC_SERVICE_TARGET),EXACTMAC_SERVICE_TARGET))
@@ -394,8 +525,12 @@ exactmac.launchd: ## Write, bootstrap, and wait for the per-user LaunchAgent.
 	validate_xml_value "$$EXACTMAC_BUNDLE_ID" EXACTMAC_BUNDLE_ID; \
 	validate_xml_value "$$EXACTMAC_APP_EXECUTABLE" EXACTMAC_APP_EXECUTABLE; \
 	validate_xml_value "$$EXACTMAC_SOCKET" EXACTMAC_SOCKET; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_SOCKET" EXACTMAC_CONSOLE_SOCKET; \
 	validate_xml_value "$$EXACTMAC_STDOUT_LOG" EXACTMAC_STDOUT_LOG; \
 	validate_xml_value "$$EXACTMAC_STDERR_LOG" EXACTMAC_STDERR_LOG; \
+	if ! mkdir -p "$(EXACTMAC_STATE_DIR)"; then printf '%s\n' 'ERROR: failed to create the state directory.' >&2; exit 1; fi; \
+	if ! chmod 700 "$(EXACTMAC_STATE_DIR)"; then printf '%s\n' 'ERROR: failed to restrict the state directory to 0700.' >&2; exit 1; fi; \
+	if [ "$$(stat -f '%Lp' "$(EXACTMAC_STATE_DIR)")" != "700" ]; then printf '%s\n' 'ERROR: the state directory is not 0700; the server will refuse to start against it.' >&2; exit 1; fi; \
 	if [ ! -x "$(EXACTMAC_APP_EXECUTABLE)" ]; then \
 		printf '%s\n' 'ERROR: installed app executable is missing.' >&2; \
 		exit 1; \
@@ -424,6 +559,22 @@ exactmac.launchd: ## Write, bootstrap, and wait for the per-user LaunchAgent.
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.wait
 
 .PHONY: exactmac.wait
+# A READY SERVER IS ONE THAT IS RUNNING *AND* IS SERVING THIS SOCKET, and the second
+# half is not decoration. A node left at the pathname by a previous run satisfies every
+# mode and ownership check, and a launchd job in its restart backoff briefly reports
+# `state = running` between attempts, so a check that looked only at those two passed
+# against a service that was crash-looping on a startup failure and reported the install
+# as complete. The handshake is what distinguishes them: the server answers it, and a server
+# that failed before it bound cannot.
+#
+# The socket path is passed to the probe IN rather than inherited, because the server learns
+# it from the LaunchAgent's EnvironmentVariables and a shell that did not export it would
+# probe nothing and report a healthy service as down.
+#
+# NO SHELL COMMENT MAY APPEAR INSIDE THIS RECIPE. A `#` line without a trailing backslash is
+# a separate recipe line, so make runs it in a separate shell and the functions defined above
+# it are gone by the time they are called; with one, `#` swallows the rest of the joined line,
+# braces included. Both were tried and both fail loudly rather than quietly.
 exactmac.wait:
 	@socket_endpoint_ready() { \
 		[ -S "$(EXACTMAC_SOCKET)" ] && [ ! -L "$(EXACTMAC_SOCKET)" ] || return 1; \
@@ -431,10 +582,15 @@ exactmac.wait:
 		socket_mode=$$(stat -f '%Sp' "$(EXACTMAC_SOCKET)" 2>/dev/null || true); \
 		[ "$$socket_owner" = "$(EXACTMAC_UID)" ] && [ "$$socket_mode" = 'srw-------' ]; \
 	}; \
+	answering() { \
+		EXACTMAC_SERVER_SOCKET_PATH="$(EXACTMAC_SOCKET)" \
+			"$(EXACTMAC_MCP_BIN)" health >/dev/null 2>&1; \
+	}; \
 	attempt=0; \
 	while [ "$$attempt" -lt "$(EXACTMAC_WAIT_ATTEMPTS)" ]; do \
 		if launchctl print "$(EXACTMAC_SERVICE_TARGET)" 2>/dev/null | grep -q 'state = running' \
-			&& socket_endpoint_ready; then \
+			&& socket_endpoint_ready \
+			&& answering; then \
 			printf 'Service ready: %s\n' "$(EXACTMAC_SERVICE_TARGET)"; \
 			ls -l "$(EXACTMAC_SOCKET)"; \
 			exit 0; \
@@ -443,7 +599,12 @@ exactmac.wait:
 		sleep "$(EXACTMAC_WAIT_INTERVAL)"; \
 	done; \
 	printf 'ERROR: service/socket not ready after %s attempt(s).\n' "$(EXACTMAC_WAIT_ATTEMPTS)" >&2; \
+	printf '%s\n' '--- the service state ---' >&2; \
 	launchctl print "$(EXACTMAC_SERVICE_TARGET)" 2>&1 | sed -n '1,80p' >&2 || true; \
+	printf '%s\n' '--- the unified log, where a startup failure is recorded ---' >&2; \
+	log show --info --last 5m --style compact --predicate 'process == "ExactMacServer"' 2>/dev/null \
+		| grep -E 'Main' | tail -n 20 >&2 || true; \
+	printf '%s\n' '--- stderr ---' >&2; \
 	tail -n 40 "$(EXACTMAC_STDERR_LOG)" 2>/dev/null >&2 || true; \
 	exit 1
 
@@ -622,3 +783,245 @@ exactmac-open-textedit-doc: ## Open an empty TextEdit document at a stable path.
 	@mkdir -p "$(PROJECT_ROOT)"; \
 	: > "$(PROJECT_ROOT)/tmp_hello.txt"; \
 	open -a TextEdit "$(PROJECT_ROOT)/tmp_hello.txt"
+
+# =============================================================================
+# ExactMacConsole
+# =============================================================================
+#
+# The consent console is a SEPARATE PROCESS and is packaged the same way the server is:
+# SwiftPM release binary, hand-assembled .app, ad-hoc signed, run from a per-user
+# LaunchAgent. It is separate because the server ENFORCES and the console CONSENTS, and the
+# whole design rests on those being two programs rather than one.
+#
+# A console that is not running is not a degraded console, it is NO consent path: the server
+# refuses every consent-requiring capability. So this LaunchAgent is what makes the service
+# usable, and `console-start` / `console-stop` exist separately from the server's own
+# lifecycle for exactly that reason.
+
+##@ [Console] Build and package
+
+.PHONY: exactmac.console-build
+exactmac.console-build: ## Build the release Swift console and its resource bundle.
+	@set -uo pipefail; \
+	if ! mkdir -p "$(EXACTMAC_BUILD_LOG_DIR)"; then printf '%s\n' 'ERROR: failed to create build log directory.' >&2; exit 1; fi; \
+	printf '%s\n' '=== Building ExactMacConsole (release) ==='; \
+	if ! cd "$(PROJECT_ROOT)/Console"; then printf '%s\n' 'ERROR: Console project directory is unavailable.' >&2; exit 1; fi; \
+	if ! swift build -c release --product ExactMacConsole \
+		>"$(EXACTMAC_CONSOLE_BUILD_LOG)" 2>&1; then \
+		printf 'ERROR: console build failed. See %s\n' "$(EXACTMAC_CONSOLE_BUILD_LOG)" >&2; \
+		tail -n 20 "$(EXACTMAC_CONSOLE_BUILD_LOG)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -x "$(EXACTMAC_CONSOLE_BIN)" ]; then printf 'ERROR: console binary not found: %s\n' "$(EXACTMAC_CONSOLE_BIN)" >&2; exit 1; fi; \
+	printf 'Console binary built: %s\n' "$(EXACTMAC_CONSOLE_BIN)"
+
+.PHONY: exactmac.console-app
+exactmac.console-app: ## Create a clean ExactMacConsole.app, including its SwiftPM resources.
+	@set -u; \
+	validate_xml_value() { value="$$1"; name="$$2"; case "$$value" in *'<'*|*'>'*) printf 'ERROR: %s contains XML-significant characters.\n' "$$name" >&2; exit 1;; esac; }; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_APP_NAME" EXACTMAC_CONSOLE_APP_NAME; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_BUNDLE_ID" EXACTMAC_CONSOLE_BUNDLE_ID; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_VERSION" EXACTMAC_CONSOLE_VERSION; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_BUILD_VERSION" EXACTMAC_CONSOLE_BUILD_VERSION; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_MIN_MACOS" EXACTMAC_CONSOLE_MIN_MACOS; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_APP_EXECUTABLE" EXACTMAC_CONSOLE_APP_EXECUTABLE; \
+	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		printf '%s\n' "ERROR: console service is loaded; run 'gmake exactmac.console-stop' before replacing the app." >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -x "$(EXACTMAC_CONSOLE_BIN)" ]; then \
+		printf 'ERROR: console binary not found: %s\n' "$(EXACTMAC_CONSOLE_BIN)" >&2; \
+		printf '%s\n' "Run 'gmake exactmac.console-build' first." >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -d "$(EXACTMAC_CONSOLE_REQUIRED_RESOURCE_BUNDLE)" ]; then \
+		printf 'ERROR: required SwiftPM resource bundle not found: %s\n' "$(EXACTMAC_CONSOLE_REQUIRED_RESOURCE_BUNDLE)" >&2; \
+		printf '%s\n' "Run 'gmake exactmac.console-build' first." >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' '=== Creating staged console bundle ==='; \
+	if ! rm -rf "$(EXACTMAC_CONSOLE_STAGING_DIR)"; then printf '%s\n' 'ERROR: failed to clear console bundle staging directory.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/MacOS" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources"; then printf '%s\n' 'ERROR: failed to create console bundle staging directories.' >&2; exit 1; fi; \
+	if ! install -m 0755 "$(EXACTMAC_CONSOLE_BIN)" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/MacOS/$(EXACTMAC_CONSOLE_APP_NAME)"; then printf '%s\n' 'ERROR: failed to install console executable into bundle.' >&2; exit 1; fi; \
+	if ! printf '%s\n' "$$EXACTMAC_CONSOLE_INFO_PLIST_E" > "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Info.plist"; then printf '%s\n' 'ERROR: failed to write console Info.plist.' >&2; exit 1; fi; \
+	if ! printf 'APPL????' > "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/PkgInfo"; then printf '%s\n' 'ERROR: failed to write PkgInfo.' >&2; exit 1; fi; \
+	resource_count=0; \
+	for resource_bundle in "$(EXACTMAC_CONSOLE_BUILD_DIR)"/*.bundle; do \
+		[ -d "$$resource_bundle" ] || continue; \
+		resource_name=$$(basename "$$resource_bundle"); \
+		if ! ditto "$$resource_bundle" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/$$resource_name"; then printf 'ERROR: failed to copy console resource bundle: %s\n' "$$resource_bundle" >&2; exit 1; fi; \
+		resource_count=$$((resource_count + 1)); \
+	done; \
+	if [ "$$resource_count" -eq 0 ]; then \
+		printf '%s\n' 'ERROR: no SwiftPM .bundle resources were copied.' >&2; \
+		exit 1; \
+	fi; \
+	if ! plutil -lint "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Info.plist"; then printf '%s\n' 'ERROR: generated console Info.plist is invalid.' >&2; exit 1; fi; \
+	if [ ! -d "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/$(EXACTMAC_CONSOLE_RESOURCE_BUNDLE_NAME)" ]; then \
+		printf 'ERROR: required console resource bundle missing: %s\n' "$(EXACTMAC_CONSOLE_RESOURCE_BUNDLE_NAME)" >&2; \
+		exit 1; \
+	fi; \
+	if ! rm -rf "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to replace installed console app directory.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(dir $(EXACTMAC_CONSOLE_APP_DIR))"; then printf '%s\n' 'ERROR: failed to create console app parent directory.' >&2; exit 1; fi; \
+	if ! mv "$(EXACTMAC_CONSOLE_STAGING_DIR)" "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to install staged console bundle.' >&2; exit 1; fi; \
+	printf 'Console bundle created: %s (%s SwiftPM resource bundle(s))\n' "$(EXACTMAC_CONSOLE_APP_DIR)" "$$resource_count"
+
+.PHONY: exactmac.console-sign
+exactmac.console-sign: private SHELL := /bin/bash
+exactmac.console-sign: ## Ad-hoc sign the console .app and verify it strictly.
+	@set -uo pipefail; \
+	if [ ! -x "$(EXACTMAC_CONSOLE_APP_EXECUTABLE)" ]; then \
+		printf '%s\n' "ERROR: console bundle is missing; run 'gmake exactmac.console-app' first." >&2; \
+		exit 1; \
+	fi; \
+	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		printf '%s\n' "ERROR: console service is loaded; run 'gmake exactmac.console-stop' before signing." >&2; \
+		exit 1; \
+	fi; \
+	if ! chmod -R u+w "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to make console app writable for signing.' >&2; exit 1; fi; \
+	if ! xattr -cr "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to clear console app extended attributes.' >&2; exit 1; fi; \
+	printf '=== Signing console with identity: %s ===\n' "$(EXACTMAC_SIGN_IDENTITY)"; \
+	if ! codesign --force --sign "$(EXACTMAC_SIGN_IDENTITY)" "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console codesign failed.' >&2; exit 1; fi; \
+	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console codesign verification failed.' >&2; exit 1; fi; \
+	printf 'Console signature verified: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"
+
+.PHONY: exactmac.console-register
+exactmac.console-register: ## Register the signed console .app with LaunchServices.
+	@set -u; \
+	if [ ! -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then \
+		printf '%s\n' 'ERROR: console bundle is missing; run console-app and console-sign first.' >&2; \
+		exit 1; \
+	fi; \
+	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console signature verification failed.' >&2; exit 1; fi; \
+	if ! "$(EXACTMAC_LSREGISTER)" -f "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console LaunchServices registration failed.' >&2; exit 1; fi; \
+	printf 'Registered %s (%s) with LaunchServices.\n' "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_BUNDLE_ID)"
+
+##@ [Console] LaunchAgent
+
+.PHONY: exactmac.console-install
+exactmac.console-install: ## Build, sign, register, bootstrap, and wait for the console LaunchAgent.
+	@# STOP FIRST, exactly as `exactmac.install` does for the server, and for the same reason:
+	@# replacing a signed bundle underneath a running process leaves that process on the old
+	@# binary until it is next respawned, which looks like an install that did nothing.
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-stop
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-build
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-app
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-sign
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-register
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-launchd
+	@printf '%s\n' 'Console installed. The menu bar item is the operator interface.'
+
+.PHONY: exactmac.console-launchd
+exactmac.console-launchd: private SHELL := /bin/bash
+exactmac.console-launchd: ## Write, bootstrap, and wait for the console LaunchAgent.
+	@set -uo pipefail; \
+	validate_xml_value() { value="$$1"; name="$$2"; case "$$value" in *'<'*|*'>'*) printf 'ERROR: %s contains XML-significant characters.\n' "$$name" >&2; exit 1;; esac; }; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_BUNDLE_ID" EXACTMAC_CONSOLE_BUNDLE_ID; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_APP_EXECUTABLE" EXACTMAC_CONSOLE_APP_EXECUTABLE; \
+	validate_xml_value "$$EXACTMAC_CONSOLE_SOCKET" EXACTMAC_CONSOLE_SOCKET; \
+	if [ ! -x "$(EXACTMAC_CONSOLE_APP_EXECUTABLE)" ]; then \
+		printf '%s\n' 'ERROR: installed console app executable is missing.' >&2; \
+		exit 1; \
+	fi; \
+	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console signature verification failed.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(dir $(EXACTMAC_CONSOLE_PLIST))" "$(dir $(EXACTMAC_CONSOLE_SOCKET))" "$(dir $(EXACTMAC_CONSOLE_STDOUT_LOG))" "$(dir $(EXACTMAC_CONSOLE_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create console LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
+	if ! chmod 700 "$(EXACTMAC_STATE_DIR)" || [ "$$(stat -f '%Lp' "$(EXACTMAC_STATE_DIR)")" != "700" ]; then \
+		printf '%s\n' 'ERROR: the state directory could not be restricted to 0700; the server will refuse to start against it.' >&2; \
+		exit 1; \
+	fi; \
+	plist_tmp=$$(mktemp "$(EXACTMAC_CONSOLE_PLIST).tmp.XXXXXX") || { printf '%s\n' 'ERROR: failed to create temporary console plist.' >&2; exit 1; }; \
+	cleanup_plist_tmp() { rm -f "$$plist_tmp"; }; \
+	trap cleanup_plist_tmp EXIT INT TERM; \
+	if ! printf '%s\n' "$$EXACTMAC_CONSOLE_LAUNCHD_PLIST_E" > "$$plist_tmp"; then printf '%s\n' 'ERROR: failed to write console LaunchAgent plist.' >&2; exit 1; fi; \
+	if ! plutil -lint "$$plist_tmp"; then printf '%s\n' 'ERROR: generated console LaunchAgent plist is invalid.' >&2; exit 1; fi; \
+	if ! chmod 600 "$$plist_tmp"; then printf '%s\n' 'ERROR: failed to secure temporary console plist.' >&2; exit 1; fi; \
+	console_service_absent() { output=$$(launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1); status=$$?; [ "$$status" -ne 0 ] && printf '%s\n' "$$output" | grep -Fq 'Could not find service'; }; \
+	if ! launchctl bootout "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		if ! console_service_absent; then printf '%s\n' 'ERROR: could not confirm console bootout; refusing replacement.' >&2; exit 1; fi; \
+	fi; \
+	attempt=0; \
+	while ! console_service_absent && [ "$$attempt" -lt 10 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
+	if ! console_service_absent; then \
+		printf '%s\n' 'ERROR: console LaunchAgent remained loaded; refusing replacement.' >&2; \
+		exit 1; \
+	fi; \
+	if ! mv "$$plist_tmp" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to install console LaunchAgent plist.' >&2; exit 1; fi; \
+	if ! launchctl enable "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; then printf '%s\n' 'ERROR: failed to enable console LaunchAgent.' >&2; exit 1; fi; \
+	if ! launchctl bootstrap "$(EXACTMAC_LAUNCH_DOMAIN)" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to bootstrap console LaunchAgent.' >&2; exit 1; fi; \
+	attempt=0; \
+	while [ "$$attempt" -lt "$(EXACTMAC_WAIT_ATTEMPTS)" ]; do \
+		if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>/dev/null | grep -q 'state = running'; then \
+			printf 'Console service ready: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
+			exit 0; \
+		fi; \
+		sleep 1; attempt=$$((attempt + 1)); \
+	done; \
+	printf '%s\n' 'ERROR: console LaunchAgent did not reach the running state.' >&2; \
+	launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1 | sed -n '1,20p' >&2 || true; \
+	exit 1
+
+.PHONY: exactmac.console-start
+exactmac.console-start: ## Start the console service without rebuilding or re-signing.
+	@set -u; \
+	if [ ! -f "$(EXACTMAC_CONSOLE_PLIST)" ]; then \
+		printf '%s\n' "ERROR: console plist is missing; run 'gmake exactmac.console-install' first." >&2; \
+		exit 1; \
+	fi; \
+	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		printf 'Console service already loaded: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
+		exit 0; \
+	fi; \
+	if ! launchctl enable "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; then printf '%s\n' 'ERROR: failed to enable console service.' >&2; exit 1; fi; \
+	if ! launchctl bootstrap "$(EXACTMAC_LAUNCH_DOMAIN)" "$(EXACTMAC_CONSOLE_PLIST)"; then printf '%s\n' 'ERROR: failed to bootstrap console service.' >&2; exit 1; fi; \
+	printf 'Console service bootstrapped: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"
+
+.PHONY: exactmac.console-stop
+exactmac.console-stop: ## Stop the console service, keeping the bundle and the plist.
+	@set -u; \
+	console_service_absent() { output=$$(launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1); status=$$?; [ "$$status" -ne 0 ] && printf '%s\n' "$$output" | grep -Eq 'Could not find service|No such process|service does not exist'; }; \
+	if launchctl bootout "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		printf 'Console service stopped: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
+	elif console_service_absent; then \
+		printf 'Console service is not loaded: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
+	else \
+		printf '%s\n' 'ERROR: could not confirm console bootout.' >&2; \
+		exit 1; \
+	fi
+
+.PHONY: exactmac.console-uninstall
+exactmac.console-uninstall: ## Remove the console bundle, LaunchAgent, plist, and socket.
+	@set -u; \
+	$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.console-stop || exit 1; \
+	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then "$(EXACTMAC_LSREGISTER)" -u "$(EXACTMAC_CONSOLE_APP_DIR)" >/dev/null 2>&1 || true; fi; \
+	rm -rf "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_STAGING_DIR)"; \
+	rm -f "$(EXACTMAC_CONSOLE_PLIST)"; \
+	rm -f "$(EXACTMAC_CONSOLE_SOCKET)"; \
+	rm -f "$(EXACTMAC_CONSOLE_STDOUT_LOG)" "$(EXACTMAC_CONSOLE_STDERR_LOG)"; \
+	printf 'Console uninstalled: %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"
+
+.PHONY: exactmac.console-status
+exactmac.console-status: ## Report the console's bundle, signature, service, and socket.
+	@set -u; \
+	printf '  App:       %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	printf '  Bundle ID: %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
+	printf '  Plist:     %s\n' "$(EXACTMAC_CONSOLE_PLIST)"; \
+	printf '  Socket:    %s\n' "$(EXACTMAC_CONSOLE_SOCKET)"; \
+	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then \
+		if codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)" 2>/dev/null; then printf '  Signature: verified\n'; else printf '  Signature: MISSING OR INVALID\n'; fi; \
+		ls -ld "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	else printf '  Bundle:    not installed\n'; fi; \
+	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
+		launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>/dev/null | grep -E '^\s*(state|pid) = ' || true; \
+	else printf '  Service:   not loaded\n'; fi
+
+# Short aliases. The catalog uses the exactmac.* prefix for everything else in this file, and
+# these exist because the deployment contract names them in that form; they forward, so there
+# is one implementation of each and no second thing to keep in step.
+.PHONY: console-build console-app console-sign console-install console-uninstall console-start console-stop
+console-build:    exactmac.console-build
+console-app:      exactmac.console-app
+console-sign:     exactmac.console-sign
+console-install:  exactmac.console-install
+console-uninstall: exactmac.console-uninstall
+console-start:    exactmac.console-start
+console-stop:     exactmac.console-stop

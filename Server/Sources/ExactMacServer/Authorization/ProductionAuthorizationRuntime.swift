@@ -409,6 +409,10 @@ struct ProductionAuthorizationRuntime {
     let grantStorePath: String
     let consoleSocketPath: String?
     let consoleEndpoint: ConsoleServerEndpoint?
+    /// The endpoint's accept loop, held so shutdown can stop it. It is a SEPARATE TASK and
+    /// not a call, because `ConsoleServerEndpoint.serve()` runs until `stop()` and calling
+    /// it inline would block startup forever.
+    let consoleEndpointTask: Task<Void, Never>?
     let authorizationRuntime: AuthorizationRuntime
     let consentTimeout: Duration
 
@@ -452,6 +456,7 @@ struct ProductionAuthorizationRuntime {
         // rather than pretending a consent path exists.
         let consoleSocketPath = config.consoleSocketPath
         var consoleEndpoint: ConsoleServerEndpoint?
+        var consoleEndpointTask: Task<Void, Never>?
         if let consoleSocketPath {
             let token: ConsoleChannelToken
             do {
@@ -479,6 +484,14 @@ struct ProductionAuthorizationRuntime {
                 throw ExactMacRuntimeError.consoleChannelUnavailable(
                     reason: String(describing: error),
                 )
+            }
+            // THE ACCEPT LOOP IS STARTED HERE, and its absence was the whole reason the
+            // console could never be seen. `listen()` binds and listens; `serve()` is what
+            // accepts, and a server that only ever listened had a console socket that
+            // answered `connect` and then nothing — so `hasAuthenticatedConsole` stayed
+            // false forever and every consent request denied with `consoleUnreachable`.
+            consoleEndpointTask = Task { [endpoint] in
+                await endpoint.serve()
             }
             consoleEndpoint = endpoint
         }
@@ -512,6 +525,7 @@ struct ProductionAuthorizationRuntime {
             grantStorePath: grantStorePath,
             consoleSocketPath: consoleSocketPath,
             consoleEndpoint: consoleEndpoint,
+            consoleEndpointTask: consoleEndpointTask,
             authorizationRuntime: runtime,
             consentTimeout: consentTimeout,
         )

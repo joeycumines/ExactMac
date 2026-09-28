@@ -28,17 +28,53 @@ final class ConsoleModel {
         category: "console",
     )
 
+    /// The channel's loop, held so it has an owner to be cancelled by. The model is the
+    /// only thing in this app whose lifetime is the process's, which is exactly the lifetime
+    /// the channel has.
+    ///
+    /// A BOX rather than a `var`, because a `@MainActor` type's `deinit` is nonisolated and
+    /// cannot read or write an isolated property — so a cancellable task held directly would
+    /// either not compile or, if it did, could not be stopped.
+    private let channelLoop = ChannelLoopBox()
+
     init(
         channel: ConsoleChannelClient = .live(),
         serviceController: any ServiceControlling = LaunchdServiceController(),
         onServiceDisabled: (@Sendable () async throws -> Void)? = nil,
+        startLoop: Bool = true,
     ) {
         self.channel = channel
         self.serviceController = serviceController
         self.onServiceDisabled = onServiceDisabled
+        if startLoop {
+            // NOT `.task` ON THE POPOVER: a View task is cancelled when the view leaves the
+            // hierarchy, and the popover leaves it every time the operator clicks away — so
+            // the channel would connect only while nobody was looking.
+            channelLoop.set(Task { [weak self] in
+                await self?.run()
+            })
+        }
     }
 
-    // MARK: The service control
+    deinit {
+        channelLoop.cancel()
+    }
+
+    /// Holds the channel loop so a nonisolated `deinit` can cancel it.
+private final class ChannelLoopBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+
+    func set(_ task: Task<Void, Never>?) {
+        lock.withLock { self.task = task }
+    }
+
+    func cancel() {
+        lock.withLock { task }?.cancel()
+    }
+}
+
+// MARK: The service control
 
     /// Changes the service enablement state in launchd, revoking standing grants on disable.
     func setServiceEnabled(_ enabling: Bool) async throws {
@@ -105,12 +141,81 @@ final class ConsoleModel {
         }
     }
 
+    /// A toggle that did not take is TOLD TO THE OPERATOR, and that is the whole point.
+    ///
+    /// `setServiceEnabled` already rolls its optimistic state back, so without this the
+    /// operator sees the switch spring back and nothing else: no message, no error, and no
+    /// way to tell a service that refused to stop from a button that was not pressed. A
+    /// control the operator cannot read the result of is a control they will press again,
+    /// and pressing it again is how a service gets left half-configured.
     private func handleServiceControlError(_ error: any Error, desiredState: Bool) {
-        logger.error("Failed to set service state to \(desiredState, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        let wanted = desiredState ? "on" : "off"
+        logger.error(
+            "Failed to set service state to \(wanted, privacy: .public): \(error.localizedDescription, privacy: .public)"
+        )
+        pendingNotice = "Could not turn ExactMac \(wanted). \(error.localizedDescription)"
     }
 
     func quit() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: The channel's whole lifecycle
+
+    /// How long to wait before trying the server again, after a failed attempt.
+    ///
+    /// Long enough not to spin a menu-bar app against a server that is not there, short
+    /// enough that starting the server afterwards is noticed while the operator is still
+    /// looking at the menu bar.
+    static let reconnectDelay = Duration.seconds(2)
+
+    /// The last connect failure, so a repeat is silent and a CHANGE is not. This is what
+    /// makes "the console has never connected" a diagnosable condition rather than a silence.
+    private var lastConnectFailure: String?
+
+    /// Connects, reads, and reconnects, for as long as the console is running.
+    ///
+    /// IT EXISTED NOWHERE, and that is not a detail. `ConsoleChannelClient.connect()` is
+    /// written and tested, `poll()` is written and tested, and NOTHING CALLED EITHER: the
+    /// console built a model whose `serviceState` was its initialiser default, drew a
+    /// plausible popover from it, and never spoke to the server at all. Every symptom
+    /// followed from that — the popover opened and showed rows that were not true, the
+    /// service toggle was the only live control, and the server refused every
+    /// consent-requiring capability with `consoleUnreachable` forever because no console
+    /// was ever authenticated.
+    ///
+    /// The loop is the whole design and it is deliberately dull: connect when not connected,
+    /// read while connected, and treat a read failure as a disconnection so the next turn
+    /// reconnects. There is no state to reconcile because every state transition here is
+    /// driven by something that either succeeded or did not.
+    func run() async {
+        logger.info("Console channel loop started")
+        while !Task.isCancelled {
+            if !channel.isConnected {
+                do {
+                    try await channel.connect()
+                    lastConnectFailure = nil
+                    apply(.running)
+                } catch {
+                    // THE REASON IS LOGGED WHEN IT CHANGES, AND NOT EVERY TICK. A menu-bar
+                    // app with no server is a normal state for as long as the operator has
+                    // not started one, so one line every two seconds would bury everything
+                    // else — but an operator whose console never connects has to be able to
+                    // find out WHY, and "nothing in the log" is not an answer. The reason
+                    // changing is worth a line in its own right: "no server" and "the server
+                    // refused us" are different faults with different fixes.
+                    let reason = String(describing: error)
+                    if reason != lastConnectFailure {
+                        lastConnectFailure = reason
+                        logger.notice("Console could not reach the server: \(reason, privacy: .public)")
+                    }
+                    apply(.unreachable)
+                    try? await Task.sleep(for: Self.reconnectDelay)
+                    continue
+                }
+            }
+            await poll()
+        }
     }
 
     // MARK: Reading from the channel
@@ -135,6 +240,13 @@ final class ConsoleModel {
     }
 
     private func apply(_ state: ServiceState) {
+        // A CHANGED STATE IS LOGGED, AND AN UNCHANGED ONE IS NOT. The console is the only
+        // place an operator can see why nothing is being approved, so a silent state change
+        // is a defect; a state that repeats every two seconds is noise that hides the one
+        // line that matters.
+        if state != serviceState {
+            logger.info("Console state is now \(String(describing: state), privacy: .public)")
+        }
         serviceState = state
         switch state {
         case .unreachable:
@@ -174,7 +286,12 @@ final class ConsoleModel {
             pendingPrompt = PendingRequest(consent: consent)
             pendingNotice = "\(consent.identity.executablePath) wants "
                 + "\(consent.request.capability)"
-            serviceState = .pending
+            // THROUGH `apply`, like every other state change. It used to assign
+            // `serviceState` directly, which meant a prompt arriving — the ONE transition
+            // the operator most needs to see — produced no log line and no fail-closed
+            // reconciliation, and there was no way to tell a console that had received a
+            // prompt from one that had not.
+            apply(.pending)
         case let .reply(reply):
             switch reply.kind {
             case "grants": activeGrantCount = reply.count

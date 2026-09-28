@@ -19,23 +19,74 @@ public protocol LaunchctlExecuting: Sendable {
 public final class ProcessLaunchctlExecutor: LaunchctlExecuting, Sendable {
     public init() {}
 
+    /// BOTH PIPES ARE DRAINED ON OTHER THREADS, AND THE WAIT COMES LAST.
+    ///
+    /// The order is the whole implementation. A child that fills a pipe buffer blocks
+    /// writing and therefore never exits, so reading after `waitUntilExit()` deadlocks: the
+    /// caller hangs, no error is produced, and the control the operator pressed appears to do
+    /// nothing. `launchctl print` against a real domain can emit more than a pipe buffer, and
+    /// a hang with no error is the worst possible symptom for a service the operator is
+    /// trying to turn OFF.
     public func execute(arguments: [String]) async throws -> (exitCode: Int32, stdout: String, stderr: String) {
-        try await Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            process.arguments = arguments
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            process.standardOutput = outPipe
-            process.standardError = errPipe
-            try process.run()
-            process.waitUntilExit()
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            let outString = String(data: outData, encoding: .utf8) ?? ""
-            let errString = String(data: errData, encoding: .utf8) ?? ""
-            return (process.terminationStatus, outString, errString)
-        }.value
+        // `Task.detached` AROUND A SYNCHRONOUS FUNCTION, and the split is deliberate: every
+        // step below blocks a thread by design, and doing that on a cooperative-pool thread
+        // would starve the pool the console's UI runs on. Putting the blocking in a plain
+        // function is also what makes the compiler accept it at all — `DispatchGroup.wait()`
+        // and `waitUntilExit()` are both unavailable inside an `async` context.
+        try await Task.detached { try Self.runBlocking("/bin/launchctl", arguments) }.value
+    }
+
+    /// The blocking half, with its executable as a parameter so the drain-then-wait ordering
+    /// can be tested against a child that genuinely outruns a pipe buffer. Everything a
+    /// caller can reach still goes through `execute`, and only launchctl can be reached that
+    /// way — this parameter is not a configuration surface.
+    static func runBlocking(
+        _ executable: String,
+        _ arguments: [String],
+    ) throws -> (exitCode: Int32, stdout: String, stderr: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        try process.run()
+
+        let collected = OutputCollector()
+        let group = DispatchGroup()
+        for (pipe, isStandardOutput) in [(outPipe, true), (errPipe, false)] {
+            DispatchQueue.global(qos: .userInitiated).async(group: group) {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                collected.store(
+                    String(data: data, encoding: .utf8) ?? "",
+                    isStandardOutput: isStandardOutput,
+                )
+            }
+        }
+        process.waitUntilExit()
+        group.wait()
+        return (process.terminationStatus, collected.stdout, collected.stderr)
+    }
+}
+
+/// The two captured streams, written from two threads and read after both have finished.
+private final class OutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var out = ""
+    private var err = ""
+
+    var stdout: String { lock.withLock { out } }
+    var stderr: String { lock.withLock { err } }
+
+    func store(_ value: String, isStandardOutput: Bool) {
+        lock.withLock {
+            if isStandardOutput {
+                out = value
+            } else {
+                err = value
+            }
+        }
     }
 }
 

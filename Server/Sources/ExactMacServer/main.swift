@@ -37,6 +37,7 @@ private func performGracefulShutdown(
     listenerFactory: PeerIdentifyingListenerFactory?,
     serviceLifetime: ServiceLifetime,
     consoleEndpoint: ConsoleServerEndpoint?,
+    consoleEndpointTask: Task<Void, Never>?,
 ) async throws {
     logger.info("Initiating graceful shutdown...")
 
@@ -44,7 +45,10 @@ private func performGracefulShutdown(
     logger.info("Composition-owned service work drained")
 
     // BEFORE the listener claim, so a console that is still attached cannot be told the
-    // channel has gone while the socket it is answering on is still up.
+    // channel has gone while the socket it is answering on is still up. The accept loop is
+    // cancelled first, because `stop()` closes the descriptor the loop is accepting on and
+    // a loop that is still running would otherwise spin against a closed one.
+    consoleEndpointTask?.cancel()
     if let consoleEndpoint {
         consoleEndpoint.stop()
     }
@@ -135,6 +139,7 @@ func serve(
     authorizationRuntime: AuthorizationRuntime,
     listenerFactory: PeerIdentifyingListenerFactory?,
     consoleEndpoint: ConsoleServerEndpoint? = nil,
+    consoleEndpointTask: Task<Void, Never>? = nil,
 ) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 1: NSApplication.shared
@@ -298,6 +303,7 @@ func serve(
             listenerFactory: listenerFactory,
             serviceLifetime: composition.serviceLifetime,
             consoleEndpoint: consoleEndpoint,
+            consoleEndpointTask: consoleEndpointTask,
         )
     } catch {
         cleanupError = error
@@ -382,6 +388,7 @@ func main() async throws {
             authorizationRuntime: runtime.authorizationRuntime,
             listenerFactory: listener,
             consoleEndpoint: runtime.consoleEndpoint,
+            consoleEndpointTask: runtime.consoleEndpointTask,
         )
         return
     }

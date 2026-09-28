@@ -7,12 +7,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joeycumines/ExactMac/internal/config"
 	"github.com/joeycumines/ExactMac/internal/server"
@@ -24,6 +26,7 @@ const usageText = `Usage: exactmac <command>
 Commands:
   mcp         Run the MCP server over stdio
   http        Run the MCP server over Streamable HTTP
+  health      Ask the server whether it is serving, and exit non-zero if it is not
   help        Show this help
   version     Show version
 `
@@ -53,6 +56,8 @@ func run(args []string) error {
 			return fmt.Errorf("unknown arguments for http: %v", args[1:])
 		}
 		return runMCP(config.TransportHTTP)
+	case "health":
+		return runHealth(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, usageText)
 		return nil
@@ -63,6 +68,27 @@ func run(args []string) error {
 		fmt.Fprint(os.Stderr, usageText)
 		return fmt.Errorf("unknown command: %q", args[0])
 	}
+}
+
+// runHealth is the deployment's liveness probe. It exists because a socket node and a
+// loaded launchd job are not a serving server: a node left by a previous run satisfies
+// every mode and ownership check, and a job in its restart backoff reports
+// `state = running` between attempts. An installation that cannot tell those apart reports
+// success against a server that is crash-looping.
+func runHealth(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("unknown arguments for health: %v", args)
+	}
+	cfg, err := config.Load(config.TransportStdio)
+	if err != nil {
+		return fmt.Errorf("could not read the configuration: %w", err)
+	}
+	serving, err := server.CheckHealth(context.Background(), cfg, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "server health: %s\n", serving)
+	return nil
 }
 
 func runMCP(transportType config.TransportType) error {

@@ -122,6 +122,59 @@ final class ProductionRuntimeTests: XCTestCase {
         XCTAssertEqual(info.st_mode & 0o777, 0o600)
     }
 
+    /// A configured console channel is ACCEPTING, not merely bound.
+    ///
+    /// `listen()` binds and listens; `serve()` accepts. A server that called only the first
+    /// had a console socket that completed `connect` and then went silent, so
+    /// `hasAuthenticatedConsole` stayed false and every consent request denied with
+    /// `consoleUnreachable` — the exact symptom of "the console does not work" that this
+    /// suite would not have caught, because nothing in the unit tests ever connected.
+    func testAConfiguredConsoleChannelAcceptsAConnection() async throws {
+        let socketPath = stateDirectory + "/console.sock"
+        let environment = environment(consoleSocket: socketPath)
+        let runtime = try ProductionAuthorizationRuntime.make(
+            config: config(environment),
+            environment: environment,
+        )
+        defer {
+            runtime.consoleEndpointTask?.cancel()
+            runtime.consoleEndpoint?.stop()
+        }
+
+        // The token is read from the owner-private file the runtime created, so this client
+        // is a real console rather than one with a token chosen to be refused: the property
+        // under test is that the channel ACCEPTS, not that it authenticates.
+        let token = try XCTUnwrap(
+            try String(
+                contentsOfFile: ExactMacRuntimePaths.consoleTokenPath(environment: environment),
+                encoding: .utf8,
+            ),
+            "the runtime must have created a console token",
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(token.isEmpty, "the console token must not be empty")
+
+        let connected = expectation(description: "the console channel accepted a connection")
+        let poll = Task { () -> Void in
+            let client = ConsoleChannelClient(
+                socketPath: socketPath,
+                token: .shared(token),
+            )
+            while !Task.isCancelled {
+                if (try? await client.connect()) != nil {
+                    // The handshake completing at all is the assertion: the server read the
+                    // token, the console read the server's, and the peer uid matched.
+                    XCTAssertTrue(client.isConnected)
+                    client.disconnect()
+                    connected.fulfill()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        defer { poll.cancel() }
+        await fulfillment(of: [connected], timeout: 15)
+    }
+
     /// A state directory the server cannot use is a STARTUP FAILURE, not a fallback. A server
     /// that starts with an unusable audit log has no reason to be listening, and one that
     /// starts with an unreadable grant store is exactly the state in which it must not be

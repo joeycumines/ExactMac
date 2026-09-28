@@ -222,12 +222,17 @@ struct ServiceControllerTests {
         )
 
         let disabledExpectation = Synchronization.Mutex<Bool>(false)
+        // `startLoop: false` because this suite is about the service control, and the
+        // channel loop is a background connection to a socket that is deliberately not there.
+        // Started, it would immediately report `.unreachable` and overwrite the very state
+        // these assertions are about — which is the loop working, not the loop breaking.
         let model = ConsoleModel(
             channel: ConsoleChannelClient(socketPath: "/tmp/test.sock", token: "test"),
             serviceController: controller,
             onServiceDisabled: {
                 disabledExpectation.withLock { $0 = true }
             },
+            startLoop: false,
         )
 
         #expect(model.isServiceEnabled == true)
@@ -286,5 +291,96 @@ struct ServiceControllerTests {
             #expect(model.serviceState == .running)
             #expect(model.failClosed == nil)
         }
+    }
+}
+
+/// The executor runs a real subprocess, so the only honest test of it is a real one.
+///
+/// THE PROPERTY IS THAT IT RETURNS. The previous implementation read the pipes AFTER
+/// `waitUntilExit()`, so a child that filled a pipe buffer blocked writing, never exited, and
+/// the caller hung with no error at all — which reaches the operator as a control that does
+/// nothing, on the one control whose whole job is to turn a service off. `launchctl print`
+/// against a live domain is the shape of command that does it, so the command is sized past
+/// a pipe buffer here rather than mocked.
+@Suite("Launchctl executor")
+struct ProcessLaunchctlExecutorTests {
+    @Test("A child that outruns a pipe buffer still returns")
+    func testAChildLargerThanAPipeBufferStillReturns() async throws {
+        // Half a megabyte on both streams: more than twice the 64 KiB a pipe holds, so the
+        // child blocks writing unless something is draining while it runs. Reading after
+        // `waitUntilExit()` — what this replaced — deadlocks here, and it deadlocks SILENTLY.
+        let payload = String(repeating: "x", count: 512 * 1024)
+        let result = try await ProcessLaunchctlExecutor.runBlocking(
+            "/bin/sh",
+            ["-c", "printf '%s%s' \"$1\" \"$1\"; printf '%s' \"$1\" >&2", "sh", payload],
+        )
+        #expect(result.exitCode == 0)
+        #expect(result.stdout == payload + payload)
+        #expect(result.stderr == payload)
+    }
+
+    @Test("The real launchctl answers print-disabled for this domain")
+    func testTheRealLaunchctlAnswers() async throws {
+        let executor = ProcessLaunchctlExecutor()
+        let result = try await executor.execute(arguments: ["print-disabled", "gui/\(getuid())"])
+        #expect(result.exitCode == 0, "stderr: \(result.stderr)")
+        #expect(result.stdout.contains("disabled services"))
+    }
+}
+
+/// The channel loop, which is the console's only connection to anything.
+///
+/// IT WAS MISSING ENTIRELY and every other test in this package passed without it, because
+/// nothing in the console ever called `connect()` or `poll()`: the model drew a popover from
+/// its initialiser state and never spoke to the server. These two are the smallest honest
+/// statements about a loop whose full behaviour needs a real server on the other end — that
+/// it runs, that it reports the safe state when there is nothing to reach, and that it stops
+/// when it is cancelled.
+@Suite("Console channel loop")
+struct ConsoleChannelLoopTests {
+    @MainActor
+    @Test("The loop reports the safe state when there is no server")
+    func testTheLoopReportsUnreachableWhenThereIsNoServer() async throws {
+        let model = ConsoleModel(
+            channel: ConsoleChannelClient(
+                socketPath: "/tmp/exactmac-no-such-console-\(UUID().uuidString).sock",
+                token: "unused",
+            ),
+            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
+            startLoop: false,
+        )
+        // Started by hand so the test owns its lifetime: the model's own loop is cancelled in
+        // its `deinit`, which this test does not reach.
+        let loop = Task { await model.run() }
+        defer { loop.cancel() }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while ContinuousClock.now < deadline, model.serviceState != .unreachable {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(model.serviceState == .unreachable)
+        #expect(
+            model.failClosed?.title == "Denied until the console is available",
+            "a console that cannot reach the server must say the safe direction, not look idle",
+        )
+    }
+
+    @MainActor
+    @Test("Cancelling the loop stops it")
+    func testCancellingTheLoopStopsIt() async throws {
+        let model = ConsoleModel(
+            channel: ConsoleChannelClient(
+                socketPath: "/tmp/exactmac-no-such-console-\(UUID().uuidString).sock",
+                token: "unused",
+            ),
+            serviceController: LaunchdServiceController(executor: MockLaunchctlExecutor()),
+            startLoop: false,
+        )
+        let loop = Task { await model.run() }
+        try await Task.sleep(for: .milliseconds(100))
+        loop.cancel()
+        // A cancelled loop that kept running would fail this, and would also keep a menu-bar
+        // app's connection attempt alive forever after the app should have let go.
+        try await loop.value
     }
 }
