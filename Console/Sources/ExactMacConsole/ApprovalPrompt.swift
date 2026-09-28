@@ -467,8 +467,8 @@ struct ApprovalPrompt: View {
             sub = "After 45 seconds with no decision the request was denied. "
                 + "Nothing was granted."
         default:
-            headline = "Console unreachable"
-            sub = "ExactMac could not reach the consent service, so it denied. "
+            headline = "No way to ask"
+            sub = "Nothing could put this question in front of you, so it was denied. "
                 + "This is the safe direction."
         }
         return VStack(alignment: .leading, spacing: Design.Space.tight) {

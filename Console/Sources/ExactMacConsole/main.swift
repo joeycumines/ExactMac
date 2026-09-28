@@ -40,6 +40,21 @@ let launchLogger = Logger(
 )
 launchLogger.notice("ExactMac operating mode: \(operatorInterface.summary, privacy: .public)")
 
+// AND THE OTHER REASON THE SAME ANSWER CAN BE NO, LOGGED SEPARATELY BECAUSE IT IS A
+// DIFFERENT FAULT WITH A DIFFERENT FIX.
+//
+// `OperatorInterface` says whether this process has somewhere to put a prompt. `ConsentSeam`
+// says whether the server exposes a way to HAND it one. Today the first is yes when the app
+// runs from its bundle and the second is no, so the pair is "can present, cannot deliver" —
+// a combination worth one line at launch, because it is the state the app is in while the
+// server library is still being split, and a single sentence at startup is cheaper than an
+// operator working out why nothing is ever approved.
+if operatorInterface.canObtainConsent, !ConsentSeam.canPresentConsent {
+    launchLogger.warning(
+        "This process can show a consent prompt, but the server exposes no in-process consent entry point (\(ConsentSeam.unavailableReason, privacy: .public)). Consent still flows over the retired console channel.",
+    )
+}
+
 ExactMacConsoleApp.main()
 
 final class ConsoleAppDelegate: NSObject, NSApplicationDelegate {

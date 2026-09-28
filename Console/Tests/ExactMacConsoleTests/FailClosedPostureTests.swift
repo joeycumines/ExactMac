@@ -1,9 +1,8 @@
 import AppKit
+@testable import ExactMacConsole
 import Foundation
 import ServiceManagement
 import Testing
-
-@testable import ExactMacConsole
 
 /// The fail-closed posture, in the form it takes now.
 ///
@@ -39,8 +38,8 @@ struct FailClosedPostureTests {
         )
     }
 
-    @Test("A process that cannot present a window never reports that it is running")
-    func headlessProcessCannotClaimRunning() {
+    @Test
+    func `A process that cannot present a window never reports that it is running`() {
         let subject = model(presentation: .headless)
 
         subject.apply(.running)
@@ -54,8 +53,8 @@ struct FailClosedPostureTests {
         #expect(subject.failClosed != nil)
     }
 
-    @Test("A process that can present a window does report running")
-    func presentationProcessReportsRunning() {
+    @Test
+    func `A process that can present a window does report running`() {
         // The counterpart, and the reason the veto is a rule about the process rather than a
         // blanket downgrade: the veto must not cost the app its own healthy state.
         let subject = model(presentation: .application)
@@ -66,8 +65,8 @@ struct FailClosedPostureTests {
         #expect(subject.failClosed == nil)
     }
 
-    @Test("Turning the service on does not grant a headless process a healthy state")
-    func enablingTheServiceCannotClaimRunning() async {
+    @Test
+    func `Turning the service on does not grant a headless process a healthy state`() async {
         // THE SECOND ROUTE, and the one that would have survived a fix applied only to
         // `apply`. `setServiceEnabled` assigned `.running` itself and cleared the band, so
         // an operator pressing the toggle on a process that could not ask anybody would
@@ -80,8 +79,8 @@ struct FailClosedPostureTests {
         #expect(subject.failClosed != nil)
     }
 
-    @Test("Turning the service off still reports stopped, not the vaguer safe state")
-    func stoppedIsNotOverwrittenByTheVeto() async {
+    @Test
+    func `Turning the service off still reports stopped, not the vaguer safe state`() async {
         // The veto is deliberately narrow. `.stopped` already means "consent is not
         // available", and an operator who turned ExactMac off deserves to be told it is off
         // rather than being given a vaguer reason it cannot act on.
@@ -93,8 +92,8 @@ struct FailClosedPostureTests {
         #expect(subject.failClosed != nil)
     }
 
-    @Test("The refused state still renders as a caution rather than a healthy dot")
-    func refusedStateIsNotDrawnAsHealthy() {
+    @Test
+    func `The refused state still renders as a caution rather than a healthy dot`() {
         // INVARIANT 17 in a form a test can hold: the operator must be able to tell from the
         // menu bar that something is not normal. `Running` and `Cannot ask` are both drawn,
         // so the assertion is on the two states disagreeing rather than on a colour, which
@@ -116,11 +115,20 @@ struct FailClosedPostureTests {
 private final class RecordingChannel: ConsoleChannel, @unchecked Sendable {
     private(set) var posted: [ConsentDecision] = []
 
-    var isConnected: Bool { true }
+    var isConnected: Bool {
+        true
+    }
+
     func connect() async throws {}
     func disconnect() {}
-    func nextFrame(timeout _: Duration) async throws -> ConsoleFrame? { nil }
-    func post(_ decision: ConsentDecision) async throws { posted.append(decision) }
+    func nextFrame(timeout _: Duration) async throws -> ConsoleFrame? {
+        nil
+    }
+
+    func post(_ decision: ConsentDecision) async throws {
+        posted.append(decision)
+    }
+
     func query(_: QueryKind) async throws {}
 }
 

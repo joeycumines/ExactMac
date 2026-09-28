@@ -64,7 +64,7 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
         switch self {
         case .running, .pending: Design.Ink.success
         case .stopped: Design.Ink.textSecondary
-        // Degraded, reduced and no console are DELIBERATELY the same amber. The menu bar is
+        // Degraded, reduced and cannot-ask are DELIBERATELY the same amber. The menu bar is
         // not required to tell them apart, only to signal that something is not normal.
         case .degraded, .reduced, .unreachable: Design.Ink.caution
         }

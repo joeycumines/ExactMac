@@ -123,19 +123,16 @@ final class ConsoleModel {
         let previousGrants = activeGrantCount
 
         isServiceEnabled = enabling
-        // Through `vetoed` rather than assigned, so turning the service ON cannot make a
-        // process that cannot present a window report itself as running. The optimistic
-        // update is rolled back on failure either way; what changed is that the optimistic
-        // state is now one the process is actually entitled to show.
-        serviceState = vetoed(enabling ? .running : .stopped)
+        // THROUGH `apply`, AND THIS IS THE WHOLE FIX FOR THIS ROUTE. Assigning the state
+        // here and hand-writing the band was a second, independent implementation of the
+        // posture decision, and it was the one that got it wrong: it set `.running` directly
+        // and then cleared the band, so an operator pressing the toggle on a process that
+        // could not ask anybody watched the fail-closed band disappear. Deriving both from
+        // `apply` means there is one implementation, and the veto cannot be bypassed by
+        // arriving here instead of there.
+        apply(enabling ? .running : .stopped)
         if !enabling {
             activeGrantCount = 0
-            failClosed = (
-                "The service is off",
-                "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
-            )
-        } else if serviceState == .running {
-            failClosed = nil
         }
         logger.info("Service \(enabling ? "enabled" : "disabled", privacy: .public) by the operator")
         do {
@@ -176,12 +173,9 @@ final class ConsoleModel {
                     "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
                 )
             } else if serviceState == .stopped {
-                // Through `vetoed` for the same reason `setServiceEnabled` is: a service that
+                // Through `apply` for the same reason `setServiceEnabled` is: a service that
                 // is enabled is not a service that can ask the operator anything.
-                serviceState = vetoed(.running)
-                if serviceState == .running {
-                    failClosed = nil
-                }
+                apply(.running)
             }
         } catch {
             logger.warning("Failed to refresh service state: \(error.localizedDescription, privacy: .public)")
@@ -284,12 +278,103 @@ final class ConsoleModel {
         )
     }
 
-    /// Answers a request, performing the ceremony first when its option needs one.
+    /// Answers a request, performing the ceremony FIRST when its option needs one.
     /// /// Exposed rather than private so a test can drive the whole decision — ceremony, nonce
-    /// and posted decision — without a window server or a sensor. What is asserted is the
-    /// decision, which is the thing that must not be wrong.
+    /// and answer — without a window server or a sensor. What is asserted is the answer, which
+    /// is the thing that must not be wrong.
     func answer(_ kind: OptionRow.Kind, for request: PendingRequest) async {
-        await answerWithCeremony(kind, for: request)
+        let answer = await answerValue(kind, for: request)
+        await post(answer, for: request)
+    }
+
+    /// THE PRESENT-THEN-ANSWER FLOW, AS A VALUE.
+    ///
+    /// IT IS SEPARATED FROM POSTING so the same implementation serves both callers: the one
+    /// that hands the answer to a transport, and the one that hands it back to the server
+    /// that asked. The ceremony-ordering rule is the whole substance of this function and it
+    /// must not be written twice — two copies of "perform the ceremony before the decision,
+    /// and a failed ceremony is a denial" is two places for the ordering to be got wrong,
+    /// and the ordering is the invariant.
+    ///
+    /// A CEREMONY THAT FAILED IS A DENIAL, returned as one rather than thrown, because a
+    /// caller that cannot express "denied" would either offer a cheaper path or leave the
+    /// operator believing the weaker one was accepted.
+    func answerValue(_ kind: OptionRow.Kind, for request: PendingRequest) async -> PendingAnswer {
+        var biometricObtained = false
+        if request.requiresBiometric, kind != .deny {
+            // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
+            // console is frontmost, so the app has to come forward — but only once the
+            // operator has committed to an option that needs a sensor, which is the moment
+            // taking focus stops being an interruption and starts being the response to
+            // something they did.
+            windows.activateForCeremony()
+            // A REQUIRED CEREMONY THAT CANNOT BE PERFORMED IS A DENIAL, and this branch
+            // used to approve instead. With no ceremony installed, the old code fell through
+            // and returned the operator's chosen option carrying `biometricObtained: false`
+            // — an approval for a check that never happened, on exactly the requests that
+            // asked for one. That is the silent downgrade invariant 3 forbids, and it was
+            // invisible in the old world because the answer was posted with the same
+            // `biometricObtained` flag a genuine non-biometric approval carried. The app
+            // always installs a ceremony in production, so the branch is test-reachable
+            // rather than operator-reachable — but "unreachable" is not a reason to leave a
+            // downgrade in the path that grants things.
+            guard let ceremony else {
+                logger.error(
+                    "A request required a biometric and no ceremony is installed; denying rather than approving without the check: \(request.requestID, privacy: .private)",
+                )
+                return answer(.deny, for: request, refusal: .ceremonyRefused)
+            }
+            let outcome = await ceremony.perform(
+                requestID: AuthorizationRequestID(rawValue: request.requestID),
+                nonce: request.nonce,
+                reason: CeremonyReason.compose(request: request, option: kind),
+            )
+            switch outcome {
+            case .performed:
+                biometricObtained = true
+            case let .unavailable(failure):
+                pendingNotice = "The request was not approved: \(failure.explanation)"
+                logger.error(
+                    "A ceremony failed for \(request.requestID, privacy: .private): \(String(describing: failure), privacy: .public)",
+                )
+                return answer(.deny, for: request, refusal: .ceremonyRefused)
+            }
+        }
+        return answer(
+            kind,
+            for: request,
+            biometricObtained: biometricObtained,
+            refusal: kind == .deny ? .operatorDeclined : nil,
+        )
+    }
+
+    /// The value for one option, with the request's own nonce and digest attached.
+    private func answer(
+        _ kind: OptionRow.Kind,
+        for request: PendingRequest,
+        biometricObtained: Bool = false,
+        refusal: AnswerRefusal? = nil,
+    ) -> PendingAnswer {
+        PendingAnswer(
+            requestID: request.requestID,
+            nonce: request.nonce,
+            requestDigest: request.requestDigest,
+            kind: kind,
+            note: "",
+            biometricObtained: biometricObtained,
+            refusal: refusal,
+        )
+    }
+
+    /// Hands a produced answer to the transport this model is wired to.
+    private func post(_ answer: PendingAnswer, for request: PendingRequest) async {
+        windows.close(.approval)
+        await decide(
+            answer.kind,
+            note: answer.note,
+            for: request,
+            biometricObtained: answer.biometricObtained,
+        )
     }
 
     /// Expands the collapsed affordances into the full option set for this request.
@@ -322,61 +407,6 @@ final class ConsoleModel {
         ) {
             approvalWindow(for: request)
         }
-    }
-
-    /// Answers a request, performing the ceremony FIRST when the option needs one.
-    /// /// THE ORDER IS THE INVARIANT AND IT IS NOT NEGOTIABLE: a biometric success authorises
-    /// exactly one decision, so a decision that was already posted cannot be "upgraded" by a
-    /// ceremony performed afterwards. A failed or unavailable ceremony therefore denies, and
-    /// never downgrades to a weaker check.
-    private func answerWithCeremony(_ kind: OptionRow.Kind, for request: PendingRequest) async {
-        var biometricObtained = false
-        if request.requiresBiometric, kind != .deny {
-            // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
-            // console is frontmost, so the app has to come forward — but only once the
-            // operator has committed to an option that needs a sensor, which is the moment
-            // taking focus stops being an interruption and starts being the response to
-            // something they did.
-            windows.activateForCeremony()
-            guard let ceremony else {
-                await postDecision(kind, for: request, biometricObtained: false)
-                return
-            }
-            let outcome = await ceremony.perform(
-                requestID: AuthorizationRequestID(rawValue: request.requestID),
-                nonce: request.nonce,
-                reason: CeremonyReason.compose(request: request, option: kind),
-            )
-            switch outcome {
-            case .performed:
-                biometricObtained = true
-            case let .unavailable(failure):
-                // A CEREMONY THAT FAILED IS A DENIAL, and saying so is the whole point: the
-                // operator is not offered a cheaper path and is not left believing the
-                // weaker one was accepted.
-                pendingNotice = "The request was not approved: \(failure.explanation)"
-                logger.error(
-                    "A ceremony failed for \(request.requestID, privacy: .private): \(String(describing: failure), privacy: .public)",
-                )
-                await postDecision(.deny, for: request, biometricObtained: false)
-                return
-            }
-        }
-        await postDecision(kind, for: request, biometricObtained: biometricObtained)
-    }
-
-    private func postDecision(
-        _ kind: OptionRow.Kind,
-        for request: PendingRequest,
-        biometricObtained: Bool,
-    ) async {
-        windows.close(.approval)
-        await decide(
-            kind,
-            note: "",
-            for: request,
-            biometricObtained: biometricObtained,
-        )
     }
 
     private func copyToPasteboard(_ text: String) {
@@ -434,14 +464,20 @@ final class ConsoleModel {
     /// makes "the console has never connected" a diagnosable condition rather than a silence.
     private var lastConnectFailure: String?
 
-    /// Connects, reads, and reconnects, for as long as the console is running.
+    /// Connects, reads, and reconnects, for as long as the app is running.
+    ///
+    /// THIS IS THE RETIRED LAYER. The consent channel was how a console in a separate
+    /// process learned that a request was waiting; the operator interface is now hosted in
+    /// this process and asked directly, so this loop and its transport are on their way
+    /// out. It is left intact and passing rather than half-removed because the replacement
+    /// needs the server's own request types, which are not yet reachable from this module.
     /// /// IT EXISTED NOWHERE, and that is not a detail. `ConsoleChannelClient.connect()` is
     /// written and tested, `poll()` is written and tested, and NOTHING CALLED EITHER: the
     /// console built a model whose `serviceState` was its initialiser default, drew a
     /// plausible popover from it, and never spoke to the server. Every symptom followed from
     /// that — the popover showed rows that were not true, the service toggle was the only
     /// live control, and the server refused every consent-requiring capability with
-    /// `consoleUnreachable` forever because no console was ever authenticated.
+    /// `consoleUnreachable` forever because nothing was ever authenticated.
     /// /// THE LOOP IS THE WHOLE DESIGN and it is deliberately dull: connect when not connected,
     /// read while connected, and treat a read failure as a disconnection so the next turn
     /// reconnects. There is no state to reconcile because every transition here is driven by
@@ -481,9 +517,11 @@ final class ConsoleModel {
     // MARK: Reading from the channel
 
     /// Pulls the next frame and folds it into the state the popover draws.
-    /// /// A channel that is not connected is the `unreachable` state and the words say
-    /// everything: the console is not running, so every consent-requiring capability is
-    /// being denied, and that is the safe direction rather than a fault.
+    /// /// A channel that is not connected is the `unreachable` state, and so is a process
+    /// that cannot present a window at all — `apply` folds both into the one band, because
+    /// they are the same thing to an operator: there is nobody to ask, so every
+    /// consent-requiring capability is being denied, and that is the safe direction rather
+    /// than a fault.
     func poll() async {
         guard channel.isConnected else {
             apply(.unreachable)

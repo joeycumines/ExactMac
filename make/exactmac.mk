@@ -34,7 +34,13 @@ EXACTMAC_APP_EXECUTABLE := $(EXACTMAC_APP_DIR)/Contents/MacOS/$(EXACTMAC_APP_NAM
 EXACTMAC_STAGING_DIR    := $(EXACTMAC_APP_DIR).staging
 
 EXACTMAC_SERVER_BUILD_DIR        ?= $(PROJECT_ROOT)/Server/.build/release
-EXACTMAC_SERVER_BIN              ?= $(EXACTMAC_SERVER_BUILD_DIR)/$(EXACTMAC_APP_NAME)
+# THE PRODUCT NAME, NOT THE TARGET NAME. `ExactMacServer` is the SwiftPM library target and
+# builds to `libExactMacServer.a`; the runnable product is `exactmac-server`, and SwiftPM
+# names a binary after the product rather than the target. The bundle's executable is
+# therefore named for the product while the resource bundle beside it is still named for the
+# target, because the bundle name comes from the target.
+EXACTMAC_SERVER_PRODUCT         ?= exactmac-server
+EXACTMAC_SERVER_BIN              ?= $(EXACTMAC_SERVER_BUILD_DIR)/$(EXACTMAC_SERVER_PRODUCT)
 EXACTMAC_RESOURCE_BUNDLE_NAME    ?= ExactMacServer_ExactMacServer.bundle
 EXACTMAC_REQUIRED_RESOURCE_BUNDLE := $(EXACTMAC_SERVER_BUILD_DIR)/$(EXACTMAC_RESOURCE_BUNDLE_NAME)
 
@@ -399,7 +405,17 @@ exactmac.build-server: ## Build the release Swift server and its resource bundle
 	printf '%s\n' '=== Building ExactMacServer (release) ==='; \
 	if ! $(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory buf.descriptor-sets; then printf '%s\n' 'ERROR: descriptor generation failed.' >&2; exit 1; fi; \
 	if ! cd "$(PROJECT_ROOT)/Server"; then printf '%s\n' 'ERROR: Server project directory is unavailable.' >&2; exit 1; fi; \
-	if ! swift build --configuration release 2>&1 | tee "$(EXACTMAC_SERVER_BUILD_LOG)" | tail -n 40; then printf '%s\n' 'ERROR: Swift server build failed.' >&2; exit 1; fi; \
+	# THE PRODUCT, EXPLICITLY. A bare `swift build` builds every product including the
+	# `ExactMacServer` library, which produces no runnable file, so the binary check below
+	# would fail against a build that had in fact succeeded.
+	# The product name reaches the shell as an argument, so it is passed through the
+	# environment rather than interpolated into the recipe text. A `$(...)` inside a recipe
+	# is expanded by make, and `exactmac-server` is not a make variable, so the shell was
+	# receiving the literal text with make's own suffix syntax already consumed: `$(EXACTMAC_
+	# SERVER_PRODUCT)` read as the two-character variable `$(EXACTMAC_` followed by
+	# `SERVER_PRODUCT)`, which expanded to nothing and left `-product` behind.
+	EXACTMAC_SERVER_PRODUCT="$(EXACTMAC_SERVER_PRODUCT)"; export EXACTMAC_SERVER_PRODUCT; \
+	if ! swift build --configuration release --product "$$EXACTMAC_SERVER_PRODUCT" 2>&1 | tee "$(EXACTMAC_SERVER_BUILD_LOG)" | tail -n 40; then printf '%s\n' 'ERROR: Swift server build failed.' >&2; exit 1; fi; \
 	test -x "$(EXACTMAC_SERVER_BIN)" || { printf 'ERROR: server binary missing: %s\n' "$(EXACTMAC_SERVER_BIN)" >&2; exit 1; }; \
 	if [ ! -d "$(EXACTMAC_REQUIRED_RESOURCE_BUNDLE)" ]; then \
 		printf 'ERROR: SwiftPM resource bundle missing: %s\n' "$(EXACTMAC_REQUIRED_RESOURCE_BUNDLE)" >&2; \
@@ -602,7 +618,7 @@ exactmac.wait:
 	printf '%s\n' '--- the service state ---' >&2; \
 	launchctl print "$(EXACTMAC_SERVICE_TARGET)" 2>&1 | sed -n '1,80p' >&2 || true; \
 	printf '%s\n' '--- the unified log, where a startup failure is recorded ---' >&2; \
-	log show --info --last 5m --style compact --predicate 'process == "ExactMacServer"' 2>/dev/null \
+	log show --info --last 5m --style compact --predicate 'process == "$(EXACTMAC_SERVER_PRODUCT)"' 2>/dev/null \
 		| grep -E 'Main' | tail -n 20 >&2 || true; \
 	printf '%s\n' '--- stderr ---' >&2; \
 	tail -n 40 "$(EXACTMAC_STDERR_LOG)" 2>/dev/null >&2 || true; \
@@ -751,7 +767,7 @@ exactmac.logs: ## Show recent stdout, stderr, and unified-log entries.
 	printf '%s\n' '=== stderr (last 40 lines) ==='; \
 	tail -n 40 "$(EXACTMAC_STDERR_LOG)" 2>/dev/null || printf '%s\n' '(empty)'; \
 	printf '%s\n' '=== unified log (last 5 minutes) ==='; \
-	log show --last 5m --style compact --predicate 'process == "ExactMacServer"' 2>/dev/null | tail -n 80 || printf '%s\n' '(unavailable)'
+	log show --last 5m --style compact --predicate 'process == "$(EXACTMAC_SERVER_PRODUCT)"' 2>/dev/null | tail -n 80 || printf '%s\n' '(unavailable)'
 
 .PHONY: exactmac.uninstall
 exactmac.uninstall: ## Remove app, LaunchAgent, plist, logs, MCP binary, and TCC records; preserve the configured socket pathname.
@@ -1013,6 +1029,147 @@ exactmac.console-status: ## Report the console's bundle, signature, service, and
 	if launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
 		launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>/dev/null | grep -E '^\s*(state|pid) = ' || true; \
 	else printf '  Service:   not loaded\n'; fi
+
+##@ [Console] LaunchAgent Retirement
+
+# The app is the product now: one process that hosts the gRPC server and presents the
+# operator's consent prompt itself. It registers for start-at-login through
+# `ServiceManagement.SMAppService.mainApp` and does not need a hand-written LaunchAgent.
+# These targets retire the two the old two-process deployment installed.
+#
+# WHY THIS IS NOT JUST `rm`. Both a loaded job and an installed plist are live state, and
+# a plist alone is not inert: launchd will bootstrap it again at the next login, so a
+# retirement that only removed the file would look complete and resurrect the server on the
+# next reboot. The order is therefore bootout, VERIFY ABSENCE, then move the file — and a
+# bootout whose result cannot be confirmed stops the run rather than continuing, because
+# the alternative is reporting a clean retirement over a process that is still serving.
+#
+# IT IS IDEMPOTENT AND REVERSIBLE. Every step checks the state it is about to change and
+# reports "already retired" instead of failing, so running it twice is the same as running
+# it once. Nothing is deleted: plists are moved into the archive directory below, and
+# `exactmac.restore-launchagents` puts them back and re-bootstraps them. Idempotence is why
+# this is safe to wire into an upgrade path; reversibility is why it is safe to run at all
+# on a machine whose operator is mid-task.
+#
+# WHAT IT DELIBERATELY DOES NOT TOUCH: any login item the app registered for itself through
+# SMAppService. That registration belongs to the bundle that created it and is revoked
+# through System Settings or by the app; reaching in and removing it from here would leave
+# the app believing it is registered for start-at-login when it is not.
+
+# The two labels the old deployment installed, as a list the recipes iterate.
+EXACTMAC_RETIRED_LABELS := $(EXACTMAC_CONSOLE_BUNDLE_ID) $(EXACTMAC_BUNDLE_ID)
+# Plists are MOVED here rather than deleted, so a mistaken retirement costs one command.
+EXACTMAC_RETIRED_PLIST_DIR ?= $(EXACTMAC_STATE_DIR)retired-launchagents
+
+# 1 reports what WOULD happen and changes nothing. It exists because the first thing anyone
+# does with a target that unloads a running server is wonder what it will touch, and
+# answering that should not require running it. Every mutating step below is guarded on this.
+#
+# IT MATTERS MORE THAN IT LOOKS. These targets act on `$(EXACTMAC_LAUNCH_DOMAIN)`, which is
+# derived from `id -u` and is therefore ALWAYS the live GUI domain of whoever ran make — so
+# overriding the plist paths to a scratch directory does NOT sandbox them, and the bootout
+# still reaches the real jobs. A dry run is the only safe way to inspect this.
+EXACTMAC_RETIRE_DRY_RUN ?= 0
+
+.PHONY: exactmac.retire-launchagents-status
+exactmac.retire-launchagents-status: ## Report which superseded LaunchAgents are installed or loaded, and change nothing.
+	@set -u; \
+	dry=0; \
+	[ "$(EXACTMAC_RETIRE_DRY_RUN)" = "1" ] && dry=1; \
+	loaded=0; installed=0; \
+	agents_dir='$(patsubst %/,%,$(dir $(EXACTMAC_CONSOLE_PLIST)))'; \
+	printf '%s\n' 'Superseded LaunchAgents (the app supersedes both):'; \
+	for label in $(EXACTMAC_RETIRED_LABELS); do \
+		target="$(EXACTMAC_LAUNCH_DOMAIN)/$$label"; \
+		plist="$$agents_dir/$$label.plist"; \
+		if launchctl print "$$target" >/dev/null 2>&1; then \
+			state=$$(launchctl print "$$target" 2>/dev/null | sed -n 's/^[[:space:]]*state = //p' | head -1); \
+			printf '  %-52s LOADED (%s)\n' "$$label" "$${state:-unknown}"; \
+			loaded=$$((loaded + 1)); \
+		else printf '  %-52s not loaded\n' "$$label"; fi; \
+		if [ -f "$$plist" ]; then printf '  %-52s installed: %s\n' '' "$$plist"; installed=$$((installed + 1)); fi; \
+	done; \
+	printf '  archive would be: %s\n' '$(EXACTMAC_RETIRED_PLIST_DIR)'; \
+	printf '%s\n' 'To retire them: gmake exactmac.retire-launchagents'
+
+.PHONY: exactmac.retire-launchagents
+exactmac.retire-launchagents: ## Unload and archive the superseded LaunchAgents. Idempotent; reversible with exactmac.restore-launchagents.
+	@set -u; \
+	dry=0; \
+	[ "$(EXACTMAC_RETIRE_DRY_RUN)" = "1" ] && dry=1; \
+	changed=0; \
+	if [ "$$dry" -eq 0 ]; then \
+		if ! mkdir -p '$(EXACTMAC_RETIRED_PLIST_DIR)'; then printf '%s\n' 'ERROR: could not create the archive directory.' >&2; exit 1; fi; \
+		chmod 700 '$(EXACTMAC_RETIRED_PLIST_DIR)'; \
+	fi; \
+	agents_dir='$(patsubst %/,%,$(dir $(EXACTMAC_CONSOLE_PLIST)))'; \
+	for label in $(EXACTMAC_RETIRED_LABELS); do \
+		target="$(EXACTMAC_LAUNCH_DOMAIN)/$$label"; \
+		plist="$$agents_dir/$$label.plist"; \
+		archive='$(EXACTMAC_RETIRED_PLIST_DIR)'/"$$label".plist; \
+		if launchctl print "$$target" >/dev/null 2>&1; then \
+			if [ "$$dry" -eq 1 ]; then printf '  would unload %s\n' "$$label"; \
+			else \
+				printf '  unloading %s\n' "$$label"; \
+				if ! launchctl bootout "$$target" >/dev/null 2>&1; then \
+					printf '  %s did not bootout cleanly; confirming it is gone\n' "$$label"; \
+				fi; \
+				if launchctl print "$$target" >/dev/null 2>&1; then \
+					printf 'ERROR: %s is still loaded after bootout; refusing to report a clean retirement.\n' "$$label" >&2; \
+					exit 1; \
+				fi; \
+				printf '  %s is unloaded\n' "$$label"; \
+			fi; changed=$$((changed + 1)); \
+		else printf '  %s was not loaded\n' "$$label"; fi; \
+		if [ -f "$$plist" ]; then \
+			if [ "$$dry" -eq 1 ]; then printf '  would archive %s to %s\n' "$$plist" "$$archive"; \
+			else \
+				if [ -e "$$archive" ]; then \
+					printf '  %s: replacing the previously archived plist\n' "$$label"; \
+					rm -f "$$archive"; \
+				fi; \
+				mv "$$plist" "$$archive" || { printf 'ERROR: could not archive %s.\n' "$$plist" >&2; exit 1; }; \
+				chmod 600 "$$archive"; \
+				printf '  %s archived: %s\n' "$$label" "$$archive"; \
+			fi; changed=$$((changed + 1)); \
+		elif [ -f "$$archive" ]; then \
+			printf '  %s was already retired\n' "$$label"; \
+		else printf '  %s has no installed plist\n' "$$label"; fi; \
+	done; \
+	if [ "$$changed" -eq 0 ]; then \
+		printf '%s\n' 'Nothing to retire; both LaunchAgents were already retired.'; \
+	else \
+		printf 'Retired. The app now starts ExactMac and registers itself through SMAppService.'; \
+		printf 'To put them back: gmake exactmac.restore-launchagents\n'; \
+	fi
+
+.PHONY: exactmac.restore-launchagents
+exactmac.restore-launchagents: ## Put the archived LaunchAgents back and reload them. Reverses exactmac.retire-launchagents.
+	@set -u; \
+	dry=0; \
+	[ "$(EXACTMAC_RETIRE_DRY_RUN)" = "1" ] && dry=1; \
+	restored=0; \
+	agents_dir='$(patsubst %/,%,$(dir $(EXACTMAC_CONSOLE_PLIST)))'; \
+	for label in $(EXACTMAC_RETIRED_LABELS); do \
+		target="$(EXACTMAC_LAUNCH_DOMAIN)/$$label"; \
+		plist="$$agents_dir/$$label.plist"; \
+		archive='$(EXACTMAC_RETIRED_PLIST_DIR)'/"$$label".plist; \
+		if [ -f "$$plist" ]; then \
+			printf '  %s is already installed; leaving it alone\n' "$$label"; \
+		elif [ -f "$$archive" ]; then \
+			if ! mkdir -p "$$(dirname "$$plist")"; then printf 'ERROR: could not create the LaunchAgents directory.\n' >&2; exit 1; fi; \
+			mv "$$archive" "$$plist" || { printf 'ERROR: could not restore %s.\n' "$$plist" >&2; exit 1; }; \
+			chmod 600 "$$plist"; \
+			printf '  %s restored: %s\n' "$$label" "$$plist"; restored=$$((restored + 1)); \
+		else printf '  %s was never retired\n' "$$label"; fi; \
+		if [ -f "$$plist" ]; then \
+			launchctl enable "$$target" >/dev/null 2>&1 || true; \
+			launchctl bootstrap '$(EXACTMAC_LAUNCH_DOMAIN)' "$$plist" >/dev/null 2>&1 \
+				|| launchctl kickstart "$$target" >/dev/null 2>&1 \
+				|| printf '  WARNING: %s is installed but did not load; run "launchctl print %s" to see why.\n' "$$label" "$$target"; \
+		fi; \
+	done; \
+	if [ "$$restored" -eq 0 ]; then printf '%s\n' 'Nothing was archived; nothing restored.'; fi
 
 # Short aliases. The catalog uses the exactmac.* prefix for everything else in this file, and
 # these exist because the deployment contract names them in that form; they forward, so there

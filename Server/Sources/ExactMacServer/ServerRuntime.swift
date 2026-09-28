@@ -377,7 +377,6 @@ public func main() async throws {
             )
         }
 
-
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Custom(listenerFactory: listener),

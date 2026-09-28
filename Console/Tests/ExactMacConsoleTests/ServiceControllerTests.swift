@@ -359,10 +359,16 @@ struct ConsoleChannelLoopTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(model.serviceState == .unreachable)
-        #expect(
-            model.failClosed?.title == "Denied until the console is available",
-            "a console that cannot reach the server must say the safe direction, not look idle",
-        )
+        // THE PROPERTY, NOT THE COPY. This used to assert the band's exact title, which made
+        // it a test of a spelling: it failed the moment the wording was corrected to stop
+        // claiming a separate console process had to be running, and it would have failed
+        // for the next copy revision too. What the test is actually standing in for is
+        // "says the safe direction, not idle", and that is a state and a band: the operator
+        // must be shown something that is not a healthy state, and something that explains
+        // why. `FailClosedPostureTests` holds the same property for the case this one
+        // cannot reach — a process that is running and yet cannot ask anybody.
+        #expect(model.failClosed != nil)
+        #expect(model.serviceState != .running)
     }
 
     @MainActor

@@ -28,7 +28,7 @@ include $(PROJECT_ROOT)/make/buf.mk
 include $(PROJECT_ROOT)/make/threat-model.mk
 include $(PROJECT_ROOT)/make/exactmac.mk
 include $(PROJECT_ROOT)/make/release.mk
-include $(PROJECT_ROOT)/make/xcodebuild.mk
+include $(PROJECT_ROOT)/make/macos.mk
 
 # Usage
 # ---

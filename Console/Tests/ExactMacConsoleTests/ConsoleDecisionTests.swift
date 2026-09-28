@@ -336,6 +336,133 @@ struct ConsoleDecisionTests {
         // stop where it stopped.
         #expect(request.isAncestryTruncated)
     }
+
+    // MARK: The answer as a value, which is what a direct caller receives
+
+    /// THE DIMENSION THAT IS NEW NOW, and the one the server that ASKS will consume.
+    ///
+    /// Everything above asserts the decision that was POSTED, which is what a transport
+    /// receives. The operator interface is now hosted in this process, so the thing a caller
+    /// receives is a returned value instead — and a returned value has properties a posted
+    /// one does not. It must be answerable without a channel, and it must be able to say
+    /// WHICH refusal it is, because "the operator said no" and "the operator could not be
+    /// asked" are different events that a caller logs differently and recovers from
+    /// differently.
+    @Test
+    func `an answer is produced without posting anything`() async {
+        let channel = RecordingChannel()
+        let model = makeModel(channel: channel)
+        let request = Self.makeRequest()
+
+        let answer = await model.answerValue(.session, for: request)
+
+        // The state difference that matters: producing the answer must not have touched the
+        // transport. A function that both decides and reports is the thing that cannot be
+        // reused by the direct caller, and the direct caller is the only path left.
+        #expect(channel.posted.isEmpty)
+        #expect(answer.isApproved)
+        #expect(answer.kind == .session)
+    }
+
+    @Test
+    func `an answer carries the request it answers`() async {
+        let model = makeModel(channel: RecordingChannel())
+        let request = Self.makeRequest(requestID: "req-bound")
+
+        let answer = await model.answerValue(.once, for: request)
+
+        // Binding, asserted on the value rather than on the post: a returned answer is only
+        // an answer to something, and a server applying it to a different request is the
+        // confused deputy in its narrowest form.
+        #expect(answer.requestID == request.requestID)
+        #expect(answer.nonce == request.nonce)
+        #expect(answer.requestDigest == request.requestDigest)
+    }
+
+    @Test
+    func `a declined answer and an unobtainable one are distinguishable`() async {
+        let model = makeModel(channel: RecordingChannel())
+
+        let declined = await model.answerValue(.deny, for: Self.makeRequest(requestID: "a"))
+        #expect(!declined.isApproved)
+        #expect(declined.refusal == .operatorDeclined)
+
+        // A request that REQUIRED a ceremony, answered with no ceremony installed. The
+        // operator chose to allow, so this is not their refusal, and saying otherwise would
+        // tell a caller the wrong thing about why nothing was granted.
+        let blocked = await model.answerValue(
+            .session,
+            for: Self.makeRequest(requiresBiometric: true, requestID: "b"),
+        )
+        #expect(!blocked.isApproved)
+        #expect(blocked.refusal == .ceremonyRefused)
+    }
+
+    @Test
+    func `a ceremony that did not happen refuses rather than approving`() async {
+        let ceremony = ScriptedCeremony(.unavailable(.lockedOut))
+        let model = makeModel(channel: RecordingChannel(), ceremony: ceremony)
+        let request = Self.makeRequest(requiresBiometric: true)
+
+        // The operator chose to ALLOW, and the answer is a refusal. That is the whole
+        // invariant: a failed ceremony is not a weaker approval, it is a denial.
+        let answer = await model.answerValue(.session, for: request)
+
+        #expect(!answer.isApproved)
+        #expect(answer.kind == .deny)
+        #expect(answer.refusal == .ceremonyRefused)
+        #expect(!answer.biometricObtained)
+    }
+
+    @Test
+    func `a required ceremony that cannot be performed denies rather than approving`() async {
+        // THE SILENT DOWNGRADE, CLOSED. A request that asks for a biometric, answered with
+        // no ceremony installed, used to return the operator's chosen ALLOW carrying
+        // `biometricObtained: false` — an approval for a check that never happened, on
+        // precisely the requests that demanded one. In the old world it was invisible
+        // because the posted decision carried the same flag as an honest non-biometric
+        // approval. A returned answer makes the difference legible, which is the point of
+        // having one.
+        let model = makeModel(channel: RecordingChannel(), ceremony: nil)
+        let request = Self.makeRequest(requiresBiometric: true)
+
+        let answer = await model.answerValue(.session, for: request)
+
+        #expect(!answer.isApproved, "an approval for a check that did not happen is a downgrade")
+        #expect(answer.kind == .deny)
+        #expect(answer.refusal == .ceremonyRefused)
+        #expect(!answer.biometricObtained)
+    }
+
+    @Test
+    func `a performed ceremony is reported on the returned answer`() async {
+        let ceremony = ScriptedCeremony(.performed)
+        let model = makeModel(channel: RecordingChannel(), ceremony: ceremony)
+        let request = Self.makeRequest(requiresBiometric: true)
+
+        let answer = await model.answerValue(.session, for: request)
+
+        #expect(answer.biometricObtained)
+        #expect(answer.isApproved)
+        #expect(ceremony.nonces == [request.nonce])
+    }
+
+    @Test
+    func `approval is derived from the option, so the two cannot disagree`() async {
+        let model = makeModel(channel: RecordingChannel())
+
+        // A deny option must never yield an approved answer, whatever else is set. The value
+        // derives one from the other rather than storing both, because a stored pair is a
+        // pair that can contradict itself.
+        let allowing: [OptionRow.Kind] = [.once, .target, .session, .envelope, .global]
+        for kind in allowing {
+            let answer = await model.answerValue(kind, for: Self.makeRequest(requestID: kind.serverValue))
+            #expect(answer.isApproved, "\(kind.serverValue) should be an approval")
+            #expect(answer.refusal == nil)
+        }
+        let denied = await model.answerValue(.deny, for: Self.makeRequest())
+        #expect(!denied.isApproved)
+    }
 }
 
 /// The two vocabularies, which do not agree, and which broke the product end to end.
