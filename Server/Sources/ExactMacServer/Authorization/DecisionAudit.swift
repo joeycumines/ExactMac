@@ -156,6 +156,14 @@ struct AuditVerification: Sendable, Equatable {
         /// That is NOT tampering: the chain over the entries that are whole still verifies,
         /// and the reader must not lose them.
         case incompleteFinalLine
+        /// The log could not be read at all. NOT REPORTED AS INTACT: a reader that cannot
+        /// parse the file knows nothing about its contents, and an empty read-back under a
+        /// defaulted `try?` is what turned a truncated log into a clean bill of health.
+        case unreadable
+        /// A line terminated by a newline that is nonetheless not a decodable entry. The
+        /// write finished, so this is not a crash: the file was edited or something else
+        /// wrote to it, and a log that silently dropped an entry must not report itself whole.
+        case undecodableLine
     }
 }
 
@@ -374,9 +382,37 @@ final class DecisionAudit: @unchecked Sendable {
     /// console renders Activity from this and must not lose a day of history to a crash
     /// during one append.
     func verify() -> AuditVerification {
-        let readBack = (try? AuditEntry.readAll(from: path))
-            ?? AuditEntry.ReadBack(whole: [], hadIncompleteFinalLine: false)
-        var previous = AuditEntry.genesisHash(birth: birth)
+        // AN UNREADABLE LOG IS NOT AN INTACT ONE. `try?` with a defaulted empty read-back made
+        // a log this process cannot parse return `isIntact: true, entryCount: 0`, so truncating
+        // or corrupting the file produced a POSITIVE integrity signal. The verdict names it
+        // rather than reporting a clean empty log, because an operator shown "intact" over a
+        // file nobody can read has been told the opposite of the truth.
+        guard let readBack = try? AuditEntry.readAll(from: path) else {
+            return AuditVerification(
+                entryCount: 0,
+                isIntact: false,
+                firstBrokenSequence: nil,
+                defect: .unreadable,
+            )
+        }
+        // THE GENESIS IS THE LOG'S OWN, NOT THIS PROCESS'S, and that distinction is the
+        // whole reason a restart does not report a broken chain.
+        //
+        // `birth` is a fresh UUID per process, so `genesisHash(birth:)` is a different value
+        // in every process and could never match a log written by the last one. Seeding the
+        // walk with it made `verify()` report `.brokenChain(sequence: 1)` on every restart,
+        // on every non-empty log, which is invariant 11 being false in production while the
+        // tests stayed green — they pass `birth: "test-birth"` explicitly on reopen, so the
+        // production shape was never exercised.
+        //
+        // The first entry on disk carries the genesis the creating process actually used, in
+        // its own `previousHash`. That is the anchor to walk from, and it is verifiable in
+        // the only sense available: it is whatever the log says it is. An attacker who
+        // rewrites the whole log can choose a genesis, and that is the accepted same-uid
+        // residual — the chain's value is that an edit anywhere breaks everything after it,
+        // not that the anchor is secret.
+        var previous = readBack.whole.first?.previousHash
+            ?? AuditEntry.genesisHash(birth: birth)
         var expectedSequence: UInt64 = 1
         for entry in readBack.whole {
             if entry.sequence != expectedSequence {
@@ -414,6 +450,17 @@ final class DecisionAudit: @unchecked Sendable {
             previous = entry.hash
             expectedSequence &+= 1
         }
+        if readBack.hadUndecodableLine {
+            // A whole line that is not an entry. The chain over the entries that ARE whole
+            // still verifies, so the count is reported, but `isIntact` is false: the log
+            // contains something this system did not write.
+            return AuditVerification(
+                entryCount: readBack.whole.count,
+                isIntact: false,
+                firstBrokenSequence: nil,
+                defect: .undecodableLine,
+            )
+        }
         return AuditVerification(
             entryCount: readBack.whole.count,
             isIntact: true,
@@ -447,6 +494,16 @@ extension AuditEntry {
     struct ReadBack: Sendable {
         var whole: [AuditEntry]
         var hadIncompleteFinalLine: Bool
+        /// A COMPLETE LINE THAT IS NOT AN ENTRY, which is a different thing from a partial
+        /// line and must not be reported as one.
+        ///
+        /// A trailing line with no newline is an append that was interrupted — a crash — and
+        /// the entries before it are whole, so the reader keeps them. A line that IS
+        /// terminated and still will not decode was written whole and is not an entry: the
+        /// file was edited, or something else wrote to it. Treating that as the same event
+        /// reported an edited log as a crash and left `isIntact` true over a chain that had
+        /// silently lost an entry.
+        var hadUndecodableLine: Bool
     }
 
     static func writeAll(_ data: Data, to descriptor: Int32) throws {
@@ -474,6 +531,7 @@ extension AuditEntry {
 
         var entries: [AuditEntry] = []
         var incomplete = false
+        var undecodable = false
         var start = data.startIndex
         let decoder = JSONDecoder()
         while start < data.endIndex {
@@ -489,9 +547,16 @@ extension AuditEntry {
             if let entry = try? decoder.decode(AuditEntry.self, from: Data(line)) {
                 entries.append(entry)
             } else {
-                incomplete = true
+                // A terminated line that will not decode. NOT a partial write: the newline is
+                // there, so the write finished. It is recorded separately so the verifier can
+                // name an edited or foreign line rather than call it a crash.
+                undecodable = true
             }
         }
-        return ReadBack(whole: entries, hadIncompleteFinalLine: incomplete)
+        return ReadBack(
+            whole: entries,
+            hadIncompleteFinalLine: incomplete,
+            hadUndecodableLine: undecodable,
+        )
     }
 }

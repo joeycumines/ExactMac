@@ -80,6 +80,93 @@ final class DecisionAuditTests: XCTestCase {
         return try (DecisionAudit(path: path, clock: clock, birth: "test-birth"), path)
     }
 
+    // MARK: - Production shape
+
+    /// A RESTART MUST NOT MANUFACTURE A BROKEN CHAIN, and this is the test that would have
+    /// caught it.
+    ///
+    /// EVERY PREVIOUS TEST IN THIS FILE PASSES `birth: "test-birth"` ON REOPEN, so the whole
+    /// suite exercised a construction production never performs. Production passes no birth,
+    /// so each process got a fresh UUID and seeded verification with a genesis the log on
+    /// disk did not contain — which made `verify()` report `.brokenChain(sequence: 1)` on
+    /// every restart of every non-empty log. The bug was invisible to the suite by
+    /// construction, which is the reason this test constructs the audit the way production
+    /// does and nothing else does.
+    func testAReopenedAuditVerifiesAcrossARestartWithNoBirthSupplied() throws {
+        let clock = MovableClock()
+        let (audit, path) = try makeAudit(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        for index in 0 ..< 3 {
+            _ = try XCTUnwrap(audit.record(
+                request: Self.request("req-\(index)"), identity: Self.identity,
+                decision: Self.promptDecision(),
+            ))
+        }
+        // The precondition: the log the first process wrote verifies on its own. Without it a
+        // pass below could only mean the assertion is vacuous.
+        XCTAssertTrue(audit.verify().isIntact, "the log was not intact before the reopen")
+
+        // NO `birth:` — the production constructor.
+        let reopened = try DecisionAudit(path: path, clock: clock)
+        let verification = reopened.verify()
+        XCTAssertEqual(verification.entryCount, 3)
+        XCTAssertTrue(verification.isIntact, "a restart reported \(String(describing: verification.defect))")
+        XCTAssertNil(verification.defect)
+
+        // And the chain still continues, so a decision taken after the restart lands on a
+        // log that verifies rather than on one that has just been declared broken.
+        let next = try XCTUnwrap(reopened.record(
+            request: Self.request("req-after"), identity: Self.identity,
+            decision: Self.promptDecision(),
+        ))
+        XCTAssertEqual(next.sequence, 4)
+        XCTAssertTrue(reopened.verify().isIntact, "\(String(describing: reopened.verify().defect))")
+    }
+
+    /// A LOG THIS PROCESS CANNOT READ IS NOT AN INTACT ONE.
+    ///
+    /// The verdict used to be built from a `try?` over the reader with a defaulted empty
+    /// read-back, so a log that failed to parse came back as `isIntact: true, entryCount: 0`.
+    /// Truncating the file to something unreadable therefore produced a positive integrity
+    /// signal, which is the exact inverse of the truth and worse than reporting nothing.
+    func testAnUnreadableLogIsNotReportedIntact() throws {
+        let clock = MovableClock()
+        let (audit, path) = try makeAudit(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        _ = try XCTUnwrap(audit.record(
+            request: Self.request("req-0"), identity: Self.identity,
+            decision: Self.promptDecision(),
+        ))
+        XCTAssertTrue(audit.verify().isIntact, "precondition: the log verified before corruption")
+
+        // Bytes on disk that are not entries, with the file's own permissions preserved so
+        // the reader fails on CONTENT rather than on the descriptor checks.
+        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data("not json at all\n".utf8))
+        try handle.close()
+
+        let verification = audit.verify()
+        XCTAssertFalse(verification.isIntact, "a log with an undecodable line reported itself intact")
+        XCTAssertEqual(verification.defect, .undecodableLine)
+    }
+
+    /// A LOG THAT CANNOT BE OPENED AT ALL is `.unreadable`, and the distinction from the
+    /// case above matters: one is a file this system wrote that something changed, the other
+    /// is a file it cannot see. Both are "not intact" and an operator shown only that would
+    /// not know which happened.
+    func testALogThatCannotBeOpenedIsReportedUnreadable() throws {
+        let clock = MovableClock()
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("exactmac-audit-absent-\(UUID().uuidString).jsonl").path
+        // Never created: the recorder's own open would have made it.
+        let audit = try DecisionAudit(path: path, clock: clock, birth: "test-birth")
+        try FileManager.default.removeItem(atPath: path)
+        let verification = audit.verify()
+        XCTAssertFalse(verification.isIntact)
+        XCTAssertEqual(verification.defect, .unreadable)
+    }
+
     // MARK: - The record
 
     /// Every field the operator would need afterwards is present and readable, because a

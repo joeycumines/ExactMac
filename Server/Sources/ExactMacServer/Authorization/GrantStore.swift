@@ -705,7 +705,7 @@ enum GrantIssuanceError: Error, Equatable {
     case nonPositiveOperationCount(Int)
 }
 
-extension AuthorizationScope {
+public extension AuthorizationScope {
     /// A description for an operator-facing error, which must not be empty.
     var description: String {
         let application = switch self.application {
