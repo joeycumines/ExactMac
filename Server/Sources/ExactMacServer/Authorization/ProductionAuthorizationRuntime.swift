@@ -6,14 +6,13 @@ import os
 
 // MARK: - Where the server's own state lives
 
-/// The one place the server, the console and the deployment documentation agree on where
-/// state is kept.
+/// The one place the server, the operator interface and the deployment documentation agree on
+/// where state is kept.
 ///
 /// THE PATHS ARE HERE RATHER THAN IN THE CALLERS because they have to agree: a grant store the
-/// console cannot find, or a console socket the server and the console spell differently, is a
+/// prompt cannot find, or a state directory the server and the host spell differently, is a
 /// service that denies everything and says nothing useful. `~/.exactmac` is one short
-/// directory, which is not tidiness — `sun_path` is 104 bytes on Darwin and the console socket
-/// has to fit inside it.
+/// directory, which is not tidiness — it is the whole point of a single derivation.
 enum ExactMacRuntimePaths {
     /// `~/.exactmac`, or `EXACTMAC_STATE_DIRECTORY` when the operator sets it.
     ///
@@ -37,14 +36,6 @@ enum ExactMacRuntimePaths {
 
     static func grantStorePath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
         stateDirectory(environment: environment) + "/grants.json"
-    }
-
-    static func consoleSocketPath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        stateDirectory(environment: environment) + "/console.sock"
-    }
-
-    static func consoleTokenPath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        stateDirectory(environment: environment) + "/console.token"
     }
 
     /// Creates the state directory at `0700` if it is absent, and refuses it otherwise.
@@ -86,7 +77,6 @@ enum ExactMacRuntimeError: Error, CustomStringConvertible {
     case systemCall(operation: String, path: String, code: Int32)
     case auditUnavailable(reason: String)
     case grantStoreUnavailable(reason: String)
-    case consoleChannelUnavailable(reason: String)
 
     var description: String {
         switch self {
@@ -102,8 +92,6 @@ enum ExactMacRuntimeError: Error, CustomStringConvertible {
             "the decision audit is unavailable: \(reason)"
         case let .grantStoreUnavailable(reason):
             "the grant store is unavailable: \(reason)"
-        case let .consoleChannelUnavailable(reason):
-            "the console channel is unavailable: \(reason)"
         }
     }
 }
@@ -347,49 +335,16 @@ struct GrantStoreIssuance: GrantIssuing {
     }
 }
 
-// MARK: - The console
-
-/// The console endpoint as the interceptor's consent broker.
-///
-/// A THIN ADAPTER, because `ConsoleServerEndpoint.obtainConsent` is already the real broker:
-/// it mints the nonce, computes the digest, keeps the request so a console that authenticates
-/// late is caught up, validates the answer against both, and denies on the bound. All this
-/// adds is the timeout, which the interceptor holds rather than the endpoint.
-struct ConsoleEndpointConsentBroker: ConsentBroker {
-    private let endpoint: ConsoleServerEndpoint?
-    private let timeout: @Sendable () -> Duration
-
-    init(endpoint: ConsoleServerEndpoint?, timeout: @escaping @Sendable () -> Duration) {
-        self.endpoint = endpoint
-        self.timeout = timeout
-    }
-
-    func obtainConsent(
-        for request: AuthorizationRequest,
-        identity: CallerIdentity,
-        decision: AuthorizationDecision,
-    ) async -> ConsentAnswer? {
-        // No endpoint is nil, which the interceptor reads as an unreachable console and
-        // denies on. It is the same answer as a console that is not running, which is right:
-        // from the caller's side the two are not distinguishable and must not be.
-        guard let endpoint else { return nil }
-        return await endpoint.obtainConsent(
-            for: request,
-            identity: identity,
-            decision: decision,
-            timeout: timeout(),
-        )
-    }
-}
+// MARK: - The real authorization runtime
 
 /// The real authorization runtime, and the one place the server's own state is created.
 ///
 /// IT EXISTS AS A SINGLE VALUE rather than as arguments threaded through `main`, because the
 /// failure this project keeps meeting is a runtime assembled from defaults: `NoStandingGrants`,
-/// `UnavailableConsentBroker`, `isConsoleReachable = false`, a nil recorder. Each of those
-/// denies, so each is safe, and together they are a system that cannot do anything while
-/// looking as though it is running. Assembling them here makes the set of things the server
-/// is actually using one readable list, and adding a dependency is a visible edit.
+/// no operator to ask, `isConsoleReachable` false, a nil recorder. Each of those denies, so
+/// each is safe, and together they are a system that cannot do anything while looking as
+/// though it is running. Assembling them here makes the set of things the server is actually
+/// using one readable list, and adding a dependency is a visible edit.
 struct ProductionAuthorizationRuntime {
     /// The consent aspect's own health entry, so the reduced posture is VISIBLE rather than a
     /// log line nobody reads. The gRPC health protocol has no "degraded" status, and reporting
@@ -407,20 +362,13 @@ struct ProductionAuthorizationRuntime {
     let registry: ConnectionPeerRegistry
     let auditPath: String
     let grantStorePath: String
-    let consoleSocketPath: String?
-    let consoleEndpoint: ConsoleServerEndpoint?
-    /// The endpoint's accept loop, held so shutdown can stop it. It is a SEPARATE TASK and
-    /// not a call, because `ConsoleServerEndpoint.serve()` runs until `stop()` and calling
-    /// it inline would block startup forever.
-    let consoleEndpointTask: Task<Void, Never>?
     let authorizationRuntime: AuthorizationRuntime
     let consentTimeout: Duration
 
-    /// - Throws: when the state directory, the audit log, the grant store or a configured
-    ///   console channel cannot be established. Startup fails rather than continuing with a
-    ///   component missing, because a server that cannot record a decision has no reason to be
-    ///   listening, and a grant store that cannot be read is the state in which the system
-    ///   must not be granting things.
+    /// - Throws: when the state directory, the audit log or the grant store cannot be
+    ///   established. Startup fails rather than continuing with a component missing, because a
+    ///   server that cannot record a decision has no reason to be listening, and a grant store
+    ///   that cannot be read is the state in which the system must not be granting things.
     static func make(
         config: ServerConfig,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -449,177 +397,33 @@ struct ProductionAuthorizationRuntime {
             throw ExactMacRuntimeError.grantStoreUnavailable(reason: String(describing: error))
         }
 
-        // THE CONSOLE CHANNEL IS OPTIONAL, and its absence is not an error. The server has to
-        // be able to start and refuse everything rather than not start at all: a service that
-        // is down is harder to diagnose than one that is up and denying. Reachability is still
-        // answered live, so a configured channel with no console attached reports unreachable
-        // rather than pretending a consent path exists.
-        let consoleSocketPath = config.consoleSocketPath
-        var consoleEndpoint: ConsoleServerEndpoint?
-        var consoleEndpointTask: Task<Void, Never>?
-        if let consoleSocketPath {
-            let token: ConsoleChannelToken
-            do {
-                token = try ConsoleChannelToken.loadOrCreate(
-                    at: ExactMacRuntimePaths.consoleTokenPath(environment: environment),
-                )
-            } catch {
-                throw ExactMacRuntimeError.consoleChannelUnavailable(
-                    reason: String(describing: error),
-                )
-            }
-            let endpoint = ConsoleServerEndpoint(
-                socketPath: consoleSocketPath,
-                token: token,
-                responder: ConsoleReplyFactory(
-                    store: store,
-                    audit: audit,
-                    posture: config.defaultPosture,
-                    stateDirectory: ExactMacRuntimePaths.stateDirectory(environment: environment),
-                ).answer,
-            )
-            do {
-                try endpoint.listen()
-            } catch {
-                throw ExactMacRuntimeError.consoleChannelUnavailable(
-                    reason: String(describing: error),
-                )
-            }
-            // THE ACCEPT LOOP IS STARTED HERE, and its absence was the whole reason the
-            // console could never be seen. `listen()` binds and listens; `serve()` is what
-            // accepts, and a server that only ever listened had a console socket that
-            // answered `connect` and then nothing — so `hasAuthenticatedConsole` stayed
-            // false forever and every consent request denied with `consoleUnreachable`.
-            consoleEndpointTask = Task { [endpoint] in
-                await endpoint.serve()
-            }
-            consoleEndpoint = endpoint
-        }
-
         let consentTimeout = Duration.seconds(config.consentTimeoutSeconds)
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
-        var runtime = AuthorizationRuntime.unixSocket(
+        let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             grants: GrantStoreSupply(store: store),
-            consent: ConsoleEndpointConsentBroker(
-                endpoint: consoleEndpoint,
-                timeout: { consentTimeout },
-            ),
+            // NOBODY TO ASK, and that is production's actual state: the operator interface is
+            // hosted in this process and the host has not installed one yet. A nil handler
+            // denies, so the server starts and refuses every consent-requiring capability
+            // rather than granting anything it could not have shown an operator — which is
+            // also why this is not an error. A service that is down is harder to diagnose than
+            // one that is up and denying.
+            consent: nil,
             issuance: GrantStoreIssuance(store: store),
             clock: clock,
             posture: config.defaultPosture,
             consentTimeout: consentTimeout,
-            // Replaced immediately below with a live answer; the literal here exists only so
-            // the initializer has one.
-            isConsoleReachable: consoleEndpoint != nil,
+            isConsoleReachable: AuthorizationRuntime.noOperatorInterfaceIsInstalled,
             peerEvidence: .registry(registry),
             audit: AuditDecisionRecorder(audit: audit),
             auditRequired: true,
         )
-        if let consoleEndpoint {
-            runtime.isConsoleReachable = { consoleEndpoint.hasAuthenticatedConsole }
-        }
         return ProductionAuthorizationRuntime(
             registry: registry,
             auditPath: auditPath,
             grantStorePath: grantStorePath,
-            consoleSocketPath: consoleSocketPath,
-            consoleEndpoint: consoleEndpoint,
-            consoleEndpointTask: consoleEndpointTask,
             authorizationRuntime: runtime,
             consentTimeout: consentTimeout,
         )
-    }
-}
-
-/// A console channel with no endpoint behind it, which is what "no console socket is
-/// configured" means: the broker is asked, and the answer is that there is nothing to ask.
-struct UnreachableConsoleEndpoint: ConsentBroker {
-    func obtainConsent(
-        for _: AuthorizationRequest,
-        identity _: CallerIdentity,
-        decision _: AuthorizationDecision,
-    ) async -> ConsentAnswer? {
-        nil
-    }
-}
-
-/// The console's three queries, answered from the state the server already owns.
-///
-/// THE CHANNEL CARRIES THE FRAME AND NOT THE DATA, so the payload is JSON encoded here and
-/// decoded by the console against its own copy of the shapes. That duplication is a real
-/// coupling and it is stated rather than hidden: a disagreement is a decode failure on a
-/// refused frame, not a silently misread field.
-struct ConsoleReplyFactory {
-    private let store: GrantStore
-    private let audit: DecisionAudit
-    private let posture: Posture
-    private let stateDirectory: String
-
-    init(store: GrantStore, audit: DecisionAudit, posture: Posture, stateDirectory: String) {
-        self.store = store
-        self.audit = audit
-        self.posture = posture
-        self.stateDirectory = stateDirectory
-    }
-
-    func answer(_ kind: QueryKind) async -> ConsoleReply {
-        let payload: String?
-        switch kind {
-        case .grants:
-            payload = encode(store.grantsForDisplay())
-        case .activity:
-            // THE VERIFICATION TRAVELS WITH THE ENTRIES rather than beside them, because a
-            // list of decisions the console renders as authoritative is exactly what a
-            // tampered log looks like. A consumer that sees the defect can say which sequence
-            // is wrong instead of displaying a broken chain as history.
-            let verification = audit.verify()
-            payload = encode(ActivitySummary(
-                entryCount: verification.entryCount,
-                isIntact: verification.isIntact,
-                firstBrokenSequence: verification.firstBrokenSequence,
-                defect: verification.defect.map { String(describing: $0) },
-            ))
-        case .settings:
-            payload = encode(SettingsSummary(
-                posture: String(describing: posture),
-                stateDirectory: stateDirectory,
-                auditLog: audit.path,
-                grantStore: store.path,
-            ))
-        }
-        return ConsoleReply(kind: kind.rawValue, payload: payload)
-    }
-
-    /// What the activity query reports: the chain's own verdict, not a list of decisions the
-    /// console would present as authoritative.
-    struct ActivitySummary: Encodable {
-        var entryCount: Int
-        var isIntact: Bool
-        var firstBrokenSequence: UInt64?
-        var defect: String?
-    }
-
-    /// What the settings query reports: where the operator's state is, so "which installation
-    /// am I looking at" is answerable without guessing.
-    struct SettingsSummary: Encodable {
-        var posture: String
-        var stateDirectory: String
-        var auditLog: String
-        var grantStore: String
-    }
-
-    /// A payload that fails to encode is nil rather than a placeholder: the console shows an
-    /// unreadable query as an error, and a placeholder would be a plausible-looking value it
-    /// then displayed.
-    private func encode(_ value: some Encodable) -> String? {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(value),
-              let text = String(data: data, encoding: .utf8)
-        else {
-            return nil
-        }
-        return text
     }
 }

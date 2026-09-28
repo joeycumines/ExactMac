@@ -24,6 +24,14 @@ final class ConsoleModel {
     private let channel: any ConsoleChannel
     private let serviceController: any ServiceControlling
     private let onServiceDisabled: (@Sendable () async throws -> Void)?
+    /// Whether this process can put a consent prompt in front of the operator.
+    ///
+    /// IT IS A DEPENDENCY RATHER THAN A CONSTANT so the one behaviour that matters — that
+    /// a process with nowhere to show a window never reports itself as running — is
+    /// assertable. Classified once at launch from the real process, and never re-derived,
+    /// because a window server session cannot appear under a running app and a bundle
+    /// cannot be shed by one either.
+    private let presentation: OperatorInterface
     private let logger = Logger(
         subsystem: "io.github.joeycumines.exactmac.console",
         category: "console",
@@ -66,6 +74,7 @@ final class ConsoleModel {
         channel: any ConsoleChannel = ConsoleChannelClient.live(),
         serviceController: any ServiceControlling = LaunchdServiceController(),
         onServiceDisabled: (@Sendable () async throws -> Void)? = nil,
+        presentation: OperatorInterface = ServerHosting.current(),
         windows: ConsoleWindowHost = ConsoleWindowHost(),
         ceremony: (any CeremonyPerforming)? = BiometricCeremony(),
         startLoop: Bool = true,
@@ -73,6 +82,7 @@ final class ConsoleModel {
         self.channel = channel
         self.serviceController = serviceController
         self.onServiceDisabled = onServiceDisabled
+        self.presentation = presentation
         self.windows = windows
         self.ceremony = ceremony
         if startLoop {
@@ -113,14 +123,18 @@ final class ConsoleModel {
         let previousGrants = activeGrantCount
 
         isServiceEnabled = enabling
-        serviceState = enabling ? .running : .stopped
+        // Through `vetoed` rather than assigned, so turning the service ON cannot make a
+        // process that cannot present a window report itself as running. The optimistic
+        // update is rolled back on failure either way; what changed is that the optimistic
+        // state is now one the process is actually entitled to show.
+        serviceState = vetoed(enabling ? .running : .stopped)
         if !enabling {
             activeGrantCount = 0
             failClosed = (
                 "The service is off",
                 "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
             )
-        } else {
+        } else if serviceState == .running {
             failClosed = nil
         }
         logger.info("Service \(enabling ? "enabled" : "disabled", privacy: .public) by the operator")
@@ -162,8 +176,12 @@ final class ConsoleModel {
                     "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
                 )
             } else if serviceState == .stopped {
-                serviceState = .running
-                failClosed = nil
+                // Through `vetoed` for the same reason `setServiceEnabled` is: a service that
+                // is enabled is not a service that can ask the operator anything.
+                serviceState = vetoed(.running)
+                if serviceState == .running {
+                    failClosed = nil
+                }
             }
         } catch {
             logger.warning("Failed to refresh service state: \(error.localizedDescription, privacy: .public)")
@@ -480,28 +498,75 @@ final class ConsoleModel {
         }
     }
 
-    private func apply(_ state: ServiceState) {
+    /// The state this process is actually able to report.
+    ///
+    /// SEPARATE FROM `apply` so the two other places that set the state directly cannot
+    /// bypass it. `setServiceEnabled` and `refreshServiceState` both wrote `.running`
+    /// themselves, and both would have left a headless process reporting a healthy state
+    /// with the fail-closed band cleared — which is the exact failure `apply` was changed to
+    /// prevent, reached by a different route.
+    private func vetoed(_ state: ServiceState) -> ServiceState {
+        guard !presentation.canObtainConsent else { return state }
+        switch state {
+        case .running, .pending: return .unreachable
+        case .degraded, .reduced, .stopped, .unreachable: return state
+        }
+    }
+
+    /// Folds a reported state into what the popover draws, and decides the fail-closed band.
+    ///
+    /// INTERNAL RATHER THAN PRIVATE SO A TEST CAN DRIVE IT, which is the same reasoning
+    /// `answer` uses: the posture decision is the whole function of this model and it has to
+    /// be assertable without a server on the other end of a socket. A test that could only
+    /// reach it by standing up a real server would be a test that runs once.
+    func apply(_ state: ServiceState) {
+        // THE POSTURE IS A PROPERTY OF THE PROCESS AND IT VETOES THE STATES THAT CLAIM
+        // CONSENT IS OBTAINABLE.
+        //
+        // This used to be a straight assignment, which meant a menu bar app that could not
+        // open a window still reported `Running` and drew a healthy dot. `Running` claims
+        // something an operator will act on — that ExactMac is working and will ask them
+        // when something needs approving — and a process with nowhere to show a prompt
+        // cannot deliver on that claim. The request would sit until it expired and be
+        // denied, while the operator looked at a green dot throughout.
+        //
+        // ONLY `.running` AND `.pending` ARE VETOED. The other four already mean "consent is
+        // not available here", so rewriting them would replace a more specific and more
+        // useful state with a vaguer one — an operator who turned ExactMac off should be
+        // told it is off, not told it cannot ask them anything.
+        let effective = vetoed(state)
         // A CHANGED STATE IS LOGGED, AND AN UNCHANGED ONE IS NOT. The console is the only
         // place an operator can see why nothing is being approved, so a silent state change
         // is a defect; a state that repeats every two seconds is noise that hides the one
         // line that matters.
-        if state != serviceState {
-            logger.info("Console state is now \(String(describing: state), privacy: .public)")
+        if effective != serviceState {
+            logger.info(
+                "Console state is now \(String(describing: effective), privacy: .public)",
+            )
         }
-        serviceState = state
-        switch state {
+        if effective != state {
+            // Logged as a VETO rather than as a state change, because the underlying state
+            // genuinely is running and the only thing wrong is this process's ability to
+            // show a window. Silently rewriting it would make a launch-time misclassification
+            // indistinguishable from a connectivity fault in the log forever after.
+            logger.notice(
+                "Refusing to report \(String(describing: state), privacy: .public): this process cannot present a consent prompt (\(self.presentation.summary, privacy: .public))",
+            )
+        }
+        serviceState = effective
+        switch effective {
         case .unreachable:
             failClosed = (
-                "Denied until the console is available",
-                "ExactMac could not reach the consent service, so every request that needs "
-                    + "consent was denied. Nothing ran and no grant was created. "
+                "Denied until ExactMac can ask you",
+                "Every request that needs consent is being denied, because nothing can put "
+                    + "the question in front of you. Nothing ran and no grant was created. "
                     + "This is the safe direction.",
             )
         case .degraded:
             failClosed = (
                 "The service is not answering",
-                "The console cannot reach ExactMac, so no request can be made or answered. "
-                    + "Nothing on this Mac is being automated while it is down.",
+                "No request can be made or answered. Nothing on this Mac is being "
+                    + "automated while this is the case.",
             )
         case .reduced:
             failClosed = (

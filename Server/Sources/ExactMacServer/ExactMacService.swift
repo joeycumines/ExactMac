@@ -67,7 +67,13 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
     let grantStore: GrantStore?
     /// The ceiling on an envelope, and the consent path, both from configuration.
     let maximumEnvelopeSeconds: Int
-    let consentBroker: (any ConsentBroker)?
+    /// Whom to ask before a pre-authorization envelope is issued, or nil when there is nobody.
+    ///
+    /// NIL IS THE DENIAL, and it is the state this service is assembled in: the operator
+    /// interface is hosted in the process that builds the service, and the interceptor — not
+    /// this RPC — is where consent is enforced. So `preauthorizeEnvelope` refuses outright
+    /// rather than minting an envelope nobody approved.
+    let consent: ConsentAnswering?
     let applicationTerminationGracePeriod: Duration
     let applicationTerminationForcePeriod: Duration
     let windowMutationConvergencePolicy: WindowMutationConvergencePolicy
@@ -99,7 +105,7 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
         windowMutationConvergencePolicy: WindowMutationConvergencePolicy = .production,
         grantStore: GrantStore? = nil,
         maximumEnvelopeSeconds: Int = ServerConfig.defaultMaximumEnvelopeSeconds,
-        consentBroker: (any ConsentBroker)? = nil,
+        consent: ConsentAnswering? = nil,
     ) {
         let elementRegistry = automationCoordinator?.elementRegistry ?? ElementRegistry()
         let automationCoordinator = automationCoordinator ?? AutomationCoordinator(
@@ -171,6 +177,6 @@ final class ExactMacService: Exactmac_V1_ExactMac.ServiceProtocol {
         self.windowMutationConvergencePolicy = windowMutationConvergencePolicy
         self.grantStore = grantStore
         self.maximumEnvelopeSeconds = maximumEnvelopeSeconds
-        self.consentBroker = consentBroker
+        self.consent = consent
     }
 }

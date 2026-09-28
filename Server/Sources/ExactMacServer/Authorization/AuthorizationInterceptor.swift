@@ -59,7 +59,7 @@ struct NoStandingGrants: GrantSupply {
 /// It names the request it answers, so a decision cannot be applied to a different one,
 /// and it carries the biometric outcome because "a biometric was required" and "a
 /// biometric was obtained" are different facts.
-struct ConsentAnswer: Sendable, Equatable {
+public struct ConsentAnswer: Sendable, Equatable {
     var requestID: AuthorizationRequestID
     var isApproved: Bool
     var selected: OfferedDecision.Kind?
@@ -69,40 +69,30 @@ struct ConsentAnswer: Sendable, Equatable {
     var biometricObtained: Bool = false
 }
 
-/// Where consent decisions come from.
+/// Whom the interceptor asks, and what they said.
 ///
-/// Returns nil when there is no console to ask, which the interceptor treats as a denial.
-/// It is nil and not an error because "the console is not running" is not a fault in the
-/// caller, and the two must not be distinguishable from outside.
-protocol ConsentBroker: Sendable {
-    func obtainConsent(
-        for request: AuthorizationRequest,
-        identity: CallerIdentity,
-        decision: AuthorizationDecision,
-    ) async -> ConsentAnswer?
-}
-
-/// The production broker until the console channel exists.
+/// A FUNCTION, not a strategy object, and the reason is that there is nothing left to
+/// abstract over. The protocol this replaced existed so the SERVER could ask a console in
+/// another PROCESS, and it had four conformances — one per combination of "nobody to ask",
+/// "ask an endpoint", and two test doubles. The operator interface is hosted in this process
+/// now, so there is one question with one shape and one way of failing to answer it: nil. A
+/// caller supplies one of these and the interceptor calls it; there is no hierarchy to
+/// implement and no variant to select.
 ///
-/// IT DENIES, and that is the whole implementation. There is no consent path yet, so there
-/// is no consent, and a system that cannot ask must not proceed as though it had. This is
-/// what makes the interceptor safe to ship before C7: a missing capability is a denial
-/// rather than an allow.
-struct UnavailableConsentBroker: ConsentBroker {
-    func obtainConsent(
-        for _: AuthorizationRequest,
-        identity _: CallerIdentity,
-        decision _: AuthorizationDecision,
-    ) async -> ConsentAnswer? {
-        nil
-    }
-}
+/// NIL IS THE DENIAL, and it is nil rather than an error because "there is nobody to ask" is
+/// not a fault in the caller, and the two must not be distinguishable from outside. There is
+/// no type to construct for "nobody to answer" — there is only nil.
+public typealias ConsentAnswering = @Sendable (
+    _ request: AuthorizationRequest,
+    _ identity: CallerIdentity,
+    _ decision: AuthorizationDecision,
+) async -> ConsentAnswer?
 
 /// Turning an approval into an authorization: the grant that is issued, persisted, and
 /// what the caller is finally told.
 ///
-/// Separate from the broker because the broker is about the OPERATOR and this is about the
-/// STORE, and C5 replaces only this one.
+/// Separate from the ask because the ask is about the OPERATOR and this is about the
+/// STORE, and the store is the one that can be replaced without changing who decides.
 protocol GrantIssuing: Sendable {
     func authorize(
         answer: ConsentAnswer,
@@ -170,20 +160,26 @@ struct AuthorizationRuntime: Sendable {
     var descriptorPolicy: PublicRequestDescriptorPolicy
     var identity: CallerIdentitySource
     var grants: any GrantSupply
-    var consent: any ConsentBroker
+    /// Whom to ask, or nil when this process has no operator interface installed.
+    ///
+    /// NIL IS A STATED POSTURE, not a shortcut, and it is the same shape as `audit` below: a
+    /// runtime with nobody to ask is a runtime that denies, which is safe, and it is
+    /// production's actual state until the host installs an operator interface. What it must
+    /// never become is a fallback: a nil handler does not degrade to anything.
+    var consent: ConsentAnswering?
     var issuance: any GrantIssuing
     var clock: any MonotonicClock
     var posture: Posture
     /// A bounded wait for the operator. Past it, deny.
     var consentTimeout: Duration
-    /// Whether a console is connected AND has authenticated, asked at the moment a request
-    /// needs one rather than captured at construction.
+    /// Whether an operator is able to answer RIGHT NOW, asked at the moment a request needs
+    /// one rather than captured at construction.
     ///
     /// A FUNCTION because a constant is wrong in both directions here. Captured `true` when
-    /// no console is running makes the interceptor take the consent path and then deny on the
-    /// timeout, which the caller experiences as a slow refusal; captured `false` when one is
-    /// running makes a working service permanently unusable. A test still passes a literal,
-    /// because the factory wraps it.
+    /// nobody can answer makes the interceptor take the consent path and then deny on the
+    /// timeout, which the caller experiences as a slow refusal; captured `false` when an
+    /// operator IS present makes a working service permanently unusable. A test still passes
+    /// a literal, because the factory wraps it.
     var isConsoleReachable: @Sendable () -> Bool
     var biometric: AuthorizationContext.BiometricAvailability
     var highConsequenceTargets: Set<String>
@@ -215,12 +211,30 @@ struct AuthorizationRuntime: Sendable {
     /// whole point of the log is that the operator can afterwards ask what was permitted.
     var auditRequired: Bool
 
+    /// WHETHER AN OPERATOR CAN ANSWER RIGHT NOW, in a process that hosts its own operator
+    /// interface and has not been given one.
+    ///
+    /// NAMED RATHER THAN WRITTEN AS A LITERAL where it is supplied, because the question
+    /// changed shape when the console boundary came out. A console in another process had to be
+    /// CONNECTED to, so reachability was a fact about a socket and a live closure was the only
+    /// honest way to ask it. The operator interface is hosted in THIS process, so reachability
+    /// is a fact about whether a consent handler has been installed — which is the host's to
+    /// answer, and until the host answers it, this is the answer. It agrees with `consent` being
+    /// nil, which is what makes the two fail-closed together: a request that needs a prompt
+    /// finds nobody to ask and is denied with `consoleUnreachable` rather than waiting.
+    static let noOperatorInterfaceIsInstalled = false
+
+    /// THE SAME FACT AS THE LIVE ANSWER, so the two spellings cannot drift. The runtime stores
+    /// a closure because reachability has to be asked at the moment a request needs it; the
+    /// factory takes a value because a test that cannot ask a question should not have to.
+    static let noOperatorInterfaceInstalled: @Sendable () -> Bool = { noOperatorInterfaceIsInstalled }
+
     /// The Unix-socket variant, which is the only one with an identity and the only one
     /// that can consent.
     static func unixSocket(
         descriptorPolicy: PublicRequestDescriptorPolicy,
         grants: any GrantSupply = NoStandingGrants(),
-        consent: any ConsentBroker = UnavailableConsentBroker(),
+        consent: ConsentAnswering? = nil,
         issuance: any GrantIssuing = NoGrantIssuance(),
         clock: any MonotonicClock = SystemMonotonicClock(),
         posture: Posture = .balanced,
@@ -267,14 +281,14 @@ struct AuthorizationRuntime: Sendable {
             descriptorPolicy: descriptorPolicy,
             identity: .unavailableTransport,
             grants: grants,
-            consent: UnavailableConsentBroker(),
+            consent: nil,
             issuance: NoGrantIssuance(),
             clock: clock,
             posture: posture,
             consentTimeout: .seconds(120),
-            // The console is irrelevant here: the posture denies before anything is asked,
+            // The operator is irrelevant here: the posture denies before anything is asked,
             // and reporting it reachable would let a caller infer a working consent path.
-            isConsoleReachable: { false },
+            isConsoleReachable: noOperatorInterfaceInstalled,
             biometric: .unavailable(reason: "the reduced unauthenticated posture has no ceremony"),
             highConsequenceTargets: [],
             applicationResolver: UnresolvableApplicationTarget(),
@@ -592,12 +606,17 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// The bound is a DENIAL and not a default: an operator who does not answer has not
     /// consented, and treating silence as consent is the failure this whole system exists
     /// to prevent.
+    ///
+    /// NOBODY TO ASK IS THE SAME DENIAL as nobody answering, and it is checked in both of its
+    /// forms — `isConsoleReachable` false, and a nil handler — so a process with no operator
+    /// interface refuses rather than reporting reachable and then waiting out a timeout it
+    /// was always going to lose.
     private func prompt(
         request: AuthorizationRequest,
         identity: CallerIdentity,
         decision: AuthorizationDecision,
     ) async throws -> (decision: AuthorizationDecision, answer: ConsentAnswer) {
-        guard runtime.isConsoleReachable() else {
+        guard runtime.isConsoleReachable(), let consent = runtime.consent else {
             throw AuthorizationDenial(reason: .consoleUnreachable, capability: request.capability)
         }
         // Whether a ceremony is required is NOT checked here. It is checked against the
@@ -606,7 +625,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         // rather than a refusal they cannot understand.
 
         let answer = await withConsentTimeout(runtime.consentTimeout) {
-            await runtime.consent.obtainConsent(for: request, identity: identity, decision: decision)
+            await consent(request, identity, decision)
         }
 
         guard let answer else {
@@ -661,7 +680,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         return (decision: issued, answer: answer)
     }
 
-    /// Races the broker against the bound, and CANCELS the broker's work when the bound
+    /// Races the ask against the bound, and CANCELS the ask's work when the bound
     /// wins — an operator answering a request the caller has already been refused is work
     /// nothing should be doing.
     private func withConsentTimeout(

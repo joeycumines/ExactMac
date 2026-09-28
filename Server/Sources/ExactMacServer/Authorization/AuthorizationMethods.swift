@@ -267,21 +267,21 @@ extension ExactMacService {
         }
         // And then the engine decides, because the engine is where the policy lives.
         //
-        // With no console reachable the broker answers nil, which is a refusal: a prompt
+        // With no operator to ask the handler returns nil, which is a refusal: a prompt
         // nobody answered has not been consented to, and a refusal is the correct outcome
         // rather than an envelope nobody approved.
-        guard let consent = self.consentBroker else {
+        guard let consent = self.consent else {
             throw RPCError(
                 code: .failedPrecondition,
-                message: "the consent console is not reachable, so no envelope can be "
+                message: "no operator interface is present, so no envelope can be "
                     + "granted; nothing has been authorized",
             )
         }
         let decision = AuthorizationMethods.envelopeDecision(capabilities: req.capabilities)
-        let granted = await consent.obtainConsent(
-            for: AuthorizationMethods.envelopeRequest(capabilities: req.capabilities),
-            identity: AuthorizationMethods.unresolvedIdentity,
-            decision: decision,
+        let granted = await consent(
+            AuthorizationMethods.envelopeRequest(capabilities: req.capabilities),
+            AuthorizationMethods.unresolvedIdentity,
+            decision,
         )
         guard let granted, granted.isApproved else {
             throw RPCError(

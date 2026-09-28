@@ -76,35 +76,41 @@ final class ProductionRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try ExactMacRuntimePaths.prepareStateDirectory(environment: environment()))
     }
 
-    /// Every path the server, the console and the deployment documentation use is derived from
-    /// one directory, so a disagreement about where state is cannot be expressed.
+    /// Every path the server and the deployment documentation use is derived from one
+    /// directory, so a disagreement about where state is cannot be expressed.
+    ///
+    /// The console socket and the console token used to be two more of these and are gone
+    /// with the channel: neither is a path this process creates any more, and a path helper
+    /// for a file nothing writes is a place for a deployment to point at something that does
+    /// not exist.
     func testEveryPathComesFromOneDirectory() {
         let environment = environment()
         let directory = ExactMacRuntimePaths.stateDirectory(environment: environment)
         XCTAssertEqual(ExactMacRuntimePaths.auditLogPath(environment: environment), directory + "/audit.log")
         XCTAssertEqual(ExactMacRuntimePaths.grantStorePath(environment: environment), directory + "/grants.json")
-        XCTAssertEqual(ExactMacRuntimePaths.consoleSocketPath(environment: environment), directory + "/console.sock")
-        XCTAssertEqual(ExactMacRuntimePaths.consoleTokenPath(environment: environment), directory + "/console.token")
     }
 
     // MARK: - The assembled runtime
 
-    /// The assembler produces a runtime with a REAL grant store, a REAL audit and a REAL
-    /// consent broker, and none of the refusing defaults. This is the assertion the whole task
-    /// turns on: each of those defaults is safe, and together they are a system that cannot do
-    /// anything while looking as though it is running.
-    func testTheAssembledRuntimeUsesNoRefusingDefault() throws {
+    /// The assembler produces a runtime with a REAL grant store and a REAL audit, and it says
+    /// so rather than leaving the refusing defaults in place by accident. Each of those
+    /// defaults is safe — they deny — and together they are a system that cannot do anything
+    /// while looking as though it is running, which is the failure this suite is about.
+    ///
+    /// The consent default is STILL a refusing default and is asserted as such rather than
+    /// papered over: the operator interface is hosted in the process that builds this runtime,
+    /// and nothing has installed one yet, so `consent` is nil and every consent-requiring
+    /// capability is denied. That is the honest state of the build, and a test that called it
+    /// a "real consent broker" would be asserting something untrue.
+    func testTheAssembledRuntimeUsesARealAuditAndARealGrantStoreAndNamesItsConsentPosture() throws {
         let environment = environment(consoleSocket: stateDirectory + "/console.sock")
         let runtime = try ProductionAuthorizationRuntime.make(
             config: config(environment),
             environment: environment,
         )
-        defer { runtime.consoleEndpoint?.stop() }
 
         XCTAssertTrue(runtime.auditPath.hasSuffix("/audit.log"))
         XCTAssertTrue(runtime.grantStorePath.hasSuffix("/grants.json"))
-        XCTAssertNotNil(runtime.consoleEndpoint, "a configured console socket must be bound")
-        XCTAssertNotNil(runtime.consoleSocketPath)
 
         // A grant that is not a placeholder: the store round-trips through the file.
         let store = try GrantStore.openStore(
@@ -115,64 +121,17 @@ final class ProductionRuntimeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: runtime.auditPath))
         XCTAssertTrue(store.liveGrants().isEmpty)
 
-        // And the console socket is owner-only, which is the whole boundary.
-        let consoleSocketPath = try XCTUnwrap(runtime.consoleSocketPath)
-        var info = stat()
-        XCTAssertEqual(lstat(consoleSocketPath, &info), 0)
-        XCTAssertEqual(info.st_mode & 0o777, 0o600)
-    }
-
-    /// A configured console channel is ACCEPTING, not merely bound.
-    ///
-    /// `listen()` binds and listens; `serve()` accepts. A server that called only the first
-    /// had a console socket that completed `connect` and then went silent, so
-    /// `hasAuthenticatedConsole` stayed false and every consent request denied with
-    /// `consoleUnreachable` — the exact symptom of "the console does not work" that this
-    /// suite would not have caught, because nothing in the unit tests ever connected.
-    func testAConfiguredConsoleChannelAcceptsAConnection() async throws {
-        let socketPath = stateDirectory + "/console.sock"
-        let environment = environment(consoleSocket: socketPath)
-        let runtime = try ProductionAuthorizationRuntime.make(
-            config: config(environment),
-            environment: environment,
+        // And the consent posture is stated, not inferred. This process presents the prompt
+        // itself, so there is no channel to configure and no socket to assert on; the posture
+        // is entirely a fact about whether a consent handler is installed.
+        XCTAssertNil(
+            runtime.authorizationRuntime.consent,
+            "no operator interface is installed, so there is nobody to ask",
         )
-        defer {
-            runtime.consoleEndpointTask?.cancel()
-            runtime.consoleEndpoint?.stop()
-        }
-
-        // The token is read from the owner-private file the runtime created, so this client
-        // is a real console rather than one with a token chosen to be refused: the property
-        // under test is that the channel ACCEPTS, not that it authenticates.
-        let token = try XCTUnwrap(
-            try String(
-                contentsOfFile: ExactMacRuntimePaths.consoleTokenPath(environment: environment),
-                encoding: .utf8,
-            ),
-            "the runtime must have created a console token",
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertFalse(token.isEmpty, "the console token must not be empty")
-
-        let connected = expectation(description: "the console channel accepted a connection")
-        let poll = Task { () in
-            let client = ConsoleChannelClient(
-                socketPath: socketPath,
-                token: .shared(token),
-            )
-            while !Task.isCancelled {
-                if await (try? client.connect()) != nil {
-                    // The handshake completing at all is the assertion: the server read the
-                    // token, the console read the server's, and the peer uid matched.
-                    XCTAssertTrue(client.isConnected)
-                    client.disconnect()
-                    connected.fulfill()
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-        }
-        defer { poll.cancel() }
-        await fulfillment(of: [connected], timeout: 15)
+        XCTAssertFalse(
+            runtime.authorizationRuntime.isConsoleReachable(),
+            "reachability must agree with the absent handler, or the two fail-closed separately",
+        )
     }
 
     /// A state directory the server cannot use is a STARTUP FAILURE, not a fallback. A server
@@ -203,7 +162,7 @@ final class ProductionRuntimeTests: XCTestCase {
     func testAnAllowedDecisionIsRecordedBeforeTheHandlerRuns() async throws {
         let recorder = RecordingAuditSpy()
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
-        var runtime = AuthorizationRuntime.unixSocket(
+        let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             grants: FixedGrantSupply(grants: [Self.clipboardGrant]),
             isConsoleReachable: false,
@@ -211,7 +170,6 @@ final class ProductionRuntimeTests: XCTestCase {
             audit: recorder,
             auditRequired: true,
         )
-        runtime.consent = UnavailableConsentBroker()
         let interceptor = AuthorizationInterceptor(runtime: runtime)
 
         let context = try await Self.context(method: "GetClipboard")
@@ -242,14 +200,13 @@ final class ProductionRuntimeTests: XCTestCase {
     func testARefusedDecisionIsRecordedAndNoHandlerRuns() async throws {
         let recorder = RecordingAuditSpy()
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
-        var runtime = AuthorizationRuntime.unixSocket(
+        let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             isConsoleReachable: false,
             peerEvidence: .fixed(Self.thisProcess),
             audit: recorder,
             auditRequired: true,
         )
-        runtime.consent = UnavailableConsentBroker()
         let interceptor = AuthorizationInterceptor(runtime: runtime)
         let entered = Counter()
         let context = try await Self.context(method: "ExecuteShellCommand")
@@ -276,14 +233,15 @@ final class ProductionRuntimeTests: XCTestCase {
     func testAnUnrecordableDecisionIsRefusedWhenTheRecordIsRequired() async throws {
         let recorder = RecordingAuditSpy()
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
-        var runtime = AuthorizationRuntime.unixSocket(
+        // The operator is reachable but there is nobody to ask: this runtime's consent is the
+        // default nil, which is the state the server is in until the host installs one.
+        let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
             audit: FailingAuditSpy(),
             auditRequired: true,
         )
-        runtime.consent = UnavailableConsentBroker()
         let interceptor = AuthorizationInterceptor(runtime: runtime)
         let context = try await Self.context(method: "ValidateScript")
         do {
@@ -308,12 +266,11 @@ final class ProductionRuntimeTests: XCTestCase {
     func testARuntimeWithoutARecorderIsUnaffectedUnlessTheRecordIsRequired() async throws {
         let recorder = RecordingAuditSpy()
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
-        var runtime = AuthorizationRuntime.unixSocket(
+        let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
-        runtime.consent = UnavailableConsentBroker()
         let interceptor = AuthorizationInterceptor(runtime: runtime)
         let context = try await Self.context(method: "ValidateScript")
         do {

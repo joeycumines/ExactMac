@@ -36,22 +36,12 @@ private func setServerProcessUmask() -> mode_t {
 private func performGracefulShutdown(
     listenerFactory: PeerIdentifyingListenerFactory?,
     serviceLifetime: ServiceLifetime,
-    consoleEndpoint: ConsoleServerEndpoint?,
-    consoleEndpointTask: Task<Void, Never>?,
 ) async throws {
     logger.info("Initiating graceful shutdown...")
 
     await serviceLifetime.shutdown()
     logger.info("Composition-owned service work drained")
 
-    // BEFORE the listener claim, so a console that is still attached cannot be told the
-    // channel has gone while the socket it is answering on is still up. The accept loop is
-    // cancelled first, because `stop()` closes the descriptor the loop is accepting on and
-    // a loop that is still running would otherwise spin against a closed one.
-    consoleEndpointTask?.cancel()
-    if let consoleEndpoint {
-        consoleEndpoint.stop()
-    }
     if let listenerFactory {
         try listenerFactory.releaseClaim()
         logger.info("Released the Unix socket claim: \(listenerFactory.socketPath, privacy: .private)")
@@ -132,14 +122,18 @@ private func performGracefulShutdown(
 /// and TCP variants cannot share one binding — and duplicating the whole lifecycle to
 /// accommodate that would put two copies of the shutdown ordering on this file. The
 /// transport is therefore chosen by `main()` before anything is built.
+/// NOT `public`, and not by an oversight. A public function may not name an internal type in
+/// its signature, and three of the parameter types are internal declarations that live in
+/// `Authorization/`: `AuthorizationRuntime`, `PeerIdentifyingListenerFactory`, and
+/// `ConsoleServerEndpoint`. Publishing this function means publishing those three, and
+/// `Authorization/` is being restructured in parallel. `main()` above is the whole public
+/// surface a host needs today, and it has no such parameter to expose.
 @MainActor
 func serve(
     config _: ServerConfig,
     transport: some ServerTransport,
     authorizationRuntime: AuthorizationRuntime,
     listenerFactory: PeerIdentifyingListenerFactory?,
-    consoleEndpoint: ConsoleServerEndpoint? = nil,
-    consoleEndpointTask: Task<Void, Never>? = nil,
 ) async throws {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 1: NSApplication.shared
@@ -302,8 +296,6 @@ func serve(
         try await performGracefulShutdown(
             listenerFactory: listenerFactory,
             serviceLifetime: composition.serviceLifetime,
-            consoleEndpoint: consoleEndpoint,
-            consoleEndpointTask: consoleEndpointTask,
         )
     } catch {
         cleanupError = error
@@ -342,7 +334,7 @@ func serve(
 /// descriptor handoff. launchd still supervises the process through the LaunchAgent; the
 /// node's permissions are established by `UnixSocketNode` around the bind.
 @MainActor
-func main() async throws {
+public func main() async throws {
     // Set the owner-only umask before AppKit, Vision, CoreImage, or Metal can
     // create cache files and directories. Directories must retain owner execute
     // permission for framework cache trees to be traversable.
@@ -374,21 +366,23 @@ func main() async throws {
         logger.info("State directory: \(ExactMacRuntimePaths.stateDirectory(), privacy: .private)")
         logger.info("Decision audit: \(runtime.auditPath, privacy: .private)")
         logger.info("Grant store: \(runtime.grantStorePath, privacy: .private)")
-        if let consoleSocketPath = runtime.consoleSocketPath {
-            logger.info("Console channel: \(consoleSocketPath, privacy: .private)")
-        } else {
+        // NO OPERATOR INTERFACE, so every consent-requiring capability denies. `main()` is the
+        // standalone entry point and nothing installs a consent handler behind it; a host that
+        // wants one supplies it through the public API, which `main()` does not take because
+        // this is the entry point for running the server on its own. The warning says what that
+        // means rather than only that a socket is missing.
+        if runtime.authorizationRuntime.consent == nil {
             logger.warning(
-                "No console socket is configured, so the server never enters the consent path and every consent-requiring capability is denied. That is the safe answer and it is also a service that can do nothing.",
+                "No operator interface is installed, so the server never enters the consent path and every consent-requiring capability is denied. That is the safe answer and it is also a service that cannot do anything.",
             )
         }
+
 
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
             authorizationRuntime: runtime.authorizationRuntime,
             listenerFactory: listener,
-            consoleEndpoint: runtime.consoleEndpoint,
-            consoleEndpointTask: runtime.consoleEndpointTask,
         )
         return
     }
@@ -406,17 +400,4 @@ func main() async throws {
         authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
         listenerFactory: nil,
     )
-}
-
-// A STARTUP FAILURE IS A CLEAN ERROR, NOT A TRAP. `try await main()` at top level turns any
-// throw into a Swift runtime error, which prints a stack-ish "Fatal error: Error raised at
-// top level" to stderr and aborts. The most likely startup failure in this system is a
-// pathname another server already holds, and an operator who hits it deserves the sentence
-// the server actually has — "is claimed by a running server; refusing to take the pathname
-// over" — rather than a trap that hides it behind a transport error.
-do {
-    try await main()
-} catch {
-    logger.error("ExactMacServer failed to start: \(String(describing: error), privacy: .public)")
-    Foundation.exit(1)
 }

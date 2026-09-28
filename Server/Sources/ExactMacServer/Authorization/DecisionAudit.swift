@@ -1,6 +1,51 @@
+import CommonCrypto
 import Darwin
 import Foundation
 import os
+
+// MARK: - What was resolved, and how it was hashed
+
+/// Who asked, resolved at decision time, in the shape the record stores.
+///
+/// IT LIVES HERE BECAUSE THE AUDIT IS WHAT USES IT. It was a wire type — the shape the
+/// console channel carried between two processes — and the channel is gone, so what is left
+/// is the record's own description of a caller: the fields an operator would need to judge
+/// this decision afterwards. It is `Codable` because the chain is JSON on disk, and that is
+/// the only transport it has now.
+struct WireIdentity: Sendable, Equatable, Codable {
+    var processIdentifier: Int32
+    var effectiveUserIdentifier: UInt32
+    var executablePath: String
+    var bundleIdentifier: String?
+    var signature: String
+    var designatedRequirement: String?
+    var isFullyResolved: Bool
+    /// Nearest ancestor first, so the record can be read as the tree the operator saw rather
+    /// than as a single leaf.
+    var ancestors: [WireAncestor]
+    var isAncestryTruncated: Bool
+}
+
+struct WireAncestor: Sendable, Equatable, Codable {
+    var processIdentifier: Int32
+    var executablePath: String
+    var bundleIdentifier: String?
+    var signature: String
+    var isFullyResolved: Bool
+}
+
+enum SHA256HexDigest {
+    /// CryptoKit is not a dependency of this package and the server compiles with
+    /// `-warnings-as-errors` under `-warn-concurrency`, so the digest is computed with
+    /// CommonCrypto, which the platform already links.
+    static func hexDigest(of data: Data) -> String {
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { raw in
+            _ = CC_SHA256(raw.baseAddress, CC_LONG(data.count), &digest)
+        }
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 /// One decision, recorded.
 ///

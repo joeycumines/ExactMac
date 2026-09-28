@@ -16,10 +16,10 @@ import Foundation
 /// Grants expire against this and never against the wall clock, because a wall-clock
 /// change — an NTP correction, a manual change, a timezone bug — must not be able to
 /// extend a grant the operator already let expire. Every value that expires carries one.
-struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
+public struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
     let nanoseconds: UInt64
 
-    static func < (lhs: Self, rhs: Self) -> Bool {
+    public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.nanoseconds < rhs.nanoseconds
     }
 
@@ -66,7 +66,7 @@ struct MonotonicInstant: Sendable, Equatable, Hashable, Comparable {
 /// `ExactMacService.swift` stopped compiling with "type 'Duration' has no member
 /// 'milliseconds'". A type declared at module scope is visible to every file in it, and
 /// the fix belongs here rather than in the twenty files that use the stdlib type.
-enum GrantDuration: Sendable, Equatable, Hashable {
+public enum GrantDuration: Sendable, Equatable, Hashable {
     case once
     case monotonicSeconds(Int)
 
@@ -100,7 +100,7 @@ enum GrantDuration: Sendable, Equatable, Hashable {
 /// engine closes every request over it, and the prompt states what a grant silently
 /// includes — because information the operator is entitled to before agreeing cannot be
 /// buried.
-enum Capability: String, Sendable, CaseIterable, Hashable {
+public enum Capability: String, Sendable, CaseIterable, Hashable {
     case scriptExecute = "script.execute"
     case macroExecute = "macro.execute"
     case accessibilityTraverse = "observation.ax"
@@ -228,7 +228,7 @@ enum Capability: String, Sendable, CaseIterable, Hashable {
 /// Which application a request lands on. Consequence is overwhelmingly a function of
 /// WHERE an action lands rather than of what shape it has, which is why this is the
 /// primary axis of a grant and not a filter applied afterwards.
-enum TargetApplication: Sendable, Equatable, Hashable {
+public enum TargetApplication: Sendable, Equatable, Hashable {
     case any
     case bundleIdentifier(String)
     case processIdentifier(Int32)
@@ -310,7 +310,7 @@ enum TargetApplication: Sendable, Equatable, Hashable {
     }
 }
 
-enum TargetWindow: Sendable, Equatable, Hashable {
+public enum TargetWindow: Sendable, Equatable, Hashable {
     case any
     case identifier(String)
 
@@ -333,7 +333,7 @@ enum TargetWindow: Sendable, Equatable, Hashable {
 
 /// What a request is allowed to touch, derived from the request bytes rather than
 /// accepted from anything that displays it.
-struct AuthorizationScope: Sendable, Equatable, Hashable {
+public struct AuthorizationScope: Sendable, Equatable, Hashable {
     var application: TargetApplication
     var window: TargetWindow
     /// A transaction declares how many operations it will perform, and exceeding that
@@ -384,7 +384,7 @@ struct AuthorizationScope: Sendable, Equatable, Hashable {
 
 // MARK: - Code identity
 
-enum SignatureState: String, Sendable, Equatable, Hashable, CaseIterable {
+public enum SignatureState: String, Sendable, Equatable, Hashable, CaseIterable {
     case signedAndValid
     case signedUnnotarized
     case adHoc
@@ -411,7 +411,7 @@ enum SignatureState: String, Sendable, Equatable, Hashable, CaseIterable {
 }
 
 /// What a grant binds to: never a pid, which changes every run.
-struct CodeIdentity: Sendable, Equatable, Hashable {
+public struct CodeIdentity: Sendable, Equatable, Hashable {
     var executablePath: String
     var bundleIdentifier: String?
     var designatedRequirement: String?
@@ -431,7 +431,7 @@ struct CodeIdentity: Sendable, Equatable, Hashable {
     }
 }
 
-struct CodeBinding: Sendable, Equatable, Hashable {
+public struct CodeBinding: Sendable, Equatable, Hashable {
     var executablePath: String
     var bundleIdentifier: String?
     /// An empty requirement is not a requirement. It is rejected at the boundary rather
@@ -471,7 +471,7 @@ struct CodeBinding: Sendable, Equatable, Hashable {
 /// process the operator has in mind: the agent is the peer's PARENT. An identity that names
 /// only the peer tells the operator that a binary asked, which is not the decision they are
 /// making.
-struct ResolvedProcess: Sendable, Equatable, Hashable {
+public struct ResolvedProcess: Sendable, Equatable, Hashable {
     var processIdentifier: Int32
     var parentProcessIdentifier: Int32?
     var code: CodeIdentity
@@ -481,7 +481,7 @@ struct ResolvedProcess: Sendable, Equatable, Hashable {
 
 /// The caller as the system resolved it, which is evidence for the operator's judgement
 /// and not an authentication verdict. The boundary was crossed at socket access.
-struct CallerIdentity: Sendable, Equatable, Hashable {
+public struct CallerIdentity: Sendable, Equatable, Hashable {
     var processIdentifier: Int32
     var effectiveUserIdentifier: uid_t
     var parentProcessIdentifier: Int32?
@@ -500,14 +500,14 @@ struct CallerIdentity: Sendable, Equatable, Hashable {
 
 // MARK: - Requests, grants, envelopes
 
-struct AuthorizationRequestID: Sendable, Equatable, Hashable {
+public struct AuthorizationRequestID: Sendable, Equatable, Hashable {
     let rawValue: String
 }
 
 /// The request, as derived from the request bytes. Nothing here is accepted from a
 /// client, a console or a prompt: the derivation layer builds it, and the engine treats
 /// it as fact precisely because it was never displayed to anyone who could alter it.
-struct AuthorizationRequest: Sendable, Equatable {
+public struct AuthorizationRequest: Sendable, Equatable {
     var id: AuthorizationRequestID
     var rpcName: String
     var capability: Capability
@@ -525,7 +525,7 @@ struct AuthorizationRequest: Sendable, Equatable {
     var origin: RequestOrigin
 }
 
-enum RequestOrigin: Sendable, Equatable {
+public enum RequestOrigin: Sendable, Equatable {
     /// A direct gRPC caller over the Unix socket.
     case directSocket
     /// The Go MCP layer, which forwards the real caller's identity.
@@ -534,7 +534,7 @@ enum RequestOrigin: Sendable, Equatable {
 }
 
 /// A permission that already exists. Its subject is CODE IDENTITY and never a pid.
-struct Grant: Sendable, Equatable, Hashable {
+public struct Grant: Sendable, Equatable, Hashable {
     var id: String
     var capability: Capability
     var scope: AuthorizationScope
@@ -588,7 +588,7 @@ struct Grant: Sendable, Equatable, Hashable {
     }
 }
 
-enum GrantOrigin: Sendable, Equatable, Hashable {
+public enum GrantOrigin: Sendable, Equatable, Hashable {
     case prompt(decidedAt: MonotonicInstant)
     case envelope(id: String)
 }
@@ -597,7 +597,7 @@ enum GrantOrigin: Sendable, Equatable, Hashable {
 /// unit. Envelopes are how an agent pre-authorizes a long session, so they are a
 /// first-class object rather than a bundle of grants: revoking one must revoke all of
 /// it immediately, and there must be no way to widen one after the fact.
-struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
+public struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
     var id: String
     var grants: [Grant]
     var declaredDuration: GrantDuration
@@ -648,7 +648,7 @@ public enum Posture: Sendable, Equatable, Hashable, CaseIterable {
 /// an `AuthorizationEnvironment` in Security.framework and the collision only surfaced
 /// in the test target — the server target happens not to import that header. A name that
 /// compiles in one target and not another is worse than a long name.
-struct AuthorizationContext: Sendable, Equatable {
+public struct AuthorizationContext: Sendable, Equatable {
     enum Transport: Sendable, Equatable {
         /// The supported production mode. Socket access to a 0600 launchd pathname is
         /// the authentication, and the owning user is the authenticating principal.
@@ -704,7 +704,7 @@ struct AuthorizationContext: Sendable, Equatable {
 
 // MARK: - Decisions
 
-enum RiskClass: String, Sendable, Equatable, Comparable, CaseIterable {
+public enum RiskClass: String, Sendable, Equatable, Comparable, CaseIterable {
     case routine
     case elevated
     case high
@@ -717,14 +717,14 @@ enum RiskClass: String, Sendable, Equatable, Comparable, CaseIterable {
         }
     }
 
-    static func < (lhs: Self, rhs: Self) -> Bool {
+    public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.rank < rhs.rank
     }
 }
 
 /// The product the risk model is built from. Each factor is normalised to 0...1 and the
 /// product is the radius, so raising any one of them raises the whole.
-struct BlastRadius: Sendable, Equatable, Hashable {
+public struct BlastRadius: Sendable, Equatable, Hashable {
     var capability: Double
     var breadth: Double
     var duration: Double
@@ -770,7 +770,7 @@ struct BlastRadius: Sendable, Equatable, Hashable {
     }
 }
 
-enum BiometricRequirement: Sendable, Hashable {
+public enum BiometricRequirement: Sendable, Hashable {
     case notRequired
     /// Carries why, because the prompt names the single decision the ceremony
     /// authorizes and an unexplained ceremony is not consent to anything in particular.
@@ -791,7 +791,7 @@ enum BiometricRequirement: Sendable, Hashable {
     }
 }
 
-enum DecisionBasis: Sendable, Equatable {
+public enum DecisionBasis: Sendable, Equatable {
     /// No consent is required for this capability at all.
     case noConsentRequired
     case grant(id: String)
@@ -801,7 +801,7 @@ enum DecisionBasis: Sendable, Equatable {
     case denied(DenialReason)
 }
 
-enum DenialReason: String, Sendable, Equatable, CaseIterable {
+public enum DenialReason: String, Sendable, Equatable, CaseIterable {
     case capabilityRequiresConsent
     case reducedUnauthenticatedPosture
     case unauthenticatedPeer
@@ -817,7 +817,7 @@ enum DenialReason: String, Sendable, Equatable, CaseIterable {
 
 /// One thing the operator can say, carrying its own breadth and duration on its face.
 /// An operator cannot compare options whose scope is hidden.
-struct OfferedDecision: Sendable, Hashable {
+public struct OfferedDecision: Sendable, Hashable {
     enum Kind: String, Sendable, Equatable, CaseIterable {
         case deny
         case allowOnce
@@ -847,7 +847,7 @@ struct OfferedDecision: Sendable, Hashable {
     var isPrimary: Bool
 }
 
-struct AuthorizationDecision: Sendable, Equatable {
+public struct AuthorizationDecision: Sendable, Equatable {
     enum Outcome: Sendable, Equatable {
         case allow
         case deny

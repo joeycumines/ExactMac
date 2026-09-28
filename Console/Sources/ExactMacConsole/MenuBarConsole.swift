@@ -71,6 +71,12 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
     }
 
     /// The word, which is what the design delegates the five-way distinction to.
+    ///
+    /// `.unreachable` USED TO SAY "No console", which was true of the two-process deployment
+    /// and is false now. The app IS the console: there is one process, and what is missing
+    /// is a window to ask through. An operator reading "No console" while ExactMac is in
+    /// their menu bar has no way to reconcile the two, and the honest word names the thing
+    /// that is actually absent.
     var pillLabel: String {
         switch self {
         case .running: "Running"
@@ -78,7 +84,7 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
         case .degraded: "Degraded"
         case .reduced: "Reduced"
         case .stopped: "Stopped"
-        case .unreachable: "No console"
+        case .unreachable: "Cannot ask"
         }
     }
 
@@ -111,7 +117,7 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
     var transport: String {
         switch self {
         case .running, .pending: "Unix socket · owner-only · no network listener"
-        case .unreachable: "Unix socket · owner-only · the console is not running"
+        case .unreachable: "Unix socket · owner-only · no window to ask through"
         case .degraded: "Unix socket · owner-only · the service is not answering"
         case .reduced: "TCP listener · no owning user to authenticate"
         case .stopped: "Unix socket · owner-only · disabled"

@@ -11,9 +11,21 @@ let package = Package(
         .macOS(.v15),
     ],
     products: [
-        .executable(
+        // The server is a LIBRARY so the GUI app in `Console/` can host the exact same server
+        // code in-process and present consent itself. The product name is deliberately
+        // `ExactMacServer` so a dependent package declares `.product(name: "ExactMacServer",
+        // package: "Server")` and nothing else in the API is renamed.
+        .library(
             name: "ExactMacServer",
             targets: ["ExactMacServer"],
+        ),
+        // The standalone headless binary, for running the server without a GUI. The product
+        // name is the executable's name, so it cannot also be `ExactMacServer` — that name is
+        // the library product above, and two products in one package may not share a name.
+        // This is the only place the two variants disagree, and it is a name.
+        .executable(
+            name: "exactmac-server",
+            targets: ["ExactMacServerHeadless"],
         ),
     ],
     dependencies: [
@@ -45,7 +57,11 @@ let package = Package(
                 .unsafeFlags(["-warnings-as-errors"]),
             ],
         ),
-        .executableTarget(
+        // A LIBRARY, not an executable. This target is entered by two hosts — the GUI app in
+        // `Console/` and the headless `ExactMacServerHeadless` below — so it must not own a
+        // top-level entry, and a file named `main.swift` is illegal here for the same reason.
+        // The target name is unchanged because 43 test files do `@testable import ExactMacServer`.
+        .target(
             name: "ExactMacServer",
             dependencies: [
                 .product(name: "GRPCCore", package: "grpc-swift-2"),
@@ -60,6 +76,20 @@ let package = Package(
             resources: [
                 .copy("DescriptorSets"),
             ],
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-warn-concurrency"]),
+                .unsafeFlags(["-warnings-as-errors"]),
+            ],
+        ),
+        // The headless entry point. Deliberately thin: it translates a startup throw into a
+        // clean exit rather than a top-level trap, and then calls the library's `main()`.
+        .executableTarget(
+            name: "ExactMacServerHeadless",
+            dependencies: [
+                "ExactMacServer",
+                "ExactMac",
+            ],
+            path: "Sources/ExactMacServerHeadless",
             swiftSettings: [
                 .unsafeFlags(["-Xfrontend", "-warn-concurrency"]),
                 .unsafeFlags(["-warnings-as-errors"]),
