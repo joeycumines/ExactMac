@@ -5,7 +5,7 @@ go 1.27.1
 replace github.com/joeycumines/ExactMac => ../
 
 require (
-	cloud.google.com/go/longrunning v1.2.0
+	cloud.google.com/go/longrunning v1.3.0
 	github.com/joeycumines/ExactMac v0.0.0-20260725215237-e90e731995ba
 	github.com/rivo/uniseg v0.4.7
 	google.golang.org/grpc v1.84.0
