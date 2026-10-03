@@ -3,7 +3,7 @@ module github.com/joeycumines/ExactMac
 go 1.27.1
 
 require (
-	cloud.google.com/go/longrunning v1.2.0
+	cloud.google.com/go/longrunning v1.3.0
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.48.0
@@ -17,6 +17,7 @@ require (
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/KimMachineGun/automemlimit v1.0.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dkorunic/betteralign v0.15.1 // indirect
 	github.com/google/renameio/v2 v2.0.2 // indirect
 	github.com/grailbio/base v0.0.11 // indirect
