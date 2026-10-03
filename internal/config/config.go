@@ -29,6 +29,34 @@ const (
 	defaultMaxConcurrentRequestsPerClient = 256
 )
 
+// DefaultRequestTimeoutSeconds is the gRPC deadline the client applies to a request.
+//
+// IT IS DERIVED FROM THE SERVER'S CONSENT WAIT, and the relationship is the whole point.
+// A consent-requiring call blocks until the operator answers or the server's own bound
+// expires — ServerConfig.defaultConsentTimeoutSeconds, 90 — and the client deadline has to
+// be LONGER than that, or the client gives up while the operator is still looking at the
+// prompt. It was 30. 30 < 90 means EVERY consent-requiring call failed with
+// DeadlineExceeded, always, in the least useful direction: the person was asked, was
+// deciding, and had already been told the request failed. They then answered a request that
+// had already been refused, which is precisely the confusion the consent flow exists to
+// prevent.
+//
+// The extra 45s is headroom for showing the prompt and the operator's own deliberation, and
+// for the reply to travel back before the deadline lands. It is a floor on the CLIENT's
+// patience, deliberately: the server's bound is what actually caps the wait, and an operator
+// who walks away is released by that bound rather than by this number.
+const DefaultRequestTimeoutSeconds = 135
+
+// ServerConsentTimeoutSeconds is the server's own consent bound, restated here so the
+// relationship above can be asserted rather than described.
+//
+// THIS IS A COPY AND IT WILL DRIFT, which is the defect this constant exists to prevent, so
+// the test below asserts the inequality and fails the build if the two ever agree in the
+// wrong order. The authoritative value lives in Swift; nothing at this end of the wire can
+// read it, and a client that asked the server would need a round trip on the path that is
+// already too slow.
+const ServerConsentTimeoutSeconds = 90
+
 // Config holds the configuration for the MCP tool, loaded from environment variables.
 // All fields have sensible defaults via the Load function.
 type Config struct {
@@ -85,7 +113,7 @@ type Config struct {
 // (selected by the CLI subcommand, not by environment). All other fields have
 // sensible defaults. Returns an error if validation fails.
 func Load(transport TransportType) (*Config, error) {
-	requestTimeout, err := getEnvAsInt("EXACTMAC_REQUEST_TIMEOUT", 30)
+	requestTimeout, err := getEnvAsInt("EXACTMAC_REQUEST_TIMEOUT", DefaultRequestTimeoutSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +161,7 @@ func Load(transport TransportType) (*Config, error) {
 
 	cfg := &Config{
 		ServerAddr:                     getEnv("EXACTMAC_SERVER_ADDR", "localhost:50051"),
-		ServerSocketPath:               os.Getenv("EXACTMAC_SERVER_SOCKET_PATH"),
+		ServerSocketPath:               defaultServerSocketPath(),
 		ServerTLS:                      serverTLS,
 		ServerCertFile:                 os.Getenv("EXACTMAC_SERVER_CERT_FILE"),
 		RequestTimeout:                 requestTimeout,
@@ -176,6 +204,25 @@ func (c *Config) validate() error {
 	}
 	if c.RequestTimeout <= 0 {
 		return fmt.Errorf("EXACTMAC_REQUEST_TIMEOUT must be positive")
+	}
+	// A deadline SHORTER THAN THE SERVER'S CONSENT WAIT IS REFUSED, because it cannot work:
+	// the server holds the request until the operator answers or its own bound expires, and a
+	// client that has already given up gets a DeadlineExceeded instead of an answer. It is
+	// checked rather than documented because the failure it prevents is total and silent —
+	// every consent-requiring call fails, and nothing in the error names the cause.
+	//
+	// The remedy the error names is the real one and it is on the SERVER, which is where the
+	// wait actually lives: an operator who genuinely wants a shorter ceiling lowers the
+	// consent bound (EXACTMAC_CONSENT_TIMEOUT_SECONDS) and this value with it. Lowering only
+	// this side would reintroduce exactly the mismatch being refused.
+	if c.RequestTimeout < ServerConsentTimeoutSeconds {
+		return fmt.Errorf(
+			"EXACTMAC_REQUEST_TIMEOUT is %d seconds, shorter than the server's %d-second consent "+
+				"wait, so every consent-requiring call would fail before the operator could answer; "+
+				"set EXACTMAC_CONSENT_TIMEOUT_SECONDS on the server to match, or raise this value",
+			c.RequestTimeout,
+			ServerConsentTimeoutSeconds,
+		)
 	}
 	const maximumDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
 	if int64(c.RequestTimeout) > maximumDurationSeconds {
@@ -261,6 +308,37 @@ func validateCORSOrigin(origin string) error {
 		return fmt.Errorf("MCP_CORS_ORIGIN must be an exact HTTP or HTTPS origin without credentials, path, query, or fragment")
 	}
 	return nil
+}
+
+// defaultServerSocketPath is where the console app binds, and it is the DEFAULT for the
+// client rather than an unset field.
+//
+// An unset socket path is not a neutral default: it selects TCP, and a TCP listener has no
+// authenticating principal, so every consent-requiring capability is denied BY DESIGN. The
+// failure mode it produces is the worst kind available — a total, uniform, silent
+// authorization denial that is indistinguishable from an operator having declined everything,
+// with the actual cause (the wrong transport) appearing nowhere. A caller who installed the
+// console and spawned this binary with no environment at all would get exactly that.
+//
+// The console app already applies this same default to itself before it starts its server
+// (Console/Sources/ExactMacConsole/main.swift), so the two now agree on one pathname and
+// cannot drift into disagreeing about where the product lives.
+//
+// An operator who WANTS the TCP posture sets EXACTMAC_SERVER_ADDR explicitly, which is a
+// deliberate act with a documented consequence rather than the accidental result of having
+// no variables set.
+func defaultServerSocketPath() string {
+	if path := os.Getenv("EXACTMAC_SERVER_SOCKET_PATH"); path != "" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		// WITHOUT A HOME there is no sensible default and guessing one would be worse than
+		// falling through to TCP, whose denials at least state their posture. Returning ""
+		// leaves the existing TCP branch in charge rather than inventing a path.
+		return ""
+	}
+	return filepath.Join(home, "Library", "Caches", "exactmac.sock")
 }
 
 func getEnv(key, defaultValue string) string {

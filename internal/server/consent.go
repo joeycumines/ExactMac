@@ -20,7 +20,24 @@ import (
 // request being authorized rather than a claim about it, and the design's whole safety
 // argument for the prompt rests on that distinction. Metadata also means adding the reason
 // does not change any request message, so it cannot change what a grant is scoped to.
-const AgentReasonMetadataKey = "exactmac-agent-reason"
+// The key is suffixed "-bin" AND IT MUST STAY THAT WAY, because a plain metadata value is
+// restricted to printable ASCII by gRPC itself.
+//
+// `ValidatePair` in google.golang.org/grpc@v1.79.3/internal/metadata/metadata.go requires
+// every byte of a non-"-bin" value to be in [0x20-0x7E] and returns early WITHOUT validating
+// the value when the key ends in "-bin". The check runs in the client before the request is
+// written, so a plain key does not carry this text imperfectly — it REJECTS the call outright,
+// reporting `Internal - header key "..." contains value with non-printable ASCII characters`.
+// An em-dash, a curly quote, an accent, an emoji or a CJK character is enough, and the error
+// names an internal server fault that did not happen and tells the agent nothing actionable.
+//
+// The "-bin" suffix makes gRPC treat the value as BINARY and base64-encode it on the wire
+// (internal/transport/http_util.go:140 encodeMetadataHeader), so the reason crosses intact
+// and the Swift server reads it back through `Metadata[binaryValues:]`, which decodes the
+// base64 for us. The alternative — stripping non-ASCII before sending — is worse than a
+// crash: it would put text in the operator's prompt that the agent never wrote, and this
+// reason is displayed precisely so the operator can judge the agent's own words.
+const AgentReasonMetadataKey = "exactmac-agent-reason-bin"
 
 // OriginMetadataKey announces that a request arrived through the Go MCP layer.
 //
@@ -37,6 +54,14 @@ const OriginMetadataKey = "exactmac-origin"
 // scroll region, and an unbounded string is a way to push the operator's actual decision
 // controls off the bottom of the window. 500 characters is roughly four sentences, which is
 // more than a reason needs and less than a payload.
+//
+// The unit is CHARACTERS and not bytes, deliberately. It was bytes before, and a byte bound
+// is a latent corruption: cutting a multi-byte character at the limit leaves an incomplete
+// UTF-8 sequence, which is not merely ugly — once the value rides on a "-bin" key it would
+// base64-decode to a replacement character, and the operator would read a mangled reason as
+// the agent's own words. That is a silent rewrite of the operator's evidence, so the bound is
+// applied on a rune boundary and the tool schema's maxLength means the same thing it means
+// to a client.
 const MaxAgentReasonLength = 500
 
 // agentReasonSchema is the property every tool carries.
@@ -117,8 +142,11 @@ func agentReasonFromCall(call *ToolCall) string {
 	if trimmed == "" {
 		return ""
 	}
-	if len(trimmed) > MaxAgentReasonLength {
-		trimmed = trimmed[:MaxAgentReasonLength]
+	// THE BOUND IS IN CHARACTERS, so it counts and cuts on a rune boundary. A byte slice
+	// here would leave an incomplete UTF-8 sequence at the end of a reason written in any
+	// language that is not ASCII.
+	if runes := []rune(trimmed); len(runes) > MaxAgentReasonLength {
+		trimmed = string(runes[:MaxAgentReasonLength])
 	}
 	return trimmed
 }

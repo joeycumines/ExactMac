@@ -103,6 +103,16 @@ struct AuditEntry: Codable, Equatable, Sendable {
     var biometricObtained: Bool
     /// What the operator typed back, which is the only place their reasoning exists.
     var operatorNote: String?
+    /// WHY the request was refused, when it was refused rather than allowed.
+    ///
+    /// IT IS SEPARATE FROM `basis` because the two answer different questions and only
+    /// together make the row readable. `basis` states what the engine decided — usually
+    /// `promptRequired`, meaning a person was asked and the request would otherwise have been
+    /// permitted. That half alone HIDES the failure: a row reading `promptRequired` looks
+    /// like a question was put, and says nothing about whether anyone answered it. This field
+    /// is what lets the log be asked what it refused, which is the question an operator has
+    /// when something did not work.
+    var refusalReason: String?
 
     /// The canonical bytes the hash is taken over.
     ///
@@ -303,6 +313,7 @@ final class DecisionAudit: @unchecked Sendable {
         // the entry is written. There is deliberately no way to add it later: a hash-chained
         // record whose entries can be edited after the fact is not a chain.
         grantExpiresAtNanoseconds: UInt64? = nil,
+        refusalReason: DenialReason? = nil,
     ) -> AuditEntry? {
         lock.withLock { () -> AuditEntry? in
             let previous = lastHash
@@ -347,6 +358,7 @@ final class DecisionAudit: @unchecked Sendable {
                 biometricRequired: decision.biometric.reason != nil,
                 biometricObtained: biometricObtained,
                 operatorNote: operatorNote,
+                refusalReason: refusalReason?.rawValue,
             )
             switch decision.basis {
             case let .grant(identifier):

@@ -1419,15 +1419,15 @@ enum AuthorizationRequestDeriver {
         guard let action = facts.nested("action") ?? facts.nested("input")?.nested("action") else {
             return parts.isEmpty ? "an input with no action" : parts.joined(separator: ", ")
         }
-        /// Coordinates are named as Global Display Coordinates (top-left origin), because
-        /// that is the space these numbers live in and an operator reading "x 420" cannot
-        /// place it on their desk without being told.
-        ///
-        /// A MISSING COMPONENT IS ZERO, not an absent point. `exactmac.type.Point` declares
-        /// `double x = 1` with implicit presence, so a caller clicking at x 1e30, y 0 puts
-        /// nothing on the wire for y — and requiring both meant the whole position was
-        /// dropped, which is how a click summarized to "an input with no described action"
-        /// and read as a malformed request rather than a click at the top edge.
+        // Coordinates are named as Global Display Coordinates (top-left origin), because
+        // that is the space these numbers live in and an operator reading "x 420" cannot
+        // place it on their desk without being told.
+        //
+        // A MISSING COMPONENT IS ZERO, not an absent point. `exactmac.type.Point` declares
+        // `double x = 1` with implicit presence, so a caller clicking at x 1e30, y 0 puts
+        // nothing on the wire for y — and requiring both meant the whole position was
+        // dropped, which is how a click summarized to "an input with no described action"
+        // and read as a malformed request rather than a click at the top edge.
         func position(_ point: RequestFacts?, _ label: String) {
             guard let point, point.number("x") != nil || point.number("y") != nil else { return }
             let x = point.number("x").map(formatted) ?? "0"
@@ -1435,9 +1435,9 @@ enum AuthorizationRequestDeriver {
             parts.append("\(label) x \(x), y \(y) in Global Display Coordinates")
         }
 
-        /// A repeated modifier, named. Read through the GENERATED enum so a new value
-        /// cannot be missing from the prompt. The generated case for the zero value spells
-        /// its name `unspecified`, which is a real value here rather than a parse failure.
+        // A repeated modifier, named. Read through the GENERATED enum so a new value
+        // cannot be missing from the prompt. The generated case for the zero value spells
+        // its name `unspecified`, which is a real value here rather than a parse failure.
         func modifiers(_ facts: RequestFacts) {
             let held = facts.numbers("modifiers")
                 .compactMap { enumName($0, modifierNames) }

@@ -29,8 +29,8 @@ import (
 
 // CheckHealth asks the server whether it is serving, over the configured socket.
 //
-// - Returns: the serving status on success. Every failure is an error, because a probe
-//   that cannot tell "not serving" from "could not ask" cannot gate an installation.
+//   - Returns: the serving status on success. Every failure is an error, because a probe
+//     that cannot tell "not serving" from "could not ask" cannot gate an installation.
 func CheckHealth(ctx context.Context, cfg *config.Config, timeout time.Duration) (string, error) {
 	if cfg.ServerSocketPath == "" {
 		return "", fmt.Errorf(

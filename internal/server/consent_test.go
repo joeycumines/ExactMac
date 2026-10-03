@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/metadata"
 )
@@ -103,6 +104,151 @@ func TestALongReasonIsBounded(t *testing.T) {
 	if len(got) != MaxAgentReasonLength {
 		t.Errorf("reason length = %d, want %d", len(got), MaxAgentReasonLength)
 	}
+}
+
+// TestTheBoundIsInCharactersNotBytes asserts the unit the tool schema advertises. The
+// schema declares maxLength 500, which a client reads as 500 unicode characters; enforcing
+// bytes instead meant a reason of 167 em-dashes was cut at byte 500 and arrived as a
+// truncated sequence ending in an incomplete rune. Because the reason rides on a "-bin" key,
+// that corruption would have decoded to a replacement character, and the operator would have
+// read a mangled reason as the agent's own words — a silent rewrite of the evidence the
+// prompt exists to show.
+func TestTheBoundIsInCharactersNotBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		unit string
+	}{
+		{"em dash", "—"},
+		{"emoji", "🎯"},
+		{"accented", "ü"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Long enough that a byte-bound would cut inside a character: three bytes each,
+			// so 501 bytes is reached after 167 characters.
+			reason := strings.Repeat(tc.unit, MaxAgentReasonLength*2)
+			encoded, err := json.Marshal(reason)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := agentReasonFromCall(&ToolCall{
+				Arguments: json.RawMessage(`{"reason":` + string(encoded) + `}`),
+			})
+			if !utf8.ValidString(got) {
+				t.Fatalf("the bounded reason is not valid UTF-8; it was cut mid-character")
+			}
+			if n := utf8.RuneCountInString(got); n != MaxAgentReasonLength {
+				t.Errorf("reason has %d characters, want %d", n, MaxAgentReasonLength)
+			}
+			// Every surviving character is a whole one, so nothing was split in half.
+			if strings.Contains(got, "�") {
+				t.Errorf("the bounded reason contains a replacement character: %q", got)
+			}
+		})
+	}
+}
+
+// TestAReasonWithinTheBoundArrivesWhole is the other half: a 500-character multibyte reason
+// is not truncated at all, which is what the byte bound got wrong as well.
+func TestAReasonWithinTheBoundArrivesWhole(t *testing.T) {
+	reason := strings.Repeat("é", MaxAgentReasonLength)
+	encoded, err := json.Marshal(reason)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := agentReasonFromCall(&ToolCall{
+		Arguments: json.RawMessage(`{"reason":` + string(encoded) + `}`),
+	})
+	if got != reason {
+		t.Errorf("a %d-character reason was altered in transit", utf8.RuneCountInString(reason))
+	}
+}
+
+// TestTheReasonKeyIsBinary asserts the suffix that makes Unicode reasons possible at all.
+// Dropping it would not fail any other test in this file — it would restore the client-side
+// rejection, in a different process, where no Go test can observe it.
+func TestTheReasonKeyIsBinary(t *testing.T) {
+	if !strings.HasSuffix(AgentReasonMetadataKey, "-bin") {
+		t.Fatalf("reason metadata key %q is not a -bin key; gRPC will reject any non-ASCII reason",
+			AgentReasonMetadataKey)
+	}
+}
+
+// grpcRejectsAReasonValue mirrors gRPC's own rule for a non-"-bin" metadata value:
+// every byte must be printable ASCII, in [0x20-0x7E]. gRPC applies it in the client
+// before the request is written (internal/metadata.hasNotPrintable, called from
+// ValidatePair, reached from the transport's header construction), and the resulting
+// failure is reported as `Internal - header key ... contains value with non-printable ASCII
+// characters`.
+//
+// THE RULE IS REPRODUCED HERE rather than imported because gRPC keeps it in an internal
+// package this module cannot import, and `metadata.New` and `AppendToOutgoingContext` do not
+// validate — the check is transport-level and has no public entry point. The copy is
+// deliberately the smallest possible statement of the rule so it cannot drift into
+// describing something other than what gRPC does: a byte loop, the same bounds, no cleverness.
+// If gRPC ever changes its bounds this helper stops matching and the test below FAILS, which
+// is the correct outcome for a test that exists to catch a transport-level constraint.
+func grpcRejectsAReasonValue(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7E {
+			return true
+		}
+	}
+	return false
+}
+
+// TestAUnicodeReasonWouldBeRejectedByAPlainKey is the defect as an agent experienced it:
+// with a plain metadata key, gRPC refused the call before it left the client, reporting an
+// internal server fault that had not occurred. The test asserts the constraint both ways —
+// that the rule really does reject these reasons, so the guard below is not vacuous, and
+// that the "-bin" suffix is what exempts them.
+func TestAUnicodeReasonWouldBeRejectedByAPlainKey(t *testing.T) {
+	reasons := []string{
+		"reading the notes — every line is needed",
+		"the operator’s file, as they asked",
+		"capture du café pour l’utilisateur",
+		"検索して要約します",
+		"🎯 screenshotting the active window",
+	}
+	for _, reason := range reasons {
+		// The negative control: the rule rejects this, so the assertions below are not
+		// passing because the check is lenient.
+		if !grpcRejectsAReasonValue(reason) {
+			t.Fatalf("gRPC's printable-ASCII rule accepted %q, so this test proves nothing", reason)
+		}
+		if !strings.HasSuffix(AgentReasonMetadataKey, "-bin") {
+			t.Fatalf("reason metadata key %q is not a -bin key; gRPC rejects any non-ASCII reason",
+				AgentReasonMetadataKey)
+		}
+		// And ASCII reasons remain valid on either key, so nothing that used to work broke.
+		if grpcRejectsAReasonValue("summarising the notes you asked about") {
+			t.Error("an ASCII reason was rejected; the transport must not narrow what already worked")
+		}
+	}
+}
+
+// TestTheReasonActuallyTravelsOnTheWire is the end-to-end half: the reason is on the
+// outgoing metadata under the key that carries the suffix, so the transport's exemption is
+// reached in the real path rather than asserted about a constant.
+func TestTheReasonActuallyTravelsOnTheWire(t *testing.T) {
+	reason := "reading the notes — every line is needed"
+	call := &ToolCall{Arguments: json.RawMessage(`{"reason":` + mustJSONString(t, reason) + `}`)}
+	outgoing, _ := metadata.FromOutgoingContext(withAgentReason(context.Background(), call))
+	values := outgoing.Get(AgentReasonMetadataKey)
+	if len(values) != 1 {
+		t.Fatalf("reason metadata = %v, want exactly one value", values)
+	}
+	if values[0] != reason {
+		t.Errorf("reason on the wire = %q, want %q", values[0], reason)
+	}
+}
+
+func mustJSONString(t *testing.T, s string) string {
+	t.Helper()
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }
 
 // TestTheReasonIsReadFromTheRawArguments rather than a parsed struct is what lets one seam

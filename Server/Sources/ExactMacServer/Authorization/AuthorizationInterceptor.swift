@@ -423,7 +423,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
                 method: context.descriptor.fullyQualifiedMethod,
                 message: first,
                 metadata: request.metadata,
-                context: context,
+                serverContext: context,
             )
         } catch let error as AuthorizationDenial {
             counters.record(error.reason)
@@ -475,11 +475,16 @@ struct AuthorizationInterceptor: ServerInterceptor {
         )
     }
 
+    /// THE SERVER CONTEXT IS NAMED `serverContext` AND NOT `context` because the body
+    /// builds a local `let context = AuthorizationContext(...)` for the policy engine, which
+    /// would otherwise shadow it — and the shadowed value is an `AuthorizationContext`, so
+    /// passing `context` to `prompt` would not compile rather than quietly doing something
+    /// wrong. Naming the two apart is the difference between a compiler error and a bug.
     private func authorize(
         method: String,
         message: any Sendable,
         metadata: Metadata,
-        context: ServerContext,
+        serverContext: ServerContext,
     ) async throws -> AuthorizationDecision {
         guard let protobuf = message as? any SwiftProtobuf.Message else {
             throw AuthorizationDenial(
@@ -506,7 +511,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
             throw AuthorizationDenial(reason: .notPermitted, capability: .localEcho)
         }
 
-        let identity = resolveIdentity(for: context)
+        let identity = resolveIdentity(for: serverContext)
         let snapshot = await runtime.grants.snapshot()
         var context = AuthorizationContext(
             transport: runtime.transport,
@@ -537,13 +542,48 @@ struct AuthorizationInterceptor: ServerInterceptor {
         case .noConsentRequired, .grant, .envelope:
             return try recorded(decision, for: request, identity: identity)
         case .promptRequired:
-            let answered = try await prompt(request: request, identity: identity, decision: decision)
-            return try recorded(
-                answered.decision,
+            // THE ISSUANCE STEP CAN STILL THROW, and it is the one thing that is allowed to:
+            // it is the store refusing, not the operator, and a store refusal is a failure of
+            // the system rather than a decision about this request. It is turned into a
+            // refusal rather than left to unwind, because an unwinding error reaches nobody
+            // but the caller — which is the same blindness the consent refusals had.
+            let outcome: ConsentOutcome
+            do {
+                outcome = try await prompt(
+                    request: request,
+                    identity: identity,
+                    decision: decision,
+                    context: serverContext,
+                )
+            } catch {
+                outcome = .refused(decision, .auditUnavailable)
+            }
+
+            // THE CONSENT-PATH REFUSAL IS RECORDED RATHER THAN THROWN PAST THE RECORDER.
+            // This branch used to `try await prompt(...)`, which THROWS on every failure
+            // path, so the throw left `authorize` before `recorded(...)` was ever reached
+            // and NOTHING was written. Every refusal that happened after the engine had
+            // decided consent was required — declined, timed out, ceremony failed, answer
+            // for the wrong request, console gone mid-prompt — was invisible in the log
+            // that exists to answer exactly that question. Measured: ten such refusals in
+            // the unified log with an audit log whose last entry was three days earlier.
+            //
+            // THE RECORDED DECISION IS THE ONE THE ENGINE REACHED, not a synthetic
+            // denial, because the useful row for an operator is "this capability needed
+            // consent" with the refusal as its annotation. Recording a fabricated
+            // `.denied` basis would erase the fact that the engine had permitted the
+            // request pending a human — which is the distinction the log exists to keep.
+            try record(
+                outcome.decision,
                 for: request,
                 identity: identity,
-                answer: answered.answer,
+                answer: outcome.answer,
+                refusal: outcome.refusal,
             )
+            if let refusal = outcome.refusal {
+                throw AuthorizationDenial(reason: refusal, capability: request.capability)
+            }
+            return outcome.decision
         case let .denied(reason):
             // A refusal is recorded too. A log that records what was permitted cannot be
             // asked what was refused, and the refusals are the half an operator reads when
@@ -570,6 +610,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         for request: AuthorizationRequest,
         identity: CallerIdentity,
         answer: ConsentAnswer? = nil,
+        refusal: DenialReason? = nil,
     ) throws {
         guard let recorder = runtime.audit else {
             if runtime.auditRequired {
@@ -586,6 +627,12 @@ struct AuthorizationInterceptor: ServerInterceptor {
             decision: decision,
             operatorNote: answer?.note,
             biometricObtained: answer?.biometricObtained ?? false,
+            // A REFUSAL REACHES THE RECORD, not just the caller. When the consent path
+            // refused, `decision` is the engine's promptRequired outcome and the basis alone
+            // would read as "asked a person", which is true and is the half that hides the
+            // failure. Carrying the reason is what makes the row answer "what was refused",
+            // which is the question an operator actually has when something did not work.
+            refusalReason: refusal,
         )
         guard written || !runtime.auditRequired else {
             throw AuthorizationDenial(
@@ -645,36 +692,47 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// forms — `isConsoleReachable` false, and a nil handler — so a process with no operator
     /// interface refuses rather than reporting reachable and then waiting out a timeout it
     /// was always going to lose.
+    ///
+    /// IT RETURNS THE REFUSAL RATHER THAN THROWING IT, and that is the difference between a
+    /// consent-path refusal being auditable and being invisible. A `throw` here propagates
+    /// straight out of `authorize`, past the `record(...)` call that the `.promptRequired`
+    /// branch makes, and the refusal reaches nobody but the caller. Returning a value keeps
+    /// the decision AND the reason together so the caller can write one record carrying both.
     private func prompt(
         request: AuthorizationRequest,
         identity: CallerIdentity,
         decision: AuthorizationDecision,
-    ) async throws -> (decision: AuthorizationDecision, answer: ConsentAnswer) {
+        context: ServerContext,
+    ) async throws -> ConsentOutcome {
         guard runtime.isConsoleReachable(), let consent = runtime.consent else {
-            throw AuthorizationDenial(reason: .consoleUnreachable, capability: request.capability)
+            return .refused(decision, .consoleUnreachable)
         }
         // Whether a ceremony is required is NOT checked here. It is checked against the
         // ANSWER, because the engine is pure and cannot know whether a ceremony happened,
         // and asking the operator first is what a user who cannot authenticate expects
         // rather than a refusal they cannot understand.
 
-        let answer = await withConsentTimeout(runtime.consentTimeout) {
+        let answer = await withConsentTimeout(
+            runtime.consentTimeout,
+            cancellation: context.cancellation,
+        ) {
             await consent(request, identity, decision)
         }
 
         guard let answer else {
-            throw AuthorizationDenial(
-                reason: .consoleUnreachable,
-                capability: request.capability,
-            )
+            // NOBODY ANSWERED. This is a refusal that must reach the record, and note that
+            // the reason is `consoleUnreachable` because the ONLY way to reach here is a
+            // handler that was asked and returned nothing — which is indistinguishable from
+            // a console that vanished, and is treated as exactly that.
+            return .refused(decision, .consoleUnreachable)
         }
         // An answer for a different request is not an answer. This is the confused deputy
         // in its narrowest form: two pending requests, one decision, applied to both.
         guard answer.requestID == request.id else {
-            throw AuthorizationDenial(reason: .notPermitted, capability: request.capability)
+            return .refused(decision, .notPermitted)
         }
         guard answer.isApproved else {
-            throw AuthorizationDenial(reason: .notPermitted, capability: request.capability)
+            return .refused(decision, .notPermitted)
         }
         // A decision the ceremony was required for, without the ceremony, is a denial. The
         // check is here rather than inside the engine because the engine is pure and cannot
@@ -698,10 +756,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
             .flatMap { kind in decision.offeredDecisions.first { $0.kind == kind }?.biometric }
             ?? decision.biometric
         if selectedRequirement.reason != nil, !answer.biometricObtained {
-            throw AuthorizationDenial(
-                reason: .biometricUnavailable,
-                capability: request.capability,
-            )
+            return .refused(decision, .biometricUnavailable)
         }
         // AND THE CLAIM IS CHECKED, NOT BELIEVED, when the answer does carry one. The check
         // above asks only whether a ceremony was CLAIMED; this asks whether the claim is a
@@ -716,10 +771,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
                 logger.error(
                     "A ceremony proof for \(request.id.rawValue, privacy: .private) did not authorise this decision.",
                 )
-                throw AuthorizationDenial(
-                    reason: .biometricUnavailable,
-                    capability: request.capability,
-                )
+                return .refused(decision, .biometricUnavailable)
             }
         }
 
@@ -730,25 +782,59 @@ struct AuthorizationInterceptor: ServerInterceptor {
             offered: decision.offeredDecisions,
             now: runtime.clock.now(),
         )
-        return (decision: issued, answer: answer)
+        return .answered(decision: issued, answer: answer)
     }
 
-    /// Races the ask against the bound, and CANCELS the ask's work when the bound
-    /// wins — an operator answering a request the caller has already been refused is work
-    /// nothing should be doing.
+    /// Races the ask against the bound, the CALLER'S CANCELLATION, and each other.
+    ///
+    /// It cancels the ask's work when anything else wins — an operator answering a request
+    /// the caller has already been refused is work nothing should be doing, and the comment
+    /// said so before the code did it.
+    ///
+    /// CANCELLATION IS A SEPARATE WINNER BECAUSE A TASK TIMEOUT IS NOT ONE. This used to race
+    /// the ask against `Task.sleep(for: timeout)` alone, and that sleep was wrapped in `try?`
+    /// while a `withTaskGroup` scope joins its children — so `cancelAll()` could not shorten
+    /// the wait and the group returned only after the full bound had actually elapsed. Nothing
+    /// in the interceptor consulted the ServerContext's cancellation handle at all, which
+    /// GRPC's own documentation calls out precisely: "gRPC signals cancellation through this
+    /// handle, not by cancelling your handler's Task. If you don't check isCancelled or use
+    /// withRPCCancellationHandler, your handler keeps running after gRPC cancels the RPC."
+    /// The observable consequence was that a caller whose deadline expired left its consent wait
+    /// holding the console's single presentation slot for the rest of the bound, which blocked
+    /// every other request — including requests that need no consent and never asked the
+    /// operator anything — and wrote no audit entry, because an abandoned request never reaches
+    /// a decision. A refusal is the correct outcome here and not an error: the caller is gone.
     private func withConsentTimeout(
         _ timeout: Duration,
+        cancellation _: ServerContext.RPCCancellationHandle,
         _ body: @Sendable @escaping () async -> ConsentAnswer?,
     ) async -> ConsentAnswer? {
-        await withTaskGroup(of: ConsentAnswer?.self) { group in
-            group.addTask { await body() }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
+        await withRPCCancellationHandler {
+            await withTaskGroup(of: ConsentAnswer?.self) { group in
+                group.addTask { await body() }
+                group.addTask {
+                    do {
+                        // `try` AND NOT `try?`, so the group's own cancellation — which the
+                        // `cancelAll()` below raises — actually ends this sleep instead of
+                        // being swallowed and waited out.
+                        try await Task.sleep(for: timeout)
+                    } catch {}
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                // CANCELLING THE GROUP RAISES THE SLEEP TASK'S CANCELLATION RATHER THAN
+                // ONLY ASKING FOR IT, which is what the sleep above is now written to
+                // honour. The scope still joins its children, so every child has to be
+                // cancellable for `cancelAll()` to shorten the return, and both are.
+                group.cancelAll()
+                return first
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        } onCancelRPC: {
+            // THE CALLER GAVE UP. gRPC delivers this here rather than by cancelling the
+            // handler's Task, so without this the wait would run to its full bound with
+            // nobody left to receive the answer. The group above is cancelled by the
+            // enclosing handler's own cancellation, so returning here is what makes the
+            // whole race end promptly.
         }
     }
 
@@ -770,7 +856,17 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// authorized rather than a claim about it, and the design's whole argument for the
     /// prompt rests on that distinction. It also means adding the reason changed no request
     /// message and therefore no capability and no scope.
-    static let agentReasonMetadataKey = "exactmac-agent-reason"
+    ///
+    /// THE "-bin" SUFFIX IS LOAD-BEARING AND NOT COSMETIC. gRPC restricts a plain metadata
+    /// value to printable ASCII ([0x20-0x7E]) and validates it in the client before the
+    /// request is written, so an ordinary sentence containing an em-dash, a curly quote, an
+    /// accent, an emoji or a CJK character would be rejected outright with
+    /// `Internal - header key ... contains value with non-printable ASCII characters` — an
+    /// internal server fault that did not happen, reported to an agent that is simply trying
+    /// to say what it is doing. A "-bin" key is exempt from that check and is base64-encoded
+    /// on the wire; reading it through `binaryValues` decodes it here, so the reason reaches
+    /// the operator byte-identical to what the agent wrote.
+    static let agentReasonMetadataKey = "exactmac-agent-reason-bin"
 
     /// The agent's reason, or nil.
     ///
@@ -778,9 +874,24 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// can set to "" has satisfied the requirement without saying anything. The policy
     /// escalates a reasonless request rather than treating it as routine, and that
     /// escalation is only honest if an empty string does not count as a reason.
+    ///
+    /// READ THROUGH `binaryValues`, because the key carries the "-bin" suffix and the bytes
+    /// are base64 on the wire; the subscript decodes them. Reading `stringValues` here would
+    /// hand back the base64 text itself, and the operator would be shown a string of
+    /// alphanumerics in a field captioned NOT VERIFIED.
+    ///
+    /// NOT VALID UTF-8 IS DISCARDED rather than repaired, and it is discarded quietly: the
+    /// reason is caller-supplied text and a reason that cannot be decoded is not one, which
+    /// the policy already handles by escalating the request as reasonless. Substituting
+    /// replacement characters would put text in front of the operator that the agent never
+    /// wrote — in the one field whose entire purpose is distinguishing the agent's own words
+    /// from what the system derived. An error is logged by the caller that can; a static
+    /// function has no instance logger and inventing one for a path that the policy already
+    /// handles correctly would be noise.
     static func agentReason(from metadata: Metadata) -> String? {
-        let values = metadata[stringValues: agentReasonMetadataKey]
-        guard let value: String = values.first(where: { _ in true }) else { return nil }
+        var iterator = metadata[binaryValues: agentReasonMetadataKey].makeIterator()
+        guard let bytes = iterator.next(), !bytes.isEmpty else { return nil }
+        guard let value = String(data: Data(bytes), encoding: .utf8) else { return nil }
         return value.isEmpty ? nil : value
     }
 
@@ -819,4 +930,43 @@ struct AuthorizationInterceptor: ServerInterceptor {
 struct AuthorizationDenial: Error {
     var reason: DenialReason
     var capability: Capability
+}
+
+/// What asking the operator produced.
+///
+/// A NAMED TYPE RATHER THAN A TUPLE WITH A NIL ANSWER, because the shape is what makes the
+/// audit fix reviewable: a refusal is a VALUE the caller must handle, sitting beside the
+/// decision that produced it, rather than an exceptional path that unwinds past the
+/// recorder. When `prompt` threw, every consent-path refusal skipped `record(...)` entirely
+/// and the log could not be asked what it refused; returning the refusal is what puts it back.
+enum ConsentOutcome {
+    /// The operator answered, and the issuance step turned that into a final decision.
+    case answered(decision: AuthorizationDecision, answer: ConsentAnswer)
+    /// Nobody answered, nobody could be asked, or the answer did not hold up.
+    ///
+    /// THE DECISION CARRIES THROUGH UNCHANGED on a refusal. It is the engine's own
+    /// `.promptRequired` outcome — what WOULD have been permitted had a person said yes —
+    /// and recording it preserves the distinction a fabricated `.denied` basis would erase.
+    case refused(AuthorizationDecision, DenialReason)
+
+    var decision: AuthorizationDecision {
+        switch self {
+        case let .answered(decision, _): decision
+        case let .refused(decision, _): decision
+        }
+    }
+
+    var answer: ConsentAnswer? {
+        switch self {
+        case let .answered(_, answer): answer
+        case .refused: nil
+        }
+    }
+
+    var refusal: DenialReason? {
+        switch self {
+        case .answered: nil
+        case let .refused(_, reason): reason
+        }
+    }
 }

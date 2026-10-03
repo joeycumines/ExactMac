@@ -6,6 +6,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,8 +41,8 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("ServerTLS = %v, want false", cfg.ServerTLS)
 	}
 
-	if cfg.RequestTimeout != 30 {
-		t.Errorf("RequestTimeout = %d, want 30", cfg.RequestTimeout)
+	if cfg.RequestTimeout != DefaultRequestTimeoutSeconds {
+		t.Errorf("RequestTimeout = %d, want %d", cfg.RequestTimeout, DefaultRequestTimeoutSeconds)
 	}
 
 	if cfg.Transport != TransportStdio {
@@ -54,6 +55,61 @@ func TestLoad_Defaults(t *testing.T) {
 
 	if cfg.CORSOrigin != "" {
 		t.Errorf("CORSOrigin = %s, want empty secure default", cfg.CORSOrigin)
+	}
+}
+
+// TestTheDefaultDeadlineOutlastsTheServersConsentWait is the assertion that the two
+// defaults cannot drift into the state that shipped.
+//
+// A consent-requiring call blocks until the operator answers or the SERVER's own bound
+// expires — ServerConfig.defaultConsentTimeoutSeconds, restated here as
+// ServerConsentTimeoutSeconds. With a client deadline below that bound every
+// consent-requiring call fails with DeadlineExceeded before the operator can answer, and the
+// person answering a request that has already been refused is the confusion the consent flow
+// exists to prevent. The client default was 30 and the server's wait is 90.
+//
+// The numbers live in two languages and nothing could read one from the other, which is
+// exactly why a green suite shipped the mismatch: the server tests drive consent with a test
+// clock and never go through the client, and the client tests exercise handlers without a
+// real ninety-second wait. This test is the only thing standing between them.
+func TestTheDefaultDeadlineOutlastsTheServersConsentWait(t *testing.T) {
+	if DefaultRequestTimeoutSeconds <= ServerConsentTimeoutSeconds {
+		t.Fatalf(
+			"default client deadline %ds does not outlast the server's %ds consent wait, so "+
+				"every consent-requiring call would time out before the operator could answer",
+			DefaultRequestTimeoutSeconds,
+			ServerConsentTimeoutSeconds,
+		)
+	}
+	// And the shipped default actually clears the bound, rather than the constant merely
+	// having the right relationship to itself.
+	t.Setenv("EXACTMAC_REQUEST_TIMEOUT", "")
+	os.Unsetenv("EXACTMAC_REQUEST_TIMEOUT")
+	cfg, err := Load(TransportStdio)
+	if err != nil {
+		t.Fatalf("Load(TransportStdio) error = %v", err)
+	}
+	if cfg.RequestTimeout <= ServerConsentTimeoutSeconds {
+		t.Errorf("loaded deadline %ds does not outlast the %ds consent wait",
+			cfg.RequestTimeout, ServerConsentTimeoutSeconds)
+	}
+}
+
+// TestADeadlineShorterThanTheConsentWaitIsRefused asserts the configuration cannot be set
+// back into the state that shipped. The error has to name the server's value, because an
+// operator who lowers one number has no way to know the other end has a different one.
+func TestADeadlineShorterThanTheConsentWaitIsRefused(t *testing.T) {
+	t.Setenv("EXACTMAC_REQUEST_TIMEOUT", "30")
+	_, err := Load(TransportStdio)
+	if err == nil {
+		t.Fatal("Load(TransportStdio) accepted a 30s deadline against a 90s consent wait")
+	}
+	if !strings.Contains(err.Error(), "consent") {
+		t.Errorf("error = %v, want it to name the consent wait as the cause", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(ServerConsentTimeoutSeconds)) {
+		t.Errorf("error = %v, want it to name the server's %d-second value",
+			err, ServerConsentTimeoutSeconds)
 	}
 }
 
@@ -629,6 +685,19 @@ func TestLoad_ServerSocketPathConfig(t *testing.T) {
 	}
 }
 
+// TestLoad_ServerSocketPathConfigDefault pins the default the product ships with.
+//
+// IT USED TO ASSERT THAT THE FIELD IS EMPTY, and that assertion was a defect being recorded
+// as a requirement: with an empty path the client selects TCP, a TCP listener has no
+// authenticating principal, and every consent-requiring capability is denied by design. An
+// agent host that installed the console and spawned `exactmac mcp` with no environment at all
+// therefore got a uniform total denial that looked exactly like an operator declining
+// everything, and the real cause — the wrong transport — appeared nowhere. The console app
+// already defaults its own socket path for precisely this reason; the client did not, and
+// the two could disagree about where the product lives.
+//
+// The test is corrected in place rather than deleted: it pins a default, and the default is
+// now the one the product needs.
 func TestLoad_ServerSocketPathConfigDefault(t *testing.T) {
 	os.Unsetenv("EXACTMAC_SERVER_SOCKET_PATH")
 
@@ -637,8 +706,14 @@ func TestLoad_ServerSocketPathConfigDefault(t *testing.T) {
 		t.Fatalf("Load(TransportStdio) error = %v", err)
 	}
 
-	if cfg.ServerSocketPath != "" {
-		t.Errorf("ServerSocketPath = %s, want empty (optional)", cfg.ServerSocketPath)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory available: %v", err)
+	}
+	want := filepath.Join(home, "Library", "Caches", "exactmac.sock")
+	if cfg.ServerSocketPath != want {
+		t.Errorf("ServerSocketPath = %q, want %q (the console's own default socket path)",
+			cfg.ServerSocketPath, want)
 	}
 }
 

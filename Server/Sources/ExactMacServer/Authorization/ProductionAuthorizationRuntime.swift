@@ -113,6 +113,7 @@ protocol DecisionRecording: Sendable {
         decision: AuthorizationDecision,
         operatorNote: String?,
         biometricObtained: Bool,
+        refusalReason: DenialReason?,
     ) -> Bool
 }
 
@@ -134,6 +135,7 @@ struct AuditDecisionRecorder: DecisionRecording {
         decision: AuthorizationDecision,
         operatorNote: String? = nil,
         biometricObtained: Bool = false,
+        refusalReason: DenialReason? = nil,
     ) -> Bool {
         audit.record(
             request: request,
@@ -141,6 +143,7 @@ struct AuditDecisionRecorder: DecisionRecording {
             decision: decision,
             operatorNote: operatorNote,
             biometricObtained: biometricObtained,
+            refusalReason: refusalReason,
         ) != nil
     }
 }

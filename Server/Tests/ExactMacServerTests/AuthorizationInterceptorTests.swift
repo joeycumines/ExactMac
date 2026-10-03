@@ -592,7 +592,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         reason: String,
     ) -> StreamingServerRequest<Input> {
         var metadata = Metadata()
-        metadata.addString(reason, forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        metadata.addBinary(Array(reason.utf8), forKey: AuthorizationInterceptor.agentReasonMetadataKey)
         metadata.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
         return StreamingServerRequest(
             metadata: metadata,
@@ -786,18 +786,43 @@ extension AuthorizationInterceptorTests {
         XCTAssertEqual(decision.basis, .promptRequired, "a reasonless request was not asked about")
     }
 
-    /// The reason travels as METADATA, and a blank one is ABSENT rather than satisfying the
+    /// The reason travels as BINARY METADATA, and a blank one is ABSENT rather than satisfying the
     /// requirement — because a header set to "" would otherwise be a way to comply with
     /// saying nothing.
-    func testTheReasonIsReadFromMetadataAndABlankOneIsAbsent() {
+    ///
+    /// The "-bin" suffix is why the multibyte assertions are here rather than being incidental:
+    /// a plain metadata key rejects any non-ASCII byte in the client before the request is
+    /// sent, so the reason could not have been an em-dash or an emoji at all.
+    func testTheReasonIsReadFromBinaryMetadataAndABlankOneIsAbsent() {
         var withReason = Metadata()
-        withReason.addString("summarising the notes", forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        withReason.addBinary(
+            Array("summarising the notes".utf8),
+            forKey: AuthorizationInterceptor.agentReasonMetadataKey,
+        )
         XCTAssertEqual(
             AuthorizationInterceptor.agentReason(from: withReason),
             "summarising the notes",
         )
+        // A reason written the way a careful agent actually writes one. Each of these was
+        // rejected by the client before the rename, so each is a regression guard for the
+        // specific reason the key carries a "-bin" suffix.
+        for reason in [
+            "reading the notes — every line is needed",
+            "the operator’s file, as they asked",
+            "capture du café pour l’utilisateur",
+            "検索して要約します",
+            "🎯 screenshotting the active window",
+        ] {
+            var metadata = Metadata()
+            metadata.addBinary(Array(reason.utf8), forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+            XCTAssertEqual(
+                AuthorizationInterceptor.agentReason(from: metadata),
+                reason,
+                "a multibyte reason was altered in transit",
+            )
+        }
         var blank = Metadata()
-        blank.addString("", forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        blank.addBinary(Array(), forKey: AuthorizationInterceptor.agentReasonMetadataKey)
         XCTAssertNil(AuthorizationInterceptor.agentReason(from: blank), "a blank reason counted")
         XCTAssertNil(AuthorizationInterceptor.agentReason(from: Metadata()))
         XCTAssertEqual(AuthorizationInterceptor.origin(of: Metadata()), .directSocket)
@@ -806,7 +831,12 @@ extension AuthorizationInterceptorTests {
         XCTAssertEqual(AuthorizationInterceptor.origin(of: viaMCP), .mcpProxy)
         // The key is shared with the Go layer, so a rename on one side is a silent loss of
         // every reason. Pinned here so the coupling is visible from both files.
-        XCTAssertEqual(AuthorizationInterceptor.agentReasonMetadataKey, "exactmac-agent-reason")
+        //
+        // The "-bin" suffix is PINNED WITH IT, and that is the sharper half of the assertion:
+        // dropping the suffix would not break this test on its own — it would restore the
+        // Unicode bug, and it would do so at the client, in a different process, where no
+        // server-side test can see it.
+        XCTAssertEqual(AuthorizationInterceptor.agentReasonMetadataKey, "exactmac-agent-reason-bin")
         XCTAssertEqual(AuthorizationInterceptor.mcpProxyMetadataKey, "exactmac-origin")
     }
 }

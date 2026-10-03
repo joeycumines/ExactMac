@@ -378,10 +378,22 @@ private final class Counter: @unchecked Sendable {
 private final class RecordingAuditSpy: DecisionRecording, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [AuthorizationDecision] = []
+    private var refusals: [DenialReason?] = []
     var entered = false
 
     var decisions: [AuthorizationDecision] {
         lock.withLock { recorded }
+    }
+
+    /// WHY each recorded decision was refused, in the order they were recorded.
+    ///
+    /// A `nil` is a decision that was NOT refused — an allow. It is captured rather than
+    /// derived because the question invariant 1 asks is "is the refusal on the record", and
+    /// answering that from the decision alone would be the mistake this spy exists to catch:
+    /// a `.promptRequired` basis reads as "asked a person" and says nothing about whether
+    /// anyone answered.
+    var refusalReasons: [DenialReason?] {
+        lock.withLock { refusals }
     }
 
     @discardableResult
@@ -391,8 +403,12 @@ private final class RecordingAuditSpy: DecisionRecording, @unchecked Sendable {
         decision: AuthorizationDecision,
         operatorNote _: String?,
         biometricObtained _: Bool,
+        refusalReason: DenialReason?,
     ) -> Bool {
-        lock.withLock { recorded.append(decision) }
+        lock.withLock {
+            recorded.append(decision)
+            refusals.append(refusalReason)
+        }
         return true
     }
 }
@@ -405,6 +421,7 @@ private struct FailingAuditSpy: DecisionRecording {
         decision _: AuthorizationDecision,
         operatorNote _: String?,
         biometricObtained _: Bool,
+        refusalReason _: DenialReason?,
     ) -> Bool {
         false
     }
