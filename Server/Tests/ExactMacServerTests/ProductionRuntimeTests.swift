@@ -360,6 +360,14 @@ private struct FixedGrantSupply: GrantSupply {
     func snapshot() async -> GrantSnapshot {
         GrantSnapshot(grants: grants)
     }
+
+    // No spend is ever honoured: these fixtures are about recording and consent, not
+    // about counts, and the refusal is what a supply that cannot spend must return.
+    func consume(_ grantIdentifier: String, operations: Int) async -> Bool { false }
+
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+        false
+    }
 }
 
 private final class Counter: @unchecked Sendable {

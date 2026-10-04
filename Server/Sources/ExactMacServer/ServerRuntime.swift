@@ -223,10 +223,24 @@ func serve(
     // The transport arrives already built, and so does the authorization posture it implies.
     // Both are decided in `main()` from the LISTENER, because whether the server can say who
     // is calling is a property of the listener and not of a flag.
-    let interceptors: [any ServerInterceptor] = if let authorizationRuntime {
-        productionServerInterceptors(AuthorizationInterceptor(runtime: authorizationRuntime))
+    //
+    // The session manager is wired here because the composition owns it and the runtime was
+    // built before this function ran: a transaction commit's declared operation count can
+    // only come from the state that counts the operations. This is the seam that made
+    // invariant 9 real — without it every transaction was authorized UNBOUNDED while the
+    // prompt said otherwise.
+    let interceptors: [any ServerInterceptor]
+    if let authorizationRuntime {
+        var runtime = authorizationRuntime
+        runtime.declaredOperationCount = { [sessionManager = composition.sessionManager] sessionName, transactionId in
+            await sessionManager.declaredOperationCount(
+                sessionName: sessionName,
+                transactionId: transactionId,
+            )
+        }
+        interceptors = productionServerInterceptors(AuthorizationInterceptor(runtime: runtime))
     } else {
-        handlerContractTestInterceptors()
+        interceptors = handlerContractTestInterceptors()
     }
     let server = GRPCServer(
         transport: productionServerTransport(transport),

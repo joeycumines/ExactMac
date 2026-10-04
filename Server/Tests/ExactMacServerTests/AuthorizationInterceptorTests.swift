@@ -24,7 +24,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     func testEveryMethodInTheAPIReachesTheInterceptorAndNoMethodReachesItsHandler() async throws {
         let policy = try Self.loadPolicy()
         let methods = RPCAuthorizationMap.declaredMethods(using: policy)
-        XCTAssertEqual(methods.count, 71, "the API's method count moved; this proof must be re-derived")
+        XCTAssertEqual(methods.count, 76, "the API's method count moved; this proof must be re-derived")
 
         let counters = AuthorizationCounters()
         let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy)
@@ -68,17 +68,164 @@ final class AuthorizationInterceptorTests: XCTestCase {
         XCTAssertFalse(entered, "a method with no capability reached its handler")
     }
 
-    /// A method of ANOTHER service is not this server's business, and the chain says so by
-    /// passing it straight through. Google Operations is served here and is not gated.
-    func testAnotherServiceIsNotGated() async throws {
+    /// A method of a service the server does not authorize is not this server's business,
+    /// and the chain says so by passing it straight through. THE NEGATIVE CONTROL for the
+    /// gate above: if every unknown service were denied here, a new first-party service
+    /// (health, reflection) would be denied too, and if NOTHING were checked the
+    /// google.longrunning.Operations hole this gate once had would reopen — five RPCs
+    /// reaching handlers with no decision and no record.
+    func testAServiceOutsideTheAuthorizedSetIsNotGated() async throws {
         let policy = try Self.loadPolicy()
         let entered = await Self.drive(
             runtime: .unixSocket(descriptorPolicy: policy),
             counters: AuthorizationCounters(),
-            method: "google.longrunning.Operations/GetOperation",
+            method: "grpc.health.v1.Health/Check",
             message: Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
         )
-        XCTAssertTrue(entered, "Operations was gated by the ExactMac authorization layer")
+        XCTAssertTrue(entered, "an unauthorized foreign service was gated by the ExactMac layer")
+    }
+
+    /// THE HOLE THAT USED TO EXIST, pinned shut. The Operations service is registered on
+    /// the server AND named by the authorization map, so its five RPCs are intercepted,
+    /// denied without a decision that permits them, and never reach a handler on this
+    /// posture. GetOperation with a plausible resource name, driven end to end: the
+    /// handler is not entered and the refusal is counted, which is invariant 1's demand
+    /// that no RPC reaches a handler without a decision on the record.
+    func testEveryOperationsMethodIsGatedAndNoneReachesItsHandler() async throws {
+        let policy = try Self.loadPolicy()
+        let counters = AuthorizationCounters()
+        let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy)
+        let message = Google_Longrunning_GetOperationRequest.with {
+            $0.name = "operations/\(UUID().uuidString)"
+        }
+        var reached: [String] = []
+        for method in [
+            "GetOperation", "ListOperations", "WaitOperation", "CancelOperation", "DeleteOperation",
+        ] {
+            let entered = await Self.drive(
+                runtime: runtime,
+                counters: counters,
+                method: "\(RPCAuthorizationMap.operationsServiceName)/\(method)",
+                message: message,
+            )
+            if entered {
+                reached.append(method)
+            }
+        }
+        XCTAssertEqual(
+            reached, [],
+            "these Operations methods reached their handler without a decision",
+        )
+        XCTAssertEqual(counters.total, 5, "every Operations refusal must be counted")
+    }
+
+    // MARK: - The declared count (invariant 9)
+
+    /// A count-bounded standing grant is SPENT BY THE BATCH IT AUTHORIZES. Before the
+    /// transaction count had a source, every CommitTransaction was authorized with no
+    /// declared count and `GrantStore.consume` had no production caller — a count on a
+    /// grant that is never decremented is decoration, and a single approval amortised
+    /// across an unbounded batch is exactly what invariant 9 forbids. The spend is
+    /// asserted through the supply, because the store's own arithmetic has its own suite;
+    /// what is proved HERE is that the interceptor spends the DECLARED count, the one the
+    /// session manager reported, not a constant and not nothing.
+    func testACountBoundedGrantIsSpentByTheDeclaredCountWhenItAuthorizes() async throws {
+        let policy = try Self.loadPolicy()
+        let caller = Self.resolvedCaller
+        // The runtime uses the SYSTEM clock, so the grant is dated against real monotonic
+        // time: a fixture issued at nanosecond 1 is six centuries expired before the
+        // policy reads it.
+        let issuedAt = MonotonicInstant.now()
+        let grant = Grant(
+            id: "grant-count",
+            capability: .transactionManage,
+            scope: AuthorizationScope(operationLimit: 5),
+            duration: .monotonicSeconds(600),
+            holder: caller.code.binding,
+            issuedAt: issuedAt,
+            expiresAt: issuedAt.advanced(by: .seconds(600)),
+            origin: .prompt(decidedAt: issuedAt),
+            remainingOperations: 5,
+            targetIsHighConsequence: false,
+        )
+        let supply = RecordingGrantSupply(
+            snapshot: GrantSnapshot(grants: [grant]),
+            consumeResult: true,
+        )
+        var runtime = AuthorizationRuntime.unixSocket(
+            descriptorPolicy: policy,
+            grants: supply,
+            peerEvidence: .fixed(Self.thisProcess),
+        )
+        runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
+        // THE SOURCE PRODUCTION WIRES, exercised: the count comes from the session
+        // manager through this seam, not from the request.
+        runtime.declaredOperationCount = { _, _ in 3 }
+        let counters = AuthorizationCounters()
+        let entered = await Self.drive(
+            runtime: runtime,
+            counters: counters,
+            method: "\(RPCAuthorizationMap.serviceName)/CommitTransaction",
+            message: Exactmac_V1_CommitTransactionRequest.with {
+                $0.name = "sessions/s1"
+                $0.transactionID = "t1"
+            },
+        )
+        XCTAssertTrue(entered, "a grant that covers the batch authorizes the commit")
+        XCTAssertEqual(supply.recordedSpends.count, 1, "the batch must be spent exactly once")
+        XCTAssertEqual(supply.recordedSpends.first?.identifier, "grant-count")
+        XCTAssertEqual(supply.recordedSpends.first?.operations, 3, "the DECLARED count is spent")
+        XCTAssertEqual(counters.total, 0)
+    }
+
+    /// The store refusing the spend — a revoke or a concurrent spend landing between the
+    /// snapshot the engine judged and the write — DENIES, and the denial is on the record.
+    /// A grant that could not cover the count after all must not leave an allow standing,
+    /// because the fail-closed direction is the only safe reading of a disagreement
+    /// between the snapshot and the store.
+    func testASpendTheStoreCannotHonourDeniesAndIsRecorded() async throws {
+        let policy = try Self.loadPolicy()
+        let caller = Self.resolvedCaller
+        // The runtime uses the SYSTEM clock, so the grant is dated against real monotonic
+        // time: a fixture issued at nanosecond 1 is six centuries expired before the
+        // policy reads it.
+        let issuedAt = MonotonicInstant.now()
+        let grant = Grant(
+            id: "grant-count",
+            capability: .transactionManage,
+            scope: AuthorizationScope(operationLimit: 5),
+            duration: .monotonicSeconds(600),
+            holder: caller.code.binding,
+            issuedAt: issuedAt,
+            expiresAt: issuedAt.advanced(by: .seconds(600)),
+            origin: .prompt(decidedAt: issuedAt),
+            remainingOperations: 5,
+            targetIsHighConsequence: false,
+        )
+        let supply = RecordingGrantSupply(
+            snapshot: GrantSnapshot(grants: [grant]),
+            consumeResult: false,
+        )
+        var runtime = AuthorizationRuntime.unixSocket(
+            descriptorPolicy: policy,
+            grants: supply,
+            peerEvidence: .fixed(Self.thisProcess),
+        )
+        runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
+        runtime.declaredOperationCount = { _, _ in 3 }
+        let counters = AuthorizationCounters()
+        let entered = await Self.drive(
+            runtime: runtime,
+            counters: counters,
+            method: "\(RPCAuthorizationMap.serviceName)/CommitTransaction",
+            message: Exactmac_V1_CommitTransactionRequest.with {
+                $0.name = "sessions/s1"
+                $0.transactionID = "t1"
+            },
+        )
+        XCTAssertFalse(entered, "a spend the store refused must not leave the allow standing")
+        XCTAssertEqual(supply.recordedSpends.count, 1, "the refusal is the spend being attempted")
+        XCTAssertEqual(counters.counts[DenialReason.notPermitted.rawValue], 1)
     }
 
     /// THE SHAPE PRODUCTION IS IN TODAY, pinned rather than left implicit: with no peer
@@ -622,6 +769,53 @@ final class AuthorizationInterceptorTests: XCTestCase {
 }
 
 // MARK: - Stubs
+
+/// A standing-grant supply that records what it was asked to spend, which is how a test
+/// sees invariant 9's enforcement without asserting on a store that has its own suite.
+private final class RecordingGrantSupply: GrantSupply, @unchecked Sendable {
+    private let snapshotValue: GrantSnapshot
+    private let consumeResult: Bool
+    private let lock = NSLock()
+    private var spends: [(identifier: String, operations: Int)] = []
+
+    init(snapshot: GrantSnapshot, consumeResult: Bool) {
+        self.snapshotValue = snapshot
+        self.consumeResult = consumeResult
+    }
+
+    func snapshot() async -> GrantSnapshot {
+        snapshotValue
+    }
+
+    func consume(_ grantIdentifier: String, operations: Int) async -> Bool {
+        lock.withLock { spends.append((grantIdentifier, operations)) }
+        return consumeResult
+    }
+
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+        lock.withLock { spends.append((envelopeIdentifier, operations)) }
+        return consumeResult
+    }
+
+    var recordedSpends: [(identifier: String, operations: Int)] {
+        lock.withLock { spends }
+    }
+}
+
+/// An inspector that always reports one process, so a grant issued against a KNOWN
+/// binding is judged against the SAME binding the resolver produces — the real inspector
+/// would resolve the test runner, whose path no fixture can predict.
+private struct FixedInspector: ProcessInspecting {
+    let identity: CodeIdentity
+
+    func codeIdentity(processIdentifier _: Int32) -> CodeIdentity? {
+        identity
+    }
+
+    func parentProcessIdentifier(of _: Int32) -> Int32? {
+        nil
+    }
+}
 
 /// Counts the asks, and never answers.
 ///

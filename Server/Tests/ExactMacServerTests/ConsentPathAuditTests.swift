@@ -366,5 +366,13 @@ final class ConsentPathAuditTests: XCTestCase {
         func snapshot() async -> GrantSnapshot {
             GrantSnapshot(grants: grants)
         }
+
+        // No spend is ever honoured: this fixture is about recording, not about counts,
+        // and the refusal is what a supply that cannot spend must return.
+        func consume(_ grantIdentifier: String, operations: Int) async -> Bool { false }
+
+        func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+            false
+        }
     }
 }

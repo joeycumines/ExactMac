@@ -294,8 +294,40 @@ enum RPCAuthorizationMap {
         ], summary: .scriptText)
         add(.localEcho, [("ValidateScript", .global, .unary, .parseOnlyScript)])
 
+        // google.longrunning.Operations: the asynchronous continuation of calls THIS API
+        // starts. The service used to be registered on the server but ABSENT from this
+        // map, and the interceptor's service gate sent anything not named here straight to
+        // its handler — so five RPCs reached real work with no decision, no record, and
+        // (through ListOperations, which takes no filter) a full read of every caller's
+        // operation results. An operation's result is desktop-derived content: an element
+        // state a wait observed, an observation's record, a macro's output. That is what
+        // `operationsManage` names, and it requires consent, because reading another
+        // caller's result is a real disclosure even though the resource names carry
+        // unguessable UUIDs — unguessable is not a permission model.
+        //
+        // The reads name `operations/<uuid>` in `name`, which no application grant can
+        // narrow to, so they scope global through the same parse-or-global fallback every
+        // other opaque reference takes.
+        for (method, source, summary) in [
+            ("ListOperations", ScopeSource.global, ArgumentSummary.none),
+            ("GetOperation", ScopeSource.resourceName, ArgumentSummary.none),
+            ("WaitOperation", ScopeSource.resourceName, ArgumentSummary.none),
+            ("CancelOperation", ScopeSource.resourceName, ArgumentSummary.none),
+            ("DeleteOperation", ScopeSource.resourceName, ArgumentSummary.none),
+        ] {
+            entries["\(operationsServiceName)/\(method)"] = Entry(
+                .operationsManage, source, stream: .unary, summary,
+            )
+        }
+
         return entries
     }()
+
+    /// The service that carries the asynchronous operations, and the set of services the
+    /// interceptor authorizes. TWO, not one: the map above covers both, and a service the
+    /// gate does not name is a service the map cannot protect.
+    static let operationsServiceName = "google.longrunning.Operations"
+    static let authorizedServiceNames: Set<String> = [serviceName, operationsServiceName]
 
     static func authorization(forMethod fullyQualifiedName: String) -> Entry? {
         table[fullyQualifiedName]
@@ -306,7 +338,11 @@ enum RPCAuthorizationMap {
     static func declaredMethods(
         using policy: PublicRequestDescriptorPolicy,
     ) -> Set<String> {
-        Set(policy.methodInputs.keys.filter { $0.hasPrefix("\(serviceName)/") })
+        Set(
+            policy.methodInputs.keys.filter { name in
+                Self.authorizedServiceNames.contains { name.hasPrefix("\($0)/") }
+            },
+        )
     }
 
     /// The two comparison directions, as functions rather than as assertions buried in a

@@ -648,6 +648,88 @@ final class GrantStore: Sendable {
         return consumed
     }
 
+    /// Spends a BATCH from a count-bounded grant: the commit or rollback of a transaction
+    /// is authorized as a scope with a declared operation count, and this is what makes
+    /// the declared count real. The same predicate the engine used to allow the request —
+    /// enough remaining, not expired — re-checked under the store's own lock, because the
+    /// snapshot the engine judged is already out of date by the time the allow arrives.
+    ///
+    /// - Returns: False when the grant cannot cover the batch — fewer operations left
+    ///   than declared, or it no longer exists. The interceptor refuses on false rather
+    ///   than letting the allow stand, which is the fail-closed direction.
+    @discardableResult
+    func consume(_ grantIdentifier: String, operations: Int) throws -> Bool {
+        precondition(operations >= 1, "a batch of zero or fewer operations is not a spend")
+        let now = clock.now()
+        let consumed = state.withLock { contents -> Bool in
+            guard let index = contents.grants.firstIndex(where: { $0.id == grantIdentifier }) else {
+                return false
+            }
+            let stored = contents.grants[index]
+            guard let remaining = stored.remainingOperations, remaining >= operations else {
+                return false
+            }
+            guard MonotonicInstant(nanoseconds: stored.expiresAtNanoseconds) > now else {
+                return false
+            }
+            let left = remaining - operations
+            guard left > 0 else {
+                contents.grants.remove(at: index)
+                return true
+            }
+            contents.grants[index].remainingOperations = left
+            return true
+        }
+        if consumed {
+            try persist()
+        }
+        return consumed
+    }
+
+    /// The same spend against a grant INSIDE a pre-authorization envelope, which is the
+    /// door a count would otherwise stay open through: envelopes are granted as a unit,
+    /// and a count-bounded grant that only decrements outside envelopes is a bound with a
+    /// hole shaped exactly like the long-running sessions envelopes exist for.
+    ///
+    /// The envelope's grants are searched in order with the engine's own predicate —
+    /// enough remaining, not expired — because the decision carries the envelope's id and
+    /// not the inner grant's: the first grant that could have covered the request is the
+    /// one that did.
+    @discardableResult
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) throws -> Bool {
+        precondition(operations >= 1, "a batch of zero or fewer operations is not a spend")
+        let now = clock.now()
+        let consumed = state.withLock { contents -> Bool in
+            guard let envelopeIndex = contents.envelopes.firstIndex(where: { $0.id == envelopeIdentifier })
+            else {
+                return false
+            }
+            for grantIndex in contents.envelopes[envelopeIndex].grants.indices {
+                let stored = contents.envelopes[envelopeIndex].grants[grantIndex]
+                guard let remaining = stored.remainingOperations, remaining >= operations else {
+                    continue
+                }
+                guard MonotonicInstant(nanoseconds: stored.expiresAtNanoseconds) > now else {
+                    continue
+                }
+                let left = remaining - operations
+                if left > 0 {
+                    contents.envelopes[envelopeIndex].grants[grantIndex].remainingOperations = left
+                } else {
+                    // Exhausted: removed, so the grants manager never shows a permission
+                    // that authorizes nothing — the same rule `consume` applies.
+                    contents.envelopes[envelopeIndex].grants.remove(at: grantIndex)
+                }
+                return true
+            }
+            return false
+        }
+        if consumed {
+            try persist()
+        }
+        return consumed
+    }
+
     // MARK: - Revoking
 
     /// Revokes one grant. Immediate, and it survives a restart because it is removed.

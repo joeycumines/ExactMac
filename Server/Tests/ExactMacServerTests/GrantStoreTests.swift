@@ -357,6 +357,58 @@ final class GrantStoreTests: XCTestCase {
         XCTAssertFalse(try store.consume(granted.id), "a removed grant cannot be spent again")
     }
 
+    /// INVARIANT 9, AT THE STORE: a batch spend — the commit or rollback of a transaction
+    /// authorized as a scope with a declared operation count — decrements by the DECLARED
+    /// count, refuses when the remaining count cannot cover it, and removes the grant at
+    /// exhaustion. The single-operation consume above covers one-at-a-time grants; this is
+    /// the batch shape, and before it existed no production path called consume at all,
+    /// which made every count on every grant decoration.
+    func testABatchSpendDecrementsByTheDeclaredCountAndExhaustionRemovesTheGrant() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let granted = try store.issue(
+            capability: .transactionManage,
+            scope: AuthorizationScope(application: .any, operationLimit: 5),
+            duration: .monotonicSeconds(600),
+            holder: Self.identity(),
+            remainingOperations: 5,
+        )
+
+        XCTAssertTrue(try store.consume(granted.id, operations: 3))
+        XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
+        // Two left cannot cover three: the same predicate the engine judged, re-checked
+        // under the store's lock, because the snapshot it judged is already stale.
+        XCTAssertFalse(try store.consume(granted.id, operations: 3))
+        XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
+        XCTAssertTrue(try store.consume(granted.id, operations: 2))
+        XCTAssertTrue(store.liveGrants().isEmpty, "an exhausted grant is removed, not left at zero")
+    }
+
+    /// The same spend against a grant INSIDE an envelope. Envelopes are granted as a unit
+    /// and re-checked per request, so a count on an envelope grant that only decremented
+    /// for ordinary grants would be a bound with a hole exactly the shape of the
+    /// long-running sessions envelopes exist for.
+    func testAnEnvelopeGrantIsSpentThroughItsEnvelope() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        try store.issueEnvelope(envelope: Self.envelope(id: "e-count"), now: clock.now())
+        XCTAssertEqual(try XCTUnwrap(store.liveEnvelopes().first).grants.count, 2)
+
+        XCTAssertTrue(try store.consumeEnvelope("e-count", operations: 3))
+        // The FIRST grant that could cover the batch is the one spent, which is the
+        // engine's own matching order.
+        XCTAssertEqual(
+            try XCTUnwrap(store.liveEnvelopes().first).grants.first?.remainingOperations, 2,
+        )
+        XCTAssertFalse(try store.consumeEnvelope("e-count", operations: 3))
+        // An unknown envelope cannot be spent, which the interceptor reads as a refusal.
+        XCTAssertFalse(try store.consumeEnvelope("e-absent", operations: 1))
+    }
+
     // MARK: - Revocation
 
     func testRevokingOneGrantIsImmediateAndSurvivesARestart() throws {

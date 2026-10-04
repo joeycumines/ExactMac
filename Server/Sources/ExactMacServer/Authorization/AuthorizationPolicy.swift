@@ -293,6 +293,11 @@ enum AuthorizationPolicy {
         // Reading what is permitted discloses the operator's whole posture, so it costs
         // more than a metadata read and far less than touching the desktop.
         case .authorizationManage: 0.2
+        // An operation's RESULT is desktop-derived content produced for some caller — an
+        // observed element state, a macro's output — so reading one costs more than a
+        // metadata read and less than a direct read, and ListOperations costs the same
+        // because it reads every caller's at once.
+        case .operationsManage: 0.4
         case .localEcho: 0.1
         }
     }

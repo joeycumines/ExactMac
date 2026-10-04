@@ -28,6 +28,17 @@ struct SystemMonotonicClock: MonotonicClock {
 /// can say "the store is unreadable" without inventing a file.
 protocol GrantSupply: Sendable {
     func snapshot() async -> GrantSnapshot
+    /// Spends `operations` from a count-bounded grant. False when the grant cannot cover
+    /// it — revoked, expired, or fewer operations left than the scope declared.
+    ///
+    /// DECLARED, NOT DEFAULTED, and the default is refusal: a supply that implements only
+    /// `snapshot` cannot truthfully claim a spend happened, and a spend that did not
+    /// happen is a bound that does not exist. The production store implements both;
+    /// `NoStandingGrants` refuses both. INVARIANT 9 lives here as much as in the engine:
+    /// a count on a grant that is never decremented is decoration.
+    func consume(_ grantIdentifier: String, operations: Int) async -> Bool
+    /// The same spend against a grant inside a pre-authorization envelope.
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool
 }
 
 struct GrantSnapshot: Sendable, Equatable {
@@ -45,6 +56,12 @@ struct GrantSnapshot: Sendable, Equatable {
 struct NoStandingGrants: GrantSupply {
     func snapshot() async -> GrantSnapshot {
         GrantSnapshot()
+    }
+
+    func consume(_ grantIdentifier: String, operations: Int) async -> Bool { false }
+
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+        false
     }
 }
 
@@ -216,6 +233,13 @@ struct AuthorizationRuntime: Sendable {
     /// The application resolver C2 needs to turn an opaque application name into the
     /// application it names. The server's own catalog in production.
     var applicationResolver: any ApplicationTargetResolving
+    /// The count a transaction commit or rollback is authorized AS A SCOPE WITH: how many
+    /// operations the named transaction has accumulated, which only the session manager
+    /// knows. NIL WHEN THERE IS NO SOURCE, which is a test fixture's shape — production
+    /// wires the composition's session manager at `serve`, and a nil here is why the
+    /// count was decoration for so long. A request with no transaction id, or a
+    /// transaction that has gone away, derives with no count rather than a guessed one.
+    var declaredOperationCount: (@Sendable (_ sessionName: String, _ transactionId: String) async -> Int?)? = nil
     /// The kernel's answer about the socket this call arrived on, WHEN THE TRANSPORT CAN
     /// SUPPLY ONE.
     ///
@@ -394,11 +418,15 @@ struct AuthorizationInterceptor: ServerInterceptor {
             _ context: ServerContext,
         ) async throws -> StreamingServerResponse<Output>,
     ) async throws -> StreamingServerResponse<Output> {
-        // Every method of the service is authorized, including the three that need no
-        // consent, so the set of methods that bypass this is empty by construction rather
-        // than by remembering to add each one to a list.
-        guard context.descriptor.service.fullyQualifiedService == RPCAuthorizationMap.serviceName
-        else {
+        // Every method of every authorized service is mapped and authorized, including
+        // the ones that need no consent, so the set of methods that bypass this is empty
+        // by construction rather than by remembering to add each one to a list. The
+        // google.longrunning.Operations service used to be the hole: registered on the
+        // server, absent from the map, and waved through this gate — five RPCs reaching
+        // handlers with no decision and no record.
+        guard RPCAuthorizationMap.authorizedServiceNames.contains(
+            context.descriptor.service.fullyQualifiedService,
+        ) else {
             return try await next(request, context)
         }
 
@@ -497,6 +525,22 @@ struct AuthorizationInterceptor: ServerInterceptor {
         }
         let now = runtime.clock.now()
         let requestID = AuthorizationRequestID(rawValue: Self.requestIdentifier(method: method, at: now))
+        // The transaction's declared operation count is not in the request — no request
+        // message in the API carries such a field — it lives in the session manager, so
+        // the runtime supplies a source and this is where it is consulted. A transaction
+        // commit or rollback is the one call whose scope must name a COUNT, because a
+        // single approval covering a batch without a bound is the amortisation invariant
+        // 9 forbids. Anything else derives with no count.
+        var operationLimit: Int? = nil
+        if let source = runtime.declaredOperationCount {
+            let facts = RequestFacts(message: protobuf, policy: runtime.descriptorPolicy)
+            // RequestFacts keys are camelCased PROTO names, so the field spelled
+            // `transaction_id` on the wire reads as `transactionId` here.
+            if let sessionName = facts.text("name"), !sessionName.isEmpty,
+               let transactionId = facts.text("transactionId"), !transactionId.isEmpty {
+                operationLimit = await source(sessionName, transactionId)
+            }
+        }
         let request = await AuthorizationRequestDeriver.derive(
             method: method,
             message: protobuf,
@@ -504,7 +548,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
             requestID: requestID,
             agentReason: Self.agentReason(from: metadata),
             origin: Self.origin(of: metadata),
-            operationLimit: nil,
+            operationLimit: operationLimit,
             resolver: runtime.applicationResolver,
         )
         // An unmapped method yields NO request, which at the interceptor is a refusal. This
@@ -542,7 +586,36 @@ struct AuthorizationInterceptor: ServerInterceptor {
         )
 
         switch decision.basis {
-        case .noConsentRequired, .grant, .envelope:
+        case .noConsentRequired:
+            return try recorded(decision, for: request, identity: identity)
+        case .grant, .envelope:
+            // A COUNT THE SCOPE DECLARED IS SPENT HERE, or the count was decoration: the
+            // store decrements what the grant has left, and a grant that reaches zero is
+            // gone. This is invariant 9's enforcement point — the engine only ever CHECKS
+            // the bound against a snapshot, and a check that never advances the counter
+            // authorizes unboundedly.
+            //
+            // The store disagreeing with the snapshot the policy judged — a revoke or a
+            // concurrent spend landing in between — is a refusal, not a race to look
+            // through: the fail-closed direction is the only safe reading of "the grant
+            // could not cover the count after all".
+            if let declared = request.scope.operationLimit {
+                let spent: Bool = switch decision.basis {
+                case let .grant(id):
+                    await runtime.grants.consume(id, operations: declared)
+                case let .envelope(id):
+                    await runtime.grants.consumeEnvelope(id, operations: declared)
+                case .noConsentRequired, .promptRequired, .denied:
+                    true
+                }
+                guard spent else {
+                    var denial = decision
+                    denial.outcome = .deny
+                    denial.basis = .denied(.notPermitted)
+                    try record(denial, for: request, identity: identity)
+                    throw AuthorizationDenial(reason: .notPermitted, capability: request.capability)
+                }
+            }
             return try recorded(decision, for: request, identity: identity)
         case .promptRequired:
             // THE ISSUANCE STEP CAN STILL THROW, and it is the one thing that is allowed to:

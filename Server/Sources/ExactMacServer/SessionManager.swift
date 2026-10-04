@@ -342,9 +342,28 @@ actor SessionManager {
         return rolledBackTransaction
     }
 
+    /// How many operations the named transaction has accumulated so far, which is the
+    /// count a commit or rollback is authorized AS A SCOPE WITH.
+    ///
+    /// The count is not in the request — no request message in the API carries such a
+    /// field — so the interceptor asks here, through the runtime, at derive time. NIL
+    /// WHEN IT CANNOT BE TRUTHFUL: no such session, no active transaction, or a
+    /// transaction id that does not match, which the authorization layer renders as a
+    /// scope with no declared count rather than a guessed one. A commit of a transaction
+    /// that has gone away fails in the handler anyway; the authorization layer refusing
+    /// to invent a number is the honest half.
+    func declaredOperationCount(sessionName: String, transactionId: String) -> Int? {
+        guard let state = sessions[sessionName],
+              let transactionState = state.activeTransaction,
+              transactionState.transaction.transactionID == transactionId
+        else {
+            return nil
+        }
+        return state.operations.count - transactionState.operationStartIndex
+    }
+
     /// Record an operation in session history
-    func recordOperation(
-        sessionName: String,
+    func recordOperation(        sessionName: String,
         operationType: String,
         resource: String,
         success: Bool,

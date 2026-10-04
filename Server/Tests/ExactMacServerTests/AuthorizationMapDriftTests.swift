@@ -71,7 +71,13 @@ final class AuthorizationMapDriftTests: XCTestCase {
             for service in file.service {
                 let serviceName = file.package.isEmpty
                     ? service.name : "\(file.package).\(service.name)"
-                guard serviceName == RPCAuthorizationMap.serviceName else { continue }
+                // The OPERATIONS service is in the set deliberately: it is registered on
+                // the server and mapped in the authorization map, so a method count that
+                // ignored it would let an unmapped Operations RPC pass as complete. It
+                // was exactly that hole once — five RPCs reaching handlers with no
+                // decision — and the count is what notices if it opens again.
+                guard RPCAuthorizationMap.authorizedServiceNames.contains(serviceName)
+                else { continue }
                 for method in service.method {
                     methodInputs["\(serviceName)/\(method.name)"] = method.inputType
                         .hasPrefix(".") ? String(method.inputType.dropFirst()) : method.inputType
@@ -170,7 +176,7 @@ final class AuthorizationMapDriftTests: XCTestCase {
         let policy = try Self.loadPolicy()
         let declared = RPCAuthorizationMap.declaredMethods(using: policy)
         XCTAssertEqual(
-            declared.count, 71,
+            declared.count, 76,
             "the API's method count moved; this map has to be re-derived, not patched",
         )
         let unmapped = RPCAuthorizationMap.unmappedMethods(declared: declared)

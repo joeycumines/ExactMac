@@ -165,6 +165,25 @@ struct GrantStoreSupply: GrantSupply {
     func snapshot() async -> GrantSnapshot {
         await store.snapshot()
     }
+
+    func consume(_ grantIdentifier: String, operations: Int) async -> Bool {
+        do {
+            return try store.consume(grantIdentifier, operations: operations)
+        } catch {
+            // A store that cannot be WRITTEN is a store that cannot honestly record a
+            // spend, and reporting true would let a bound exist only in the log. The
+            // unreadable case denies through the same false an exhausted grant returns.
+            return false
+        }
+    }
+
+    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+        do {
+            return try store.consumeEnvelope(envelopeIdentifier, operations: operations)
+        } catch {
+            return false
+        }
+    }
 }
 
 /// Turning the operator's answer into a grant that is persisted before the caller is told.

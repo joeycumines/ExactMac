@@ -139,6 +139,19 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
     /// exact rot the lattice exists to prevent: a capability whose name does not describe
     /// what it permits is how a grant ends up covering something nobody read the label for.
     case authorizationManage = "authorization.manage"
+    /// Reads, cancels or deletes the server's ASYNCHRONOUS OPERATIONS — the
+    /// google.longrunning.Operations resources an authorized call starts (a macro
+    /// execution, an element wait, an observation) and the results those operations
+    /// carry.
+    ///
+    /// It is a capability of its own for the same reason `authorizationManage` is: no
+    /// adjacent label is true of it. An operation's result is not a local echo — it is
+    /// content the server produced from the DESKTOP for some caller, so `GetOperation`
+    /// can disclose an observed element state or a macro's output. And it is not any one
+    /// desktop read, because which one depends on what started the operation. The
+    /// operations were unmapped once, which meant they reached their handler with no
+    /// decision and no record at all — invariant 1's only hole.
+    case operationsManage = "operations.manage"
     /// Reads nothing off the desktop: it echoes back input the caller itself submitted.
     /// It still passes through the interceptor, and it is still mapped, so that the
     /// set of unmapped methods stays empty.
@@ -155,7 +168,7 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
                 .observationStream, .displayRead, .clipboardRead, .clipboardWrite,
                 .inputSynthesize, .windowManage, .applicationControl,
                 .fileDialogAutomate, .transactionManage, .sessionManage,
-                .authorizationManage,
+                .authorizationManage, .operationsManage,
             ]
         case .macroExecute:
             // A recorded macro is a bounded sequence of input and transactions.
@@ -171,7 +184,7 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
             [.displayRead]
         case .observationStream, .windowManage, .applicationControl, .fileDialogAutomate,
              .transactionManage, .sessionManage, .displayRead, .clipboardRead,
-             .clipboardWrite, .inputSynthesize, .localEcho:
+             .clipboardWrite, .inputSynthesize, .operationsManage, .localEcho:
             []
         case .authorizationManage:
             // Reading what is permitted confers NO desktop power, which is the point: the
@@ -247,6 +260,7 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
         case .transactionManage: "Group actions into a transaction"
         case .sessionManage: "Create and inspect sessions"
         case .authorizationManage: "See what is permitted, and pre-authorize a batch"
+        case .operationsManage: "Read or cancel the server's asynchronous operations"
         case .localEcho: "Read back input this server was already given"
         }
     }
