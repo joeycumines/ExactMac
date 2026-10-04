@@ -425,6 +425,12 @@ struct ProductionAuthorizationRuntime {
             audit: AuditDecisionRecorder(audit: audit),
             auditRequired: true,
         )
+        ServerInspectionService.register(
+            store: store,
+            audit: audit,
+            clock: clock,
+            stateDirectory: ExactMacRuntimePaths.stateDirectory(environment: environment),
+        )
         return ProductionAuthorizationRuntime(
             registry: registry,
             auditPath: auditPath,

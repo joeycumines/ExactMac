@@ -224,13 +224,13 @@ final class AuthorizationMapDriftTests: XCTestCase {
 
     // MARK: - The classifications that are decisions rather than obvious
 
-    func testDisplayMethodsAreMeteredAsADisclosure() throws {
+    func testDisplayMethodsDescribeHardwareLayoutWithoutPrompting() throws {
         for method in ["ListDisplays", "GetDisplay"] {
             let entry = try XCTUnwrap(
                 RPCAuthorizationMap.authorization(forMethod: "\(RPCAuthorizationMap.serviceName)/\(method)"),
             )
             XCTAssertEqual(entry.capability, .displayRead, method)
-            XCTAssertTrue(entry.capability.requiresConsent, method)
+            XCTAssertFalse(entry.capability.requiresConsent, "\(method) describes hardware layout and requires no consent")
             XCTAssertEqual(entry.scopeSource, .global, "a display is not owned by an application")
         }
     }
@@ -904,11 +904,18 @@ final class AuthorizationMapDriftTests: XCTestCase {
     /// a comment about the handler, sitting on top of a handler that said otherwise — so
     /// this assertion now names the real cost of the three-way split, and a reclassification
     /// has to be argued from the handler rather than from the method name.
-    func testOnlyValidateScriptNeedsNoConsent() {
+    func testOnlyExplicitNonConsentCapabilitiesNeedNoConsent() {
         let consentFree = Set(
             RPCAuthorizationMap.table.filter { !$0.value.capability.requiresConsent }.keys,
         )
-        XCTAssertEqual(consentFree, ["exactmac.v1.ExactMac/ValidateScript"])
+        XCTAssertEqual(
+            consentFree,
+            [
+                "exactmac.v1.ExactMac/ValidateScript",
+                "exactmac.v1.ExactMac/ListDisplays",
+                "exactmac.v1.ExactMac/GetDisplay",
+            ],
+        )
     }
 
     /// A read of the server's own input registry is a CONTENT READ, and this says so

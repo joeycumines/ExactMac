@@ -1,3 +1,4 @@
+import ExactMacServer
 import SwiftUI
 
 /// The 688pt content column every window row is.
@@ -20,14 +21,14 @@ struct ConsoleWindow<Content: View>: View {
     let title: String
     let subtitle: String
     var badge: AnyView?
-    let footer: AnyView
+    var footer: AnyView?
     @ViewBuilder let content: () -> Content
 
     init(
         title: String,
         subtitle: String,
         badge: (some View)? = AnyView?.none,
-        footer: some View,
+        footer: (some View)? = AnyView?.none,
         @ViewBuilder content: @escaping () -> Content,
     ) {
         self.title = title
@@ -37,7 +38,11 @@ struct ConsoleWindow<Content: View>: View {
         } else {
             self.badge = nil
         }
-        self.footer = AnyView(footer)
+        if let footer {
+            self.footer = AnyView(footer)
+        } else {
+            self.footer = nil
+        }
         self.content = content
     }
 
@@ -53,9 +58,11 @@ struct ConsoleWindow<Content: View>: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             content()
-            Rectangle().fill(Design.Ink.separator).frame(height: 1)
-            footer
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let footer {
+                Rectangle().fill(Design.Ink.separator).frame(height: 1)
+                footer
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.top, Design.Space.frame)
         .padding(.trailing, Design.Space.frame)
@@ -89,9 +96,48 @@ struct GrantRow: View {
         var origin: String
         var remaining: String
         var countdown: CountdownChip.State
+
+        init(
+            id: String,
+            consequence: String,
+            capability: String,
+            scope: String,
+            holder: String,
+            signature: SignatureBadge.State,
+            origin: String,
+            remaining: String,
+            countdown: CountdownChip.State,
+        ) {
+            self.id = id
+            self.consequence = consequence
+            self.capability = capability
+            self.scope = scope
+            self.holder = holder
+            self.signature = signature
+            self.origin = origin
+            self.remaining = remaining
+            self.countdown = countdown
+        }
+
+        init(from displayGrant: DisplayGrant) {
+            self.id = displayGrant.id
+            self.consequence = displayGrant.consequence
+            self.capability = displayGrant.capability
+            self.scope = displayGrant.scope
+            self.holder = displayGrant.holder
+            self.signature = SignatureBadge.State(serverValue: displayGrant.signature)
+            self.origin = displayGrant.origin
+            self.remaining = displayGrant.remaining
+            self.countdown = switch displayGrant.countdownState {
+            case .live: .live
+            case .soon: .soon
+            case .expired: .expired
+            }
+        }
     }
 
     let grant: Model
+    var onRevoke: (String) -> Void = { _ in }
 
     var body: some View {
         HStack(alignment: .top, spacing: Design.Space.three) {
@@ -115,15 +161,17 @@ struct GrantRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: Design.Space.chip) {
                 CountdownChip(label: grant.remaining, state: grant.countdown)
-                Button("Revoke") {}
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Design.Ink.textSecondary)
-                    .frame(width: 110, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                            .fill(Design.Ink.surface),
-                    )
+                Button("Revoke") {
+                    onRevoke(grant.id)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(Design.Ink.textSecondary)
+                .frame(width: 110, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                        .fill(Design.Ink.surface),
+                )
             }
         }
         .padding(Design.Space.three)
@@ -140,33 +188,65 @@ struct GrantRow: View {
 
 struct GrantsManager: View {
     let grants: [GrantRow.Model]
+    var subtitle: String?
+    var errorMessage: String?
+    var onRevoke: (String) -> Void = { _ in }
+    var onRevokeAll: () -> Void = {}
 
     var body: some View {
-        ConsoleWindow(
-            title: "Grants",
-            subtitle: "\(grants.count) listed · 1 expires within a minute",
-            footer: VStack(alignment: .leading, spacing: Design.Space.chip) {
-                HStack(alignment: .center, spacing: Design.Space.chip) {
-                    StatusDot(Design.Ink.success, diameter: 8)
-                    Text("Touch ID will confirm: revoke every grant at once")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Design.Ink.textSecondary)
+        if let errorMessage {
+            ConsoleWindow(
+                title: "Grants",
+                subtitle: "Unavailable",
+                footer: AnyView?.none,
+            ) {
+                ErrorState(
+                    title: "Grants could not be read",
+                    message: errorMessage,
+                )
+            }
+        } else if grants.isEmpty {
+            ConsoleWindow(
+                title: "Grants",
+                subtitle: "None active",
+                footer: AnyView?.none,
+            ) {
+                EmptyState(
+                    title: "No grants",
+                    message: "Nothing is permitted without asking. Every request that needs consent will prompt you, and every decision you make here is shown in Activity.",
+                )
+            }
+        } else {
+            ConsoleWindow(
+                title: "Grants",
+                subtitle: subtitle ?? "\(grants.count) listed",
+                footer: VStack(alignment: .leading, spacing: Design.Space.chip) {
+                    HStack(alignment: .center, spacing: Design.Space.chip) {
+                        StatusDot(Design.Ink.success, diameter: 8)
+                        Text("Touch ID will confirm: revoke every grant at once")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Design.Ink.textSecondary)
+                    }
+                    .padding(Design.Space.three)
+                    .background(
+                        RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                            .fill(Design.Ink.surfaceSunken),
+                    )
+                    ConsoleButton(title: "Revoke every grant", kind: .caution, action: onRevokeAll)
+                        .frame(width: 190)
+                    Design.Font.microNote(
+                        "Revocation is immediate and survives a restart. An envelope is revoked as a "
+                            + "unit, never partially.",
+                    )
+                },
+            ) {
+                ScrollView {
+                    VStack(spacing: Design.Space.chip) {
+                        ForEach(grants) { grant in
+                            GrantRow(grant: grant, onRevoke: onRevoke)
+                        }
+                    }
                 }
-                .padding(Design.Space.three)
-                .background(
-                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                        .fill(Design.Ink.surfaceSunken),
-                )
-                ConsoleButton(title: "Revoke every grant", kind: .caution)
-                    .frame(width: 190)
-                Design.Font.microNote(
-                    "Revocation is immediate and survives a restart. An envelope is revoked as a "
-                        + "unit, never partially.",
-                )
-            },
-        ) {
-            VStack(spacing: Design.Space.chip) {
-                ForEach(grants) { GrantRow(grant: $0) }
             }
         }
     }
@@ -190,6 +270,43 @@ struct ActivityRow: View {
         var signature: SignatureBadge.State
         var agentReason: String
         var operatorNote: String?
+
+        init(
+            id: String,
+            isAllowed: Bool,
+            time: String,
+            consequence: String,
+            capability: String,
+            basis: String,
+            identity: String,
+            signature: SignatureBadge.State,
+            agentReason: String,
+            operatorNote: String? = nil,
+        ) {
+            self.id = id
+            self.isAllowed = isAllowed
+            self.time = time
+            self.consequence = consequence
+            self.capability = capability
+            self.basis = basis
+            self.identity = identity
+            self.signature = signature
+            self.agentReason = agentReason
+            self.operatorNote = operatorNote
+        }
+
+        init(from displayItem: DisplayActivityItem) {
+            self.id = displayItem.id
+            self.isAllowed = displayItem.isAllowed
+            self.time = displayItem.time
+            self.consequence = displayItem.consequence
+            self.capability = displayItem.capability
+            self.basis = displayItem.basis
+            self.identity = displayItem.identity
+            self.signature = SignatureBadge.State(serverValue: displayItem.signature)
+            self.agentReason = displayItem.agentReason
+            self.operatorNote = displayItem.operatorNote
+        }
     }
 
     let row: Model
@@ -261,12 +378,13 @@ struct IntegrityBadge: View {
         case verified(entries: Int)
         case broken(at: Int)
         case unchecked
+        case nothingToVerify
 
         var dot: Color {
             switch self {
             case .verified: Design.Ink.success
             case .broken: Design.Ink.danger
-            case .unchecked: Design.Ink.textSecondary
+            case .unchecked, .nothingToVerify: Design.Ink.textSecondary
             }
         }
 
@@ -275,6 +393,7 @@ struct IntegrityBadge: View {
             case let .verified(entries): "Chain verified · \(grouped(entries)) entries"
             case let .broken(at): "Chain broken at entry \(grouped(at))"
             case .unchecked: "Not verified"
+            case .nothingToVerify: "Nothing to verify"
             }
         }
 
@@ -282,7 +401,22 @@ struct IntegrityBadge: View {
             // The one exception: the words are the warning.
             switch self {
             case .broken: Design.Ink.danger
-            case .verified, .unchecked: Design.Ink.textPrimary
+            case .verified, .unchecked, .nothingToVerify: Design.Ink.textPrimary
+            }
+        }
+
+        init(from displayState: DisplayIntegrityState, itemCount: Int) {
+            switch displayState {
+            case let .verified(count):
+                if count == 0, itemCount == 0 {
+                    self = .nothingToVerify
+                } else {
+                    self = .verified(entries: count)
+                }
+            case let .broken(at):
+                self = .broken(at: at)
+            case .unreadable:
+                self = .unchecked
             }
         }
 
@@ -314,49 +448,107 @@ struct ActivityTimeline: View {
     let rows: [ActivityRow.Model]
     let integrity: IntegrityBadge.State
     let subtitle: String
+    var errorMessage: String?
+    var onRetry: (() -> Void)?
 
     var body: some View {
-        ConsoleWindow(
-            title: "Activity",
-            subtitle: subtitle,
-            badge: IntegrityBadge(state: integrity),
-            footer: Design.Font.microNote(
-                "The log is append-only and hash-chained: removing or editing an entry breaks "
-                    + "the chain and is shown here rather than hidden.",
-            ),
-        ) {
-            // SCROLLS, for the same reason the settings surface does: the list's length is
-            // whatever the decision log happens to hold, and a window that cannot be resized
-            // would put the oldest entries permanently out of reach.
-            ScrollView {
-                VStack(spacing: Design.Space.chip) {
-                    ForEach(rows) { ActivityRow(row: $0) }
-                    if case let .broken(at) = integrity {
-                        // The rule is GREY, not orange: this is the system saying it cannot
-                        // tell you something, which is the other of the two provenances.
-                        HStack(alignment: .center, spacing: Design.Space.component) {
-                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                                .fill(Design.Rule.unknown)
-                                .frame(width: 3, height: 40)
-                            VStack(alignment: .leading, spacing: Design.Space.tight) {
-                                Design.Font.emphasized("The log has been altered")
-                                Text(
-                                    "An entry does not match the hash recorded for it, so "
-                                        + "everything after entry \(at) cannot be trusted. Grants "
-                                        + "are still enforced — but this log is not evidence of "
-                                        + "what happened.",
-                                )
-                                .font(.system(size: 11))
-                                .foregroundStyle(Design.Ink.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
+        if let errorMessage {
+            ConsoleWindow(
+                title: "Activity",
+                subtitle: "Unavailable",
+                badge: IntegrityBadge(state: .unchecked),
+                footer: AnyView?.none,
+            ) {
+                ErrorState(
+                    title: "Activity could not be loaded",
+                    message: errorMessage,
+                    retryTitle: onRetry != nil ? "Try again" : nil,
+                    onRetry: onRetry,
+                )
+            }
+        } else if rows.isEmpty, integrity == .nothingToVerify || integrity == .verified(entries: 0) {
+            ConsoleWindow(
+                title: "Activity",
+                subtitle: "Nothing recorded yet",
+                badge: IntegrityBadge(state: .nothingToVerify),
+                footer: AnyView?.none,
+            ) {
+                EmptyState(
+                    title: "No activity yet",
+                    message: "Every decision will appear here: what was asked, by whom, and whether a grant, your prompt or an envelope allowed it.",
+                )
+            }
+        } else if case let .broken(at) = integrity, rows.isEmpty {
+            ConsoleWindow(
+                title: "Activity",
+                subtitle: "Unavailable",
+                badge: IntegrityBadge(state: integrity),
+                footer: AnyView?.none,
+            ) {
+                ErrorState(
+                    title: "The log has been altered",
+                    message: "An entry does not match the hash recorded for it, so everything after entry \(at) cannot be trusted. Grants are still enforced — but this log is not evidence of what happened.",
+                    retryTitle: onRetry != nil ? "Try again" : nil,
+                    onRetry: onRetry,
+                )
+            }
+        } else if rows.isEmpty {
+            ConsoleWindow(
+                title: "Activity",
+                subtitle: "Unavailable",
+                badge: IntegrityBadge(state: .unchecked),
+                footer: AnyView?.none,
+            ) {
+                ErrorState(
+                    title: "Activity could not be loaded",
+                    message: "The decision log did not open. Decisions are still being enforced; this view is missing, not the protection.",
+                    retryTitle: onRetry != nil ? "Try again" : nil,
+                    onRetry: onRetry,
+                )
+            }
+        } else {
+            ConsoleWindow(
+                title: "Activity",
+                subtitle: subtitle,
+                badge: IntegrityBadge(state: integrity),
+                footer: Design.Font.microNote(
+                    "The log is append-only and hash-chained: removing or editing an entry breaks "
+                        + "the chain and is shown here rather than hidden.",
+                ),
+            ) {
+                // SCROLLS, for the same reason the settings surface does: the list's length is
+                // whatever the decision log happens to hold, and a window that cannot be resized
+                // would put the oldest entries permanently out of reach.
+                ScrollView {
+                    VStack(spacing: Design.Space.chip) {
+                        ForEach(rows) { ActivityRow(row: $0) }
+                        if case let .broken(at) = integrity {
+                            // The rule is GREY, not orange: this is the system saying it cannot
+                            // tell you something, which is the other of the two provenances.
+                            HStack(alignment: .center, spacing: Design.Space.component) {
+                                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                    .fill(Design.Rule.unknown)
+                                    .frame(width: 3, height: 40)
+                                VStack(alignment: .leading, spacing: Design.Space.tight) {
+                                    Design.Font.emphasized("The log has been altered")
+                                    Text(
+                                        "An entry does not match the hash recorded for it, so "
+                                            + "everything after entry \(at) cannot be trusted. Grants "
+                                            + "are still enforced — but this log is not evidence of "
+                                            + "what happened.",
+                                    )
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Design.Ink.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
+                            .padding(.horizontal, Design.Space.three)
+                            .padding(.vertical, Design.Space.component)
+                            .background(
+                                RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                                    .fill(Design.Ink.surfaceSunken),
+                            )
                         }
-                        .padding(.horizontal, Design.Space.three)
-                        .padding(.vertical, Design.Space.component)
-                        .background(
-                            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                                .fill(Design.Ink.surfaceSunken),
-                        )
                     }
                 }
             }
@@ -400,20 +592,34 @@ struct ErrorState: View {
     let title: String
     let message: String
     var retryTitle: String?
+    var onRetry: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: Design.Space.component) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Design.Rule.unknown)
-                .frame(width: 3, height: 40)
-            VStack(alignment: .leading, spacing: Design.Space.tight) {
-                Design.Font.emphasized(title)
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Design.Ink.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: Design.Space.component) {
+            HStack(alignment: .top, spacing: Design.Space.component) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Design.Rule.unknown)
+                    .frame(width: 3, height: 40)
+                VStack(alignment: .leading, spacing: Design.Space.tight) {
+                    Design.Font.emphasized(title)
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            if let retryTitle, let onRetry {
+                Button(retryTitle, action: onRetry)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Design.Ink.textSecondary)
+                    .frame(width: 110, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+                            .fill(Design.Ink.surface),
+                    )
+            }
         }
         .padding(.top, Design.Space.component)
         .padding(.trailing, Design.Space.component)

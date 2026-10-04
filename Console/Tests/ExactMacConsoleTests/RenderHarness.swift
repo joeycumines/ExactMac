@@ -1,5 +1,6 @@
 import AppKit
 @testable import ExactMacConsole
+@testable import ExactMacServer
 import SwiftUI
 import Testing
 
@@ -281,6 +282,76 @@ struct RenderTests {
     }
 
     @Test
+    func `the approval prompt renders reason-missing and operator note states in both schemes`() throws {
+        let (noReasonReq, noReasonIdentity, noReasonDecision) = ServerFixture.request(
+            requestID: "r-noreason",
+            capability: .clipboardRead,
+            rpcName: "exactmac.v1.ExactMac/GetClipboard",
+            argumentSummary: "the clipboard and its history",
+            agentReason: nil,
+        )
+        let noReasonPending = PendingRequest(
+            request: noReasonReq,
+            identity: noReasonIdentity,
+            decision: noReasonDecision,
+        )
+        let noReasonPrompt = ApprovalPrompt(
+            state: .pending,
+            title: noReasonPending.promptTitle,
+            capabilityLine: noReasonPending.promptScopeLine,
+            risk: noReasonPending.riskClass.label,
+            riskDot: noReasonPending.riskClass.dot,
+            clock: "decides in 0:45",
+            reason: nil,
+            implication: noReasonPending.implicationText,
+            tree: CallerTree.rows(for: noReasonPending),
+            payload: noReasonPending.argumentSummary,
+            biometricLine: noReasonPending.biometricLine,
+            biometricDot: Design.Ink.success,
+            moreChoicesLabel: noReasonPending.moreChoicesText,
+            showOptionsLabel: "Show options",
+            selectedOption: .once,
+        )
+        let noReasonHeight = RenderHarness.fittedHeight(of: noReasonPrompt, width: Design.Layout.promptWidth)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                noReasonPrompt,
+                size: CGSize(width: Design.Layout.promptWidth, height: noReasonHeight),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "prompt-noreason\(mode.suffix)",
+            )
+        }
+
+        let withNotePrompt = ApprovalPrompt(
+            state: .pending,
+            title: noReasonPending.promptTitle,
+            capabilityLine: noReasonPending.promptScopeLine,
+            risk: noReasonPending.riskClass.label,
+            riskDot: noReasonPending.riskClass.dot,
+            clock: "decides in 0:45",
+            reason: "Reading active buffer.",
+            implication: noReasonPending.implicationText,
+            tree: CallerTree.rows(for: noReasonPending),
+            payload: noReasonPending.argumentSummary,
+            biometricLine: noReasonPending.biometricLine,
+            biometricDot: Design.Ink.success,
+            moreChoicesLabel: noReasonPending.moreChoicesText,
+            showOptionsLabel: "Show options",
+            selectedOption: .once,
+            operatorNote: "Use the scoped option next time; this touches my keychain project.",
+        )
+        let withNoteHeight = RenderHarness.fittedHeight(of: withNotePrompt, width: Design.Layout.promptWidth)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                withNotePrompt,
+                size: CGSize(width: Design.Layout.promptWidth, height: withNoteHeight),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "prompt-withnote\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
     func `the render harness leaves the process appearance unchanged`() throws {
         let initialAppearance = NSAppearance.currentDrawing()
         let prompt = ApprovalPrompt(
@@ -312,14 +383,68 @@ struct RenderTests {
     }
 
     @Test
-    func `the popover renders at 360pt and hugs its content`() throws {
-        let model = ConsoleModel()
+    func `the popover renders normal, pending, and stopped states in both schemes`() throws {
+        // 1. Normal state (running, login-item disabled):
+        let normalModel = ConsoleModel()
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
-                MenuBarPopover(model: model),
+                MenuBarPopover(model: normalModel),
                 size: CGSize(width: Design.Layout.popoverWidth, height: 380),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "popover\(mode.suffix)",
+            )
+            try RenderHarness.png(
+                MenuBarPopover(model: normalModel),
+                size: CGSize(width: Design.Layout.popoverWidth, height: 380),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "popover-normal\(mode.suffix)",
+            )
+        }
+
+        // 2. Pending state (running with 1 waiting request):
+        let pendingModel = ConsoleModel(presentation: .application)
+        let (req, _, dec) = ServerFixture.request(
+            requestID: "req-1",
+            capability: .clipboardRead,
+            rpcName: "exactmac.v1.ExactMac/GetClipboard",
+        )
+        let scopedReq = AuthorizationRequest(
+            id: req.id,
+            rpcName: req.rpcName,
+            capability: .clipboardRead,
+            scope: AuthorizationScope(application: .bundleIdentifier("TextEdit"), window: .any),
+            argumentSummary: req.argumentSummary,
+            agentReason: req.agentReason,
+            origin: req.origin,
+        )
+        let identity = ServerFixture.identity(
+            executablePath: "/usr/local/bin/exactmac-mcp",
+            bundleIdentifier: "io.github.joeycumines.exactmac.mcp",
+        )
+        let pendingRequest = PendingRequest(
+            request: scopedReq,
+            identity: identity,
+            decision: dec,
+        )
+        pendingModel.deliverPending(pendingRequest)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                MenuBarPopover(model: pendingModel),
+                size: CGSize(width: Design.Layout.popoverWidth, height: 440),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "popover-pending\(mode.suffix)",
+            )
+        }
+
+        // 3. Stopped state (service stopped by operator):
+        let stoppedModel = ConsoleModel()
+        stoppedModel.stopService()
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                MenuBarPopover(model: stoppedModel),
+                size: CGSize(width: Design.Layout.popoverWidth, height: 460),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "popover-stopped\(mode.suffix)",
             )
         }
     }
@@ -387,6 +512,37 @@ struct WindowRenderTests {
     }
 
     @Test
+    func `the empty grants manager renders at 720pt in both schemes`() throws {
+        let view = GrantsManager(grants: [])
+        let height = RenderHarness.fittedHeight(of: view, width: 720)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: 720, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "grants-empty\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the error grants manager renders at 720pt in both schemes`() throws {
+        let view = GrantsManager(
+            grants: [],
+            errorMessage: "ExactMac cannot tell what is permitted, so it is denying every request that needs consent. Nothing is being granted on a guess.",
+        )
+        let height = RenderHarness.fittedHeight(of: view, width: 720)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: 720, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "grants-error\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
     func `the activity timeline renders with a broken chain`() throws {
         let rows = [
             ActivityRow.Model(
@@ -424,6 +580,88 @@ struct WindowRenderTests {
                 size: CGSize(width: 720, height: 824),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "activity\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the empty activity timeline renders with nothing to verify in both schemes`() throws {
+        let view = ActivityTimeline(
+            rows: [],
+            integrity: .nothingToVerify,
+            subtitle: "Nothing recorded yet",
+        )
+        let height = RenderHarness.fittedHeight(of: view, width: 720)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: 720, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "activity-empty\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the verified activity timeline renders at 720pt in both schemes`() throws {
+        let rows = [
+            ActivityRow.Model(
+                id: "1",
+                isAllowed: true,
+                time: "16:42:07",
+                consequence: "Read the clipboard in TextEdit",
+                capability: "clipboard.read · TextEdit only",
+                basis: "Allowed by a grant you approved at 16:38 · expires in 3m 12s",
+                identity: "exactmac-mcp · pid 4517",
+                signature: .unnotarized,
+                agentReason: "Pasting the test fixture into the TextEdit scratch buffer.",
+                operatorNote: nil,
+            ),
+            ActivityRow.Model(
+                id: "2",
+                isAllowed: false,
+                time: "16:39:52",
+                consequence: "Run a shell command in any application",
+                capability: "script.execute · every application",
+                basis: "Denied — no grant matched, and you declined it in the prompt",
+                identity: "codex · pid 8823",
+                signature: .signed,
+                agentReason: "Installing the fixture dependencies before the run.",
+                operatorNote: "Use the scoped option next time — this reaches every app I have open.",
+            ),
+        ]
+        let view = ActivityTimeline(
+            rows: rows,
+            integrity: .verified(entries: 42),
+            subtitle: "Today · newest first",
+        )
+        let height = RenderHarness.fittedHeight(of: view, width: 720)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: 720, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "activity-verified\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the error activity timeline renders with try again button in both schemes`() throws {
+        let view = ActivityTimeline(
+            rows: [],
+            integrity: .unchecked,
+            subtitle: "Unavailable",
+            errorMessage: "The decision log did not open. Decisions are still being enforced; this view is missing, not the protection.",
+            onRetry: {},
+        )
+        let height = RenderHarness.fittedHeight(of: view, width: 720)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                view,
+                size: CGSize(width: 720, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "activity-error\(mode.suffix)",
             )
         }
     }

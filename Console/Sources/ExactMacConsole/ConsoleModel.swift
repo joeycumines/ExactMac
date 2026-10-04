@@ -13,21 +13,39 @@ import SwiftUI
 @Observable
 final class ConsoleModel {
     private(set) var serviceState: ServiceState = .running
-    /// Whether ExactMac is registered to start at login, read from the SYSTEM.
-    ///
-    /// It used to be a cached `Bool` that launchd was asked about at launch. An operator
-    /// can revoke a login item in System Settings while the app is running, so a cached
-    /// value is a second source of truth that disagrees with the platform the first time
-    /// anything else changes it — and this one is read on every access instead.
+
+    /// Whether the ExactMac automation service is actively running or pending a decision.
+    var isServiceRunning: Bool {
+        serviceState == .running || serviceState == .pending
+    }
+
+    /// Whether the service is enabled (synonymous with running/pending service state).
     var isServiceEnabled: Bool {
+        isServiceRunning
+    }
+
+    /// Whether ExactMac is registered to start at login, read from the system via SMAppService.
+    var isStartAtLoginEnabled: Bool {
         startAtLogin.status == .enabled
+    }
+
+    /// Number of requests currently waiting on operator consent.
+    var waitingCount: Int {
+        max(waiting.count, pendingPrompt != nil ? 1 : 0)
     }
 
     /// `.none` when there is nothing wrong, and the band when there is. An OPTIONAL SLOT at a
     /// fixed index, which is why the popover's height is driven by it and nothing else.
     private(set) var failClosed: (title: String, body: String)?
     private(set) var pendingNotice: String?
+    /// Records the last timeout notice that occurred while another prompt was visible,
+    /// so the operator is informed after the blocker resolves.
+    private(set) var lastTimeoutNotice: String?
     var pendingPrompt: PendingRequest?
+    /// Requests queued behind the active prompt, in arrival order.
+    private(set) var queuedRequests: [PendingRequest] = []
+    /// Records which prompt blocked another, for diagnostics and transparency.
+    private(set) var blockedBy: [String: String] = [:]
 
     /// Start-at-login, the one on/off the app can still honour.
     ///
@@ -109,20 +127,35 @@ final class ConsoleModel {
         identity: CallerIdentity,
         decision: AuthorizationDecision,
     ) async -> PendingAnswer? {
+        guard isServiceRunning else {
+            logger.notice("Refusing request \(request.id.rawValue, privacy: .private): service is stopped")
+            return nil
+        }
         let pending = PendingRequest(
             request: request,
             identity: identity,
             decision: decision,
         )
-        pendingPrompt = pending
-        pendingNotice = nil
-        // PRESENTED, NOT SET. A request the operator has not seen yet has no window, and
-        // `setContent` is a no-op against a window that does not exist — the same reason the
-        // old channel loop lost requests at launch. `present` creates the window if it is
-        // missing and reuses it otherwise, and it does not activate: a consent request waits
-        // to be noticed, it does not take focus away from what the operator was doing.
-        windows.present(.approval, title: "Request", width: Design.Layout.promptWidth) {
-            approvalWindow(for: pending)
+
+        if pendingPrompt == nil {
+            pendingPrompt = pending
+            pendingNotice = pending.popoverNoticeBody
+            apply(.pending)
+
+            windows.present(.approval, title: "ExactMac needs your approval", width: Design.Layout.promptWidth) {
+                approvalWindow(for: pending)
+            }
+        } else {
+            // A request is already in front of the operator.
+            // Queue this request behind it rather than overwriting the active prompt.
+            queuedRequests.append(pending)
+            if let active = pendingPrompt {
+                blockedBy[pending.requestID] = active.promptTitle
+            }
+            apply(.pending)
+            logger.notice(
+                "Request \(pending.requestID, privacy: .private) queued behind active prompt \(self.pendingPrompt?.requestID ?? "", privacy: .private)",
+            )
         }
 
         return await withTaskCancellationHandler {
@@ -138,20 +171,66 @@ final class ConsoleModel {
             }
         } onCancel: {
             Task { @MainActor [weak self] in
-                self?.finish(pending.requestID, with: nil)
+                self?.handleWaitCancellation(for: pending.requestID)
             }
         }
     }
 
     /// Hands the operator's answer back to whoever is waiting for it.
     private func finish(_ requestID: String, with answer: PendingAnswer?) {
-        guard let continuation = waiting.removeValue(forKey: requestID) else { return }
+        let continuation = waiting.removeValue(forKey: requestID)
+        queuedRequests.removeAll { $0.requestID == requestID }
+        let blockedReason = blockedBy.removeValue(forKey: requestID)
+
         if pendingPrompt?.requestID == requestID {
-            pendingPrompt = nil
-            pendingNotice = nil
             optionsExpandedFor = nil
+            if let next = queuedRequests.first {
+                queuedRequests.removeFirst()
+                pendingPrompt = next
+                pendingNotice = next.popoverNoticeBody
+                windows.present(
+                    .approval,
+                    title: "ExactMac needs your approval",
+                    width: Design.Layout.promptWidth,
+                    updateIfPresent: true,
+                ) {
+                    self.approvalWindow(for: next)
+                }
+                logger.info(
+                    "Advanced approval prompt to next queued request \(next.requestID, privacy: .private)",
+                )
+            } else {
+                pendingPrompt = nil
+                if answer == nil, let blocked = blockedReason {
+                    pendingNotice = "A request timed out while waiting behind \(blocked)"
+                } else if let notice = lastTimeoutNotice {
+                    pendingNotice = notice
+                    lastTimeoutNotice = nil
+                } else {
+                    pendingNotice = nil
+                }
+                windows.close(.approval)
+                if serviceState == .pending, waiting.isEmpty {
+                    apply(.running)
+                }
+            }
+        } else if answer == nil, let blocked = blockedReason {
+            let notice = "A request timed out while waiting behind \(blocked)"
+            logger.notice(
+                "Queued request \(requestID, privacy: .private) was cancelled or timed out while waiting behind \(blocked, privacy: .public)",
+            )
+            if pendingPrompt == nil {
+                pendingNotice = notice
+            } else {
+                lastTimeoutNotice = notice
+            }
         }
-        continuation.resume(returning: answer)
+
+        continuation?.resume(returning: answer)
+    }
+
+    private func handleWaitCancellation(for requestID: String) {
+        finish(requestID, with: nil)
     }
 
     // MARK: The server this process hosts
@@ -187,15 +266,52 @@ final class ConsoleModel {
 
     // MARK: The service control
 
-    /// Registers or unregisters ExactMac for start at login.
-    ///
-    /// IT REPORTS RATHER THAN THROWS, because the caller is a menu bar toggle: an operator
-    /// who is told "macOS needs you to approve this in System Settings" has something to do,
-    /// and one handed a thrown error from a popover has nothing.
+    /// Stops the ExactMac service: closes active approval prompts, refuses waiting requests, and sets state to stopped.
+    func stopService() {
+        logger.info("Stopping ExactMac service by operator request")
+        queuedRequests.removeAll()
+        blockedBy.removeAll()
+        lastTimeoutNotice = nil
+        let waitingKeys = Array(waiting.keys)
+        for key in waitingKeys {
+            finish(key, with: nil)
+        }
+        windows.close(.approval)
+        apply(.stopped)
+        failClosed = (
+            "The service is off",
+            "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
+        )
+    }
+
+    /// Starts the ExactMac service, moving state to running unless vetoed by presentation.
+    func startService() {
+        logger.info("Starting ExactMac service by operator request")
+        apply(.running)
+    }
+
+    /// Toggles the service between running and stopped.
+    func toggleService() {
+        if isServiceRunning {
+            stopService()
+        } else {
+            startService()
+        }
+    }
+
+    /// Enables or disables the service.
     func setServiceEnabled(_ enabling: Bool) {
-        // ONE CALL, AND ITS OUTCOME IS REPORTED. The result is kept rather than re-queried,
-        // because `setEnabled` is the thing that performed the system call and asking it
-        // again would be a second call with a second chance to disagree with the first.
+        if enabling {
+            startService()
+        } else {
+            stopService()
+        }
+    }
+
+    // MARK: Login-item registration
+
+    /// Registers or unregisters ExactMac for start at login via SMAppService.
+    func setStartAtLoginEnabled(_ enabling: Bool) {
         let outcome = startAtLogin.setEnabled(enabling)
         switch outcome {
         case .none:
@@ -205,20 +321,14 @@ final class ConsoleModel {
         case .unregister:
             logger.info("ExactMac removed from start at login")
         case .operatorApprovalRequired:
-            // NOT AN ERROR AND NOT A SUCCESS. macOS holds this decision outside the app, so
-            // the honest response is to say so in the one place the operator is already
-            // looking, rather than to report a start-at-login that will not happen.
             break
         }
-        // Whatever the registration said about itself — a refusal, or the operator's
-        // approval still being needed — belongs in the notice, because a switch that
-        // silently did nothing is the failure an operator cannot otherwise diagnose.
         pendingNotice = startAtLogin.lastRefusal
     }
 
     /// Flips start-at-login.
-    func toggleService() {
-        setServiceEnabled(!isServiceEnabled)
+    func toggleStartAtLogin() {
+        setStartAtLoginEnabled(!isStartAtLoginEnabled)
     }
 
     /// Re-reads the registration, because the operator can change it outside this app.
@@ -249,8 +359,7 @@ final class ConsoleModel {
         // Leaving it set would offer the new request the previous one's breadth at a glance.
         optionsExpandedFor = nil
         pendingPrompt = request
-        pendingNotice = "\(request.executablePath) wants "
-            + "\(request.capability)"
+        pendingNotice = request.popoverNoticeBody
         apply(.pending)
         // IT SURFACES ITSELF, AND THAT IS NOT OPTIONAL. A consent request expires, and one
         // that expires unseen becomes a denial the operator never knew was asked for. Waiting
@@ -300,8 +409,8 @@ final class ConsoleModel {
             moreChoicesLabel: request.moreChoicesText,
             showOptionsLabel: "Show options",
             selectedOption: request.offeredKinds.first,
-            onDecision: { kind in
-                Task { await self.answer(kind, for: request) }
+            onDecision: { kind, note in
+                Task { await self.answer(kind, for: request, note: note) }
             },
             onCopyPayload: { self.copyToPasteboard(request.argumentSummary) },
             onShowOptions: { self.expandOptions(for: request) },
@@ -309,11 +418,12 @@ final class ConsoleModel {
     }
 
     /// Answers a request, performing the ceremony FIRST when its option needs one.
-    /// /// Exposed rather than private so a test can drive the whole decision — ceremony, nonce
+    ///
+    /// Exposed rather than private so a test can drive the whole decision — ceremony, nonce
     /// and answer — without a window server or a sensor. What is asserted is the answer, which
     /// is the thing that must not be wrong.
-    func answer(_ kind: OptionRow.Kind, for request: PendingRequest) async {
-        let answer = await answerValue(kind, for: request)
+    func answer(_ kind: OptionRow.Kind, for request: PendingRequest, note: String = "") async {
+        let answer = await answerValue(kind, for: request, note: note)
         await post(answer, for: request)
     }
 
@@ -329,7 +439,11 @@ final class ConsoleModel {
     /// A CEREMONY THAT FAILED IS A DENIAL, returned as one rather than thrown, because a
     /// caller that cannot express "denied" would either offer a cheaper path or leave the
     /// operator believing the weaker one was accepted.
-    func answerValue(_ kind: OptionRow.Kind, for request: PendingRequest) async -> PendingAnswer {
+    func answerValue(
+        _ kind: OptionRow.Kind,
+        for request: PendingRequest,
+        note: String = "",
+    ) async -> PendingAnswer {
         var biometricObtained = false
         if request.requiresBiometric, kind != .deny {
             // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
@@ -352,7 +466,7 @@ final class ConsoleModel {
                 logger.error(
                     "A request required a biometric and no ceremony is installed; denying rather than approving without the check: \(request.requestID, privacy: .private)",
                 )
-                return answer(.deny, for: request, refusal: .ceremonyRefused)
+                return answer(.deny, for: request, note: note, refusal: .ceremonyRefused)
             }
             let outcome = await ceremony.perform(
                 nonce: request.nonce,
@@ -366,12 +480,13 @@ final class ConsoleModel {
                 logger.error(
                     "A ceremony failed for \(request.requestID, privacy: .private): \(String(describing: failure), privacy: .public)",
                 )
-                return answer(.deny, for: request, refusal: .ceremonyRefused)
+                return answer(.deny, for: request, note: note, refusal: .ceremonyRefused)
             }
         }
         return answer(
             kind,
             for: request,
+            note: note,
             biometricObtained: biometricObtained,
             refusal: kind == .deny ? .operatorDeclined : nil,
         )
@@ -381,6 +496,7 @@ final class ConsoleModel {
     private func answer(
         _ kind: OptionRow.Kind,
         for request: PendingRequest,
+        note: String = "",
         biometricObtained: Bool = false,
         refusal: AnswerRefusal? = nil,
     ) -> PendingAnswer {
@@ -389,7 +505,7 @@ final class ConsoleModel {
             nonce: request.nonce,
             requestDigest: request.requestDigest,
             kind: kind,
-            note: "",
+            note: note,
             biometricObtained: biometricObtained,
             refusal: refusal,
         )
@@ -402,7 +518,6 @@ final class ConsoleModel {
     /// and "returning" it are the same act. The window is closed first so the prompt cannot
     /// still be on screen for a request that has already been answered.
     private func post(_ answer: PendingAnswer, for request: PendingRequest) async {
-        windows.close(.approval)
         finish(request.requestID, with: answer)
     }
 
@@ -443,39 +558,151 @@ final class ConsoleModel {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    /// The grants list, which is NOT YET AVAILABLE and says so rather than showing a lie.
-    /// /// The store persists each grant's expiry as nanoseconds on the SERVER's monotonic
-    /// timeline, so the countdown the row shows cannot be computed in this process: those
-    /// instants mean nothing here, and a chip counting down from a number it cannot
-    /// interpret is worse than no list. The server has to send display-ready rows, and until
-    /// it does the operator is told that instead of being shown a plausible wrong one.
-    /// The grants list, WHICH IS NOT AVAILABLE AND SAYS SO rather than showing a lie.
+    /// Opens the Grants management window, reading live standing grants from the server.
     ///
-    /// It used to query a socket and then say this regardless of the answer. The socket is
-    /// gone — the app hosts the server it would have queried — and the reason it is still
-    /// unavailable is unchanged and is not the app's to fix: the store keeps each grant's
-    /// expiry as an instant on the server's own timeline, so the countdown a row would show
-    /// cannot be computed in a view. The server has to send display-ready rows.
+    /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
     func openGrants() {
-        pendingNotice = "The grants list needs a display shape the server does not send yet."
+        refreshGrants()
     }
 
-    /// The decision timeline, WHICH THIS PROCESS CANNOT SHOW AND SAYS SO.
+    /// Refreshes the Grants management window with current server state.
+    func refreshGrants() {
+        let grantsResult: Result<[DisplayGrant], Error> = Result {
+            try ServerInspectionService.inspectGrants()
+        }
+
+        let view: GrantsManager
+        switch grantsResult {
+        case let .success(grants):
+            let models = grants.map { GrantRow.Model(from: $0) }
+            let subtitle = ServerInspectionService.grantsSubtitle(for: grants)
+            view = GrantsManager(
+                grants: models,
+                subtitle: subtitle,
+                onRevoke: { [weak self] id in
+                    self?.revokeGrant(id: id)
+                },
+                onRevokeAll: { [weak self] in
+                    self?.revokeAllGrants()
+                },
+            )
+        case let .failure(error):
+            logger.error("Failed to inspect grants: \(String(describing: error), privacy: .public)")
+            view = GrantsManager(
+                grants: [],
+                errorMessage: "ExactMac cannot tell what is permitted, so it is denying every request that needs consent. Nothing is being granted on a guess.",
+            )
+        }
+
+        windows.present(
+            .grants,
+            title: "Grants",
+            activates: true,
+            updateIfPresent: true,
+        ) {
+            view
+        }
+    }
+
+    /// Revokes a specific standing grant and refreshes the Grants window.
+    func revokeGrant(id: String) {
+        do {
+            try ServerInspectionService.revokeGrant(id: id)
+        } catch {
+            logger.error("Failed to revoke grant \(id, privacy: .private): \(String(describing: error), privacy: .public)")
+        }
+        refreshGrants()
+    }
+
+    /// Revokes all standing grants and envelopes, performing the biometric ceremony when installed.
+    func revokeAllGrants() {
+        Task { @MainActor in
+            await performRevokeAllGrants()
+        }
+    }
+
+    /// Performs revocation of all standing grants and envelopes with biometric ceremony verification.
+    func performRevokeAllGrants() async {
+        guard let ceremony else {
+            logger.error("Cannot revoke all grants: no biometric ceremony is installed")
+            return
+        }
+        windows.activateForCeremony()
+        let outcome = await ceremony.perform(
+            nonce: UUID().uuidString,
+            reason: "ExactMac asks to revoke every grant at once",
+        )
+        guard case .performed = outcome else {
+            logger.notice("Revoke-all ceremony was cancelled or declined")
+            return
+        }
+        do {
+            try ServerInspectionService.revokeAllGrants()
+        } catch {
+            logger.error("Failed to revoke all grants: \(String(describing: error), privacy: .public)")
+        }
+        refreshGrants()
+    }
+
+    /// Opens the Activity timeline window, reading and verifying the decision audit log from the server.
     ///
-    /// IT USED TO OPEN A WINDOW, and the window made two claims that were both false. Its
-    /// subtitle said "No decisions recorded yet" when the log is written on this very
-    /// machine and this process simply cannot read it, and its footer promised that a
-    /// tampered chain "is shown here rather than hidden" while showing nothing at all. An
-    /// operator who opened that window and saw an empty list would conclude they had never
-    /// approved anything — the opposite of the truth, and the most dangerous direction a
-    /// security record can be wrong in.
-    ///
-    /// The app hosts the server, but hosting is not reading: the audit log is the server
-    /// library's, behind an API this module cannot call, so there is nothing to render. A
-    /// window that admits it is empty is still a lie; this says the log exists and is not
-    /// shown here.
+    /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
     func openActivity() {
-        pendingNotice = "The decision log is on this Mac and is not shown here yet."
+        refreshActivity()
+    }
+
+    /// Refreshes the Activity timeline window with current server state and verified hash chain.
+    func refreshActivity() {
+        let activityResult: Result<DisplayActivityReport, Error> = Result {
+            try ServerInspectionService.inspectActivity()
+        }
+
+        let view: ActivityTimeline
+        switch activityResult {
+        case let .success(report):
+            if case let .unreadable(reason) = report.integrity {
+                view = ActivityTimeline(
+                    rows: [],
+                    integrity: .unchecked,
+                    subtitle: "Unavailable",
+                    errorMessage: "The decision log did not open: \(reason). Decisions are still being enforced; this view is missing, not the protection.",
+                    onRetry: { [weak self] in
+                        self?.refreshActivity()
+                    },
+                )
+            } else {
+                let models = report.items.map { ActivityRow.Model(from: $0) }
+                let badgeState = IntegrityBadge.State(from: report.integrity, itemCount: models.count)
+                view = ActivityTimeline(
+                    rows: models,
+                    integrity: badgeState,
+                    subtitle: report.subtitle,
+                    onRetry: { [weak self] in
+                        self?.refreshActivity()
+                    },
+                )
+            }
+        case let .failure(error):
+            logger.error("Failed to inspect activity: \(String(describing: error), privacy: .public)")
+            view = ActivityTimeline(
+                rows: [],
+                integrity: .unchecked,
+                subtitle: "Unavailable",
+                errorMessage: "The decision log did not open. Decisions are still being enforced; this view is missing, not the protection.",
+                onRetry: { [weak self] in
+                    self?.refreshActivity()
+                },
+            )
+        }
+
+        windows.present(
+            .activity,
+            title: "Activity",
+            activates: true,
+            updateIfPresent: true,
+        ) {
+            view
+        }
     }
 
     func openSettings() {
@@ -827,5 +1054,25 @@ struct PendingRequest: Equatable {
         // application" directly above a disclosure promising "Allow for TextEdit".
         return "\(alternatives.count) more choices — this exact request, or "
             + Self.proseList(alternatives.dropFirst().map(\.scope))
+    }
+
+    /// The body text shown on the popover's pending notice card, matching Figma node 0:1326.
+    ///
+    /// Forms a human-readable sentence: "<caller> wants to <action> in <target>".
+    var popoverNoticeBody: String {
+        let caller = !executablePath.isEmpty
+            ? URL(fileURLWithPath: executablePath).lastPathComponent
+            : (bundleIdentifier ?? "An application")
+        var action = consequence.prefix(1).lowercased() + consequence.dropFirst()
+        if action.hasSuffix(" and its history") {
+            action = String(action.dropLast(" and its history".count))
+        }
+        if scopeDescription.hasPrefix("in ") {
+            return "\(caller) wants to \(action) \(scopeDescription)"
+        } else if scopeDescription != "any application", !scopeDescription.isEmpty {
+            return "\(caller) wants to \(action) in \(scopeDescription)"
+        } else {
+            return "\(caller) wants to \(action)"
+        }
     }
 }

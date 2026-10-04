@@ -1,6 +1,8 @@
+import AppKit
 @testable import ExactMacConsole
 @testable import ExactMacServer
 import Foundation
+import SwiftUI
 import Testing
 
 /// What the prompt SAYS, which is most of what made the alert unusable.
@@ -291,4 +293,177 @@ struct PromptCompositionTests {
         "authorization.manage",
         "local.echo",
     ]
+
+    // MARK: - E26 Acceptance Tests
+
+    @Test
+    func `The agent gave no reason banner appears if and only if no reason arrived`() {
+        let baseRequest = Self.request()
+
+        let nilReasonPrompt = ApprovalPrompt(
+            state: .pending,
+            title: baseRequest.promptTitle,
+            capabilityLine: baseRequest.promptScopeLine,
+            risk: baseRequest.riskClass.label,
+            riskDot: baseRequest.riskClass.dot,
+            reason: nil,
+            tree: CallerTree.rows(for: baseRequest),
+            payload: baseRequest.argumentSummary,
+            biometricLine: baseRequest.biometricLine,
+            biometricDot: baseRequest.riskClass.dot,
+        )
+        #expect(
+            nilReasonPrompt.showsMissingReasonBanner,
+            "A request with nil reason must show the 'THE AGENT GAVE NO REASON' banner",
+        )
+
+        let emptyReasonPrompt = ApprovalPrompt(
+            state: .pending,
+            title: baseRequest.promptTitle,
+            capabilityLine: baseRequest.promptScopeLine,
+            risk: baseRequest.riskClass.label,
+            riskDot: baseRequest.riskClass.dot,
+            reason: "",
+            tree: CallerTree.rows(for: baseRequest),
+            payload: baseRequest.argumentSummary,
+            biometricLine: baseRequest.biometricLine,
+            biometricDot: baseRequest.riskClass.dot,
+        )
+        #expect(
+            emptyReasonPrompt.showsMissingReasonBanner,
+            "A request with empty string reason must show the missing reason banner",
+        )
+
+        let whitespaceReasonPrompt = ApprovalPrompt(
+            state: .pending,
+            title: baseRequest.promptTitle,
+            capabilityLine: baseRequest.promptScopeLine,
+            risk: baseRequest.riskClass.label,
+            riskDot: baseRequest.riskClass.dot,
+            reason: "   \t\n   ",
+            tree: CallerTree.rows(for: baseRequest),
+            payload: baseRequest.argumentSummary,
+            biometricLine: baseRequest.biometricLine,
+            biometricDot: baseRequest.riskClass.dot,
+        )
+        #expect(
+            whitespaceReasonPrompt.showsMissingReasonBanner,
+            "A request with whitespace-only reason must show the missing reason banner",
+        )
+
+        let suppliedReasonPrompt = ApprovalPrompt(
+            state: .pending,
+            title: baseRequest.promptTitle,
+            capabilityLine: baseRequest.promptScopeLine,
+            risk: baseRequest.riskClass.label,
+            riskDot: baseRequest.riskClass.dot,
+            reason: "Answering a question about your active document",
+            tree: CallerTree.rows(for: baseRequest),
+            payload: baseRequest.argumentSummary,
+            biometricLine: baseRequest.biometricLine,
+            biometricDot: baseRequest.riskClass.dot,
+        )
+        #expect(
+            !suppliedReasonPrompt.showsMissingReasonBanner,
+            "A request with a real supplied reason must NOT show the missing reason banner",
+        )
+    }
+
+    @Test
+    func `Every path in the caller tree is fully visible and the first row is never cut`() {
+        let longRequesterPath = "/Users/joeyc/dev/ExactMac/nested/directory/structure/with/a/very/long/executable/path/cmd/exactmac"
+        let longAncestorPath = "/Users/joeyc/.bun/install/global/node_modules/@modelcontextprotocol/server-exactmac/dist/index.js"
+
+        let (req, _, decision) = ServerFixture.request(
+            requestID: "r-long",
+            capability: .clipboardRead,
+            rpcName: "exactmac.v1.ExactMac/GetClipboard",
+            agentReason: "Inspecting caller tree path layout",
+        )
+        let identityWithLongPaths = ServerFixture.identity(
+            executablePath: longRequesterPath,
+            ancestors: [
+                ResolvedProcess(
+                    processIdentifier: 1233,
+                    parentProcessIdentifier: nil,
+                    code: CodeIdentity(
+                        executablePath: longAncestorPath,
+                        bundleIdentifier: nil,
+                        signature: .unsigned,
+                    ),
+                    isFullyResolved: true,
+                ),
+            ],
+        )
+        let pending = PendingRequest(
+            request: req,
+            identity: identityWithLongPaths,
+            decision: decision,
+        )
+
+        let rows = CallerTree.rows(for: pending)
+        #expect(rows.count == 2)
+
+        // Specifically the first row, which names the requester, carries the full path.
+        let firstRow = rows[0]
+        #expect(firstRow.isRequester)
+        #expect(firstRow.name == longRequesterPath)
+        #expect(firstRow.role == "asking for this")
+
+        let secondRow = rows[1]
+        #expect(!secondRow.isRequester)
+        #expect(secondRow.name == longAncestorPath)
+        #expect(secondRow.role == "started it")
+
+        // Invariant 13: View must wrap rather than truncate.
+        let treeView = CallerTree(rows: rows)
+        let hosting = NSHostingView(rootView: treeView)
+        hosting.frame = CGRect(x: 0, y: 0, width: Design.Layout.promptWidth, height: 400)
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+
+        // With 2 rows where paths wrap across lines, the fitting height must expand beyond 2 * 34pt.
+        #expect(
+            size.height > 68,
+            "Wrapped paths must expand view height rather than clipping at fixed 34pt per row (got \(String(describing: size.height))pt)",
+        )
+    }
+
+    @Test
+    func `The note field carries operator input and is preserved in the decision value`() async {
+        let (req, identity, decision) = ServerFixture.request(
+            requestID: "r-note",
+            capability: .clipboardRead,
+            rpcName: "exactmac.v1.ExactMac/GetClipboard",
+            agentReason: "Testing note field preservation",
+        )
+        let pending = PendingRequest(
+            request: req,
+            identity: identity,
+            decision: decision,
+        )
+
+        let model = ConsoleModel()
+        let typedNote = "Only allow for TextEdit; do not inspect my password manager."
+
+        let answer = await model.answerValue(.once, for: pending, note: typedNote)
+        #expect(answer.isApproved)
+        #expect(answer.note == typedNote, "The operator's typed note must be preserved in the PendingAnswer")
+
+        let defaultAnswer = await model.answerValue(.once, for: pending)
+        #expect(defaultAnswer.note.isEmpty, "When no note is typed, note defaults to empty string")
+
+        let denialAnswer = await model.answerValue(.deny, for: pending, note: "Forbidden by policy")
+        #expect(!denialAnswer.isApproved)
+        #expect(denialAnswer.note == "Forbidden by policy")
+    }
+
+    @Test
+    func `NoteField caption distinguishes decisions from denials`() {
+        let decisionField = NoteField(text: .constant(""), isDenied: false)
+        #expect(decisionField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION")
+
+        let denialField = NoteField(text: .constant(""), isDenied: true)
+        #expect(denialField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DENIAL")
+    }
 }

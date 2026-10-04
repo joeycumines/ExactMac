@@ -944,6 +944,90 @@ final class AuthorizationPolicyTests: XCTestCase {
         XCTAssertEqual(base.remaining(until: MonotonicInstant(nanoseconds: 1500)), .nanoseconds(500))
         XCTAssertNil(base.remaining(until: base), "a deadline in the past leaves nothing")
     }
+
+    // MARK: E24 — capability consent partition is explicit, positive-listed, and exhaustive
+
+    /// Task E24: The set of capabilities that require no consent is stated explicitly in code
+    /// as a positive list with a stated reason for each member, rather than emerging from a subtraction.
+    /// Reading the display layout does not prompt.
+    /// A test asserts the partition directly — which capabilities are on each side — so a capability
+    /// added later cannot silently inherit the permissive side.
+    func testCapabilityConsentPartitionIsExplicitAndExhaustive() {
+        let nonConsent = Set(Capability.allCases.filter { !$0.requiresConsent })
+        let consent = Set(Capability.allCases.filter(\.requiresConsent))
+
+        // Assert exact members of each partition
+        XCTAssertEqual(
+            nonConsent,
+            [.localEcho, .displayRead],
+            "Only localEcho and displayRead may be on the non-consent side",
+        )
+        XCTAssertEqual(
+            consent,
+            [
+                .scriptExecute,
+                .macroExecute,
+                .accessibilityTraverse,
+                .windowObserve,
+                .screenObserve,
+                .observationStream,
+                .clipboardRead,
+                .clipboardWrite,
+                .inputSynthesize,
+                .windowManage,
+                .applicationControl,
+                .fileDialogAutomate,
+                .transactionManage,
+                .sessionManage,
+                .authorizationManage,
+            ],
+            "Every other capability requires an operator consent decision",
+        )
+
+        // Union equals all cases, intersection is empty
+        XCTAssertEqual(nonConsent.union(consent), Set(Capability.allCases))
+        XCTAssertTrue(nonConsent.isDisjoint(with: consent))
+
+        // Every non-consent capability has an explicit non-empty justification
+        for cap in nonConsent {
+            let reason = Capability.nonConsentRequiringCapabilities[cap]
+            XCTAssertNotNil(reason, "\(cap) must have an explicit reason documented in nonConsentRequiringCapabilities")
+            XCTAssertFalse(reason?.isEmpty ?? true)
+        }
+
+        // Verify that display.read does not prompt and is evaluated to .noConsentRequired
+        let displayRequest = request(.displayRead, scope: AuthorizationScope())
+        let displayDecision = decide(displayRequest, posture: .strict)
+        XCTAssertEqual(displayDecision.outcome, .allow, "display.read must be allowed without prompting")
+        XCTAssertEqual(displayDecision.basis, .noConsentRequired)
+    }
+
+    // MARK: E29 — reading display layout never prompts across repeated requests or with prior grant
+
+    func testDisplayReadNeverPromptsEvenAcrossRepeatedRequestsOrWithPriorGrant() {
+        let displayReq = request(.displayRead, scope: AuthorizationScope())
+
+        // 1. Initial request without grant: allows without prompt on all postures
+        for posture in [Posture.strict, .balanced] {
+            let initial = decide(displayReq, posture: posture)
+            XCTAssertEqual(initial.outcome, .allow)
+            XCTAssertEqual(initial.basis, .noConsentRequired)
+            XCTAssertFalse(initial.basis == .promptRequired, "display.read must never prompt")
+        }
+
+        // 2. Prior grant present: still allows with .noConsentRequired
+        let priorGrant = grant(.displayRead, scope: AuthorizationScope())
+        let subsequent = decide(displayReq, grants: [priorGrant], posture: .strict)
+        XCTAssertEqual(subsequent.outcome, .allow)
+        XCTAssertEqual(subsequent.basis, .noConsentRequired)
+
+        // 3. Repeated requests: cadence is zero prompts
+        for _ in 1 ... 10 {
+            let repeated = decide(displayReq, posture: .balanced)
+            XCTAssertEqual(repeated.outcome, .allow)
+            XCTAssertEqual(repeated.basis, .noConsentRequired)
+        }
+    }
 }
 
 /// Regressions for the six blocking findings an independent review returned on C1.

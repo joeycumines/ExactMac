@@ -486,6 +486,9 @@ struct AuthorizationInterceptor: ServerInterceptor {
         metadata: Metadata,
         serverContext: ServerContext,
     ) async throws -> AuthorizationDecision {
+        if serverContext.cancellation.isCancelled || Task.isCancelled {
+            throw RPCError(code: .cancelled, message: "request was cancelled by the caller")
+        }
         guard let protobuf = message as? any SwiftProtobuf.Message else {
             throw AuthorizationDenial(
                 reason: .notPermitted,
@@ -555,35 +558,36 @@ struct AuthorizationInterceptor: ServerInterceptor {
                     decision: decision,
                     context: serverContext,
                 )
+            } catch let error as RPCError where error.code == .cancelled {
+                throw error
+            } catch is CancellationError {
+                throw RPCError(code: .cancelled, message: "request was cancelled by the caller")
             } catch {
                 outcome = .refused(decision, .auditUnavailable)
             }
 
-            // THE CONSENT-PATH REFUSAL IS RECORDED RATHER THAN THROWN PAST THE RECORDER.
-            // This branch used to `try await prompt(...)`, which THROWS on every failure
-            // path, so the throw left `authorize` before `recorded(...)` was ever reached
-            // and NOTHING was written. Every refusal that happened after the engine had
-            // decided consent was required — declined, timed out, ceremony failed, answer
-            // for the wrong request, console gone mid-prompt — was invisible in the log
-            // that exists to answer exactly that question. Measured: ten such refusals in
-            // the unified log with an audit log whose last entry was three days earlier.
-            //
-            // THE RECORDED DECISION IS THE ONE THE ENGINE REACHED, not a synthetic
-            // denial, because the useful row for an operator is "this capability needed
-            // consent" with the refusal as its annotation. Recording a fabricated
-            // `.denied` basis would erase the fact that the engine had permitted the
-            // request pending a human — which is the distinction the log exists to keep.
-            try record(
-                outcome.decision,
-                for: request,
-                identity: identity,
-                answer: outcome.answer,
-                refusal: outcome.refusal,
-            )
-            if let refusal = outcome.refusal {
-                throw AuthorizationDenial(reason: refusal, capability: request.capability)
+            switch outcome {
+            case let .answered(issuedDecision, answer):
+                try record(
+                    issuedDecision,
+                    for: request,
+                    identity: identity,
+                    answer: answer,
+                )
+                return issuedDecision
+            case let .refused(refusedDecision, refusalReason):
+                try record(
+                    refusedDecision,
+                    for: request,
+                    identity: identity,
+                    refusal: refusalReason,
+                )
+                throw AuthorizationDenial(reason: refusalReason, capability: request.capability)
+            case .cancelled:
+                // An abandoned request writes NO audit entry: it never reached a decision,
+                // and writing an entry would imply the system decided something it did not.
+                throw RPCError(code: .cancelled, message: "request was cancelled by the caller")
             }
-            return outcome.decision
         case let .denied(reason):
             // A refusal is recorded too. A log that records what was permitted cannot be
             // asked what was refused, and the refusals are the half an operator reads when
@@ -704,6 +708,10 @@ struct AuthorizationInterceptor: ServerInterceptor {
         decision: AuthorizationDecision,
         context: ServerContext,
     ) async throws -> ConsentOutcome {
+        if context.cancellation.isCancelled || Task.isCancelled {
+            return .cancelled
+        }
+
         guard runtime.isConsoleReachable(), let consent = runtime.consent else {
             return .refused(decision, .consoleUnreachable)
         }
@@ -712,77 +720,89 @@ struct AuthorizationInterceptor: ServerInterceptor {
         // and asking the operator first is what a user who cannot authenticate expects
         // rather than a refusal they cannot understand.
 
-        let answer = await withConsentTimeout(
+        let waitResult = await withConsentTimeout(
             runtime.consentTimeout,
             cancellation: context.cancellation,
         ) {
             await consent(request, identity, decision)
         }
 
-        guard let answer else {
+        switch waitResult {
+        case .cancelled:
+            return .cancelled
+
+        case .timedOut:
             // NOBODY ANSWERED. This is a refusal that must reach the record, and note that
             // the reason is `consoleUnreachable` because the ONLY way to reach here is a
             // handler that was asked and returned nothing — which is indistinguishable from
             // a console that vanished, and is treated as exactly that.
             return .refused(decision, .consoleUnreachable)
-        }
-        // An answer for a different request is not an answer. This is the confused deputy
-        // in its narrowest form: two pending requests, one decision, applied to both.
-        guard answer.requestID == request.id else {
-            return .refused(decision, .notPermitted)
-        }
-        guard answer.isApproved else {
-            return .refused(decision, .notPermitted)
-        }
-        // A decision the ceremony was required for, without the ceremony, is a denial. The
-        // check is here rather than inside the engine because the engine is pure and cannot
-        // know whether a ceremony happened.
-        //
-        // THE REQUIREMENT OF THE OPTION THAT WAS SELECTED, NOT OF THE ONE THE PROMPT
-        // FOCUSED, and this is a security property rather than a detail. `decision.biometric`
-        // is the requirement for the default option, and the default is usually the
-        // narrowest: a clipboard read scoped to one application is routine and needs no
-        // ceremony, while `allowGlobalPersistent` for the same request needs one. An
-        // answer selecting the global option therefore passed a check that was reading the
-        // narrow option's bar, and the grant was issued with no fingerprint — defeating the
-        // BREADTH x PERSISTENCE rule the engine exists to enforce. An adversarial review of
-        // this work found it; it is the same shape as the defect
-        // `AuthorizationPolicy.swift` records having fixed once already, one layer up.
-        //
-        // AN ANSWER NAMING AN OPTION THIS ENGINE DID NOT OFFER CANNOT LOWER THE BAR: the
-        // floor is the focused option's own requirement, so an unrecognised or absent
-        // selection is judged against the decision rather than against nothing.
-        let selectedRequirement = answer.selected
-            .flatMap { kind in decision.offeredDecisions.first { $0.kind == kind }?.biometric }
-            ?? decision.biometric
-        if selectedRequirement.reason != nil, !answer.biometricObtained {
-            return .refused(decision, .biometricUnavailable)
-        }
-        // AND THE CLAIM IS CHECKED, NOT BELIEVED, when the answer does carry one. The check
-        // above asks only whether a ceremony was CLAIMED; this asks whether the claim is a
-        // proof FOR THIS DECISION that has not been spent and has not expired. The server wrote
-        // `BiometricProof` and `BiometricNonceLedger` for exactly this and called neither, so
-        // an invariant claimed two load-bearing controls that were dead code.
-        if let proof = answer.ceremonyProof {
-            let now = runtime.clock.now()
-            guard proof.authorizes(request, nonce: decision.ceremonyNonce ?? "", now: now),
-                  runtime.ceremonyLedger.spend(proof.nonce)
-            else {
-                logger.error(
-                    "A ceremony proof for \(request.id.rawValue, privacy: .private) did not authorise this decision.",
-                )
+
+        case let .answered(answer):
+            // An answer for a different request is not an answer. This is the confused deputy
+            // in its narrowest form: two pending requests, one decision, applied to both.
+            guard answer.requestID == request.id else {
+                return .refused(decision, .notPermitted)
+            }
+            guard answer.isApproved else {
+                return .refused(decision, .notPermitted)
+            }
+            // A decision the ceremony was required for, without the ceremony, is a denial. The
+            // check is here rather than inside the engine because the engine is pure and cannot
+            // know whether a ceremony happened.
+            //
+            // THE REQUIREMENT OF THE OPTION THAT WAS SELECTED, NOT OF THE ONE THE PROMPT
+            // FOCUSED, and this is a security property rather than a detail. `decision.biometric`
+            // is the requirement for the default option, and the default is usually the
+            // narrowest: a clipboard read scoped to one application is routine and needs no
+            // ceremony, while `allowGlobalPersistent` for the same request needs one. An
+            // answer selecting the global option therefore passed a check that was reading the
+            // narrow option's bar, and the grant was issued with no fingerprint — defeating the
+            // BREADTH x PERSISTENCE rule the engine exists to enforce. An adversarial review of
+            // this work found it; it is the same shape as the defect
+            // `AuthorizationPolicy.swift` records having fixed once already, one layer up.
+            //
+            // AN ANSWER NAMING AN OPTION THIS ENGINE DID NOT OFFER CANNOT LOWER THE BAR: the
+            // floor is the focused option's own requirement, so an unrecognised or absent
+            // selection is judged against the decision rather than against nothing.
+            let selectedRequirement = answer.selected
+                .flatMap { kind in decision.offeredDecisions.first { $0.kind == kind }?.biometric }
+                ?? decision.biometric
+            if selectedRequirement.reason != nil, !answer.biometricObtained {
                 return .refused(decision, .biometricUnavailable)
             }
-        }
+            // AND THE CLAIM IS CHECKED, NOT BELIEVED, when the answer does carry one. The check
+            // above asks only whether a ceremony was CLAIMED; this asks whether the claim is a
+            // proof FOR THIS DECISION that has not been spent and has not expired. The server wrote
+            // `BiometricProof` and `BiometricNonceLedger` for exactly this and called neither, so
+            // an invariant claimed two load-bearing controls that were dead code.
+            if let proof = answer.ceremonyProof {
+                let now = runtime.clock.now()
+                guard proof.authorizes(request, nonce: decision.ceremonyNonce ?? "", now: now),
+                      runtime.ceremonyLedger.spend(proof.nonce)
+                else {
+                    logger.error(
+                        "A ceremony proof for \(request.id.rawValue, privacy: .private) did not authorise this decision.",
+                    )
+                    return .refused(decision, .biometricUnavailable)
+                }
+            }
 
-        let issued = try await runtime.issuance.authorize(
-            answer: answer,
-            request: request,
-            identity: identity,
-            offered: decision.offeredDecisions,
-            now: runtime.clock.now(),
-        )
-        return .answered(decision: issued, answer: answer)
+            let issued = try await runtime.issuance.authorize(
+                answer: answer,
+                request: request,
+                identity: identity,
+                offered: decision.offeredDecisions,
+                now: runtime.clock.now(),
+            )
+            return .answered(decision: issued, answer: answer)
+        }
+    }
+
+    private enum ConsentWaitResult: Sendable, Equatable {
+        case answered(ConsentAnswer)
+        case timedOut
+        case cancelled
     }
 
     /// Races the ask against the bound, the CALLER'S CANCELLATION, and each other.
@@ -794,47 +814,73 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// CANCELLATION IS A SEPARATE WINNER BECAUSE A TASK TIMEOUT IS NOT ONE. This used to race
     /// the ask against `Task.sleep(for: timeout)` alone, and that sleep was wrapped in `try?`
     /// while a `withTaskGroup` scope joins its children — so `cancelAll()` could not shorten
-    /// the wait and the group returned only after the full bound had actually elapsed. Nothing
-    /// in the interceptor consulted the ServerContext's cancellation handle at all, which
-    /// GRPC's own documentation calls out precisely: "gRPC signals cancellation through this
-    /// handle, not by cancelling your handler's Task. If you don't check isCancelled or use
-    /// withRPCCancellationHandler, your handler keeps running after gRPC cancels the RPC."
-    /// The observable consequence was that a caller whose deadline expired left its consent wait
-    /// holding the console's single presentation slot for the rest of the bound, which blocked
-    /// every other request — including requests that need no consent and never asked the
-    /// operator anything — and wrote no audit entry, because an abandoned request never reaches
-    /// a decision. A refusal is the correct outcome here and not an error: the caller is gone.
+    /// the wait and the group returned only after the full bound had actually elapsed.
+    /// In addition, gRPC delivers cancellation through `ServerContext.RPCCancellationHandle`,
+    /// not by cancelling your handler's Task. If you don't check isCancelled or use
+    /// `withRPCCancellationHandler`, your handler keeps running after gRPC cancels the RPC.
+    ///
+    /// When the caller's context is cancelled (via RPCCancellationHandle or Task cancellation),
+    /// the consent wait ends immediately: the askTask is cancelled (which dismisses the prompt
+    /// in the operator UI and frees the waiter), the child tasks in the group are cancelled,
+    /// and the function returns `.cancelled` promptly rather than waiting out the full bound.
     private func withConsentTimeout(
         _ timeout: Duration,
-        cancellation _: ServerContext.RPCCancellationHandle,
+        cancellation: ServerContext.RPCCancellationHandle,
         _ body: @Sendable @escaping () async -> ConsentAnswer?,
-    ) async -> ConsentAnswer? {
-        await withRPCCancellationHandler {
-            await withTaskGroup(of: ConsentAnswer?.self) { group in
-                group.addTask { await body() }
-                group.addTask {
-                    do {
-                        // `try` AND NOT `try?`, so the group's own cancellation — which the
-                        // `cancelAll()` below raises — actually ends this sleep instead of
-                        // being swallowed and waited out.
-                        try await Task.sleep(for: timeout)
-                    } catch {}
-                    return nil
+    ) async -> ConsentWaitResult {
+        if cancellation.isCancelled || Task.isCancelled {
+            return .cancelled
+        }
+
+        let askTask = Task {
+            await body()
+        }
+
+        return await withTaskCancellationHandler {
+            await withRPCCancellationHandler {
+                await withTaskGroup(of: ConsentWaitResult.self) { group in
+                    group.addTask {
+                        let answer = await askTask.value
+                        if cancellation.isCancelled || Task.isCancelled || askTask.isCancelled {
+                            return .cancelled
+                        }
+                        if let answer {
+                            return .answered(answer)
+                        } else {
+                            return .timedOut
+                        }
+                    }
+                    group.addTask {
+                        do {
+                            try await Task.sleep(for: timeout)
+                            return .timedOut
+                        } catch {
+                            return .cancelled
+                        }
+                    }
+                    group.addTask {
+                        do {
+                            try await cancellation.cancelled
+                            return .cancelled
+                        } catch {
+                            return .cancelled
+                        }
+                    }
+
+                    let first = await group.next() ?? .timedOut
+                    let isCancelled = cancellation.isCancelled || Task.isCancelled || first == .cancelled
+                    group.cancelAll()
+                    askTask.cancel()
+                    if isCancelled {
+                        return .cancelled
+                    }
+                    return first
                 }
-                let first = await group.next() ?? nil
-                // CANCELLING THE GROUP RAISES THE SLEEP TASK'S CANCELLATION RATHER THAN
-                // ONLY ASKING FOR IT, which is what the sleep above is now written to
-                // honour. The scope still joins its children, so every child has to be
-                // cancellable for `cancelAll()` to shorten the return, and both are.
-                group.cancelAll()
-                return first
+            } onCancelRPC: {
+                askTask.cancel()
             }
-        } onCancelRPC: {
-            // THE CALLER GAVE UP. gRPC delivers this here rather than by cancelling the
-            // handler's Task, so without this the wait would run to its full bound with
-            // nobody left to receive the answer. The group above is cancelled by the
-            // enclosing handler's own cancellation, so returning here is what makes the
-            // whole race end promptly.
+        } onCancel: {
+            askTask.cancel()
         }
     }
 
@@ -948,24 +994,27 @@ enum ConsentOutcome {
     /// `.promptRequired` outcome — what WOULD have been permitted had a person said yes —
     /// and recording it preserves the distinction a fabricated `.denied` basis would erase.
     case refused(AuthorizationDecision, DenialReason)
+    /// The caller abandoned or cancelled the request before any decision was reached.
+    case cancelled
 
-    var decision: AuthorizationDecision {
+    var decision: AuthorizationDecision? {
         switch self {
         case let .answered(decision, _): decision
         case let .refused(decision, _): decision
+        case .cancelled: nil
         }
     }
 
     var answer: ConsentAnswer? {
         switch self {
         case let .answered(_, answer): answer
-        case .refused: nil
+        case .refused, .cancelled: nil
         }
     }
 
     var refusal: DenialReason? {
         switch self {
-        case .answered: nil
+        case .answered, .cancelled: nil
         case let .refused(_, reason): reason
         }
     }

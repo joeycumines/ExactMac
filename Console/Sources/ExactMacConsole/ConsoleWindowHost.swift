@@ -80,8 +80,8 @@ final class ConsoleWindowHost {
 
     init(application: any ConsoleApplication = LiveConsoleApplication()) {
         self.application = application
-        windowDelegate.onClose = { [weak self] surface in
-            self?.windowClosed(surface)
+        windowDelegate.onClose = { [weak self] closingWindow in
+            self?.windowClosed(closingWindow)
         }
     }
 
@@ -115,6 +115,7 @@ final class ConsoleWindowHost {
         title: String,
         width: CGFloat = Design.Layout.windowWidth,
         activates: Bool = false,
+        updateIfPresent: Bool = false,
         @ViewBuilder content: () -> some View,
     ) {
         if activates {
@@ -124,6 +125,9 @@ final class ConsoleWindowHost {
         if windows[surface] != nil {
             // Re-presenting the SAME request must not build a second window answering the
             // same nonce, so the content is only built when there is nothing to reuse.
+            if updateIfPresent {
+                setContent(surface, content: content)
+            }
             bringToFront(surface, activates: activates)
             return
         }
@@ -155,7 +159,6 @@ final class ConsoleWindowHost {
         window.maxSize = window.frame.size
         window.isReleasedWhenClosed = false
         window.delegate = windowDelegate
-        windowDelegate.surface = surface
         window.center()
         windows[surface] = window
         bringToFront(surface, activates: activates)
@@ -166,6 +169,11 @@ final class ConsoleWindowHost {
     /// host's bookkeeping and a test cannot quietly become a second way to open a window.
     func window(forTesting surface: Surface) -> NSWindow? {
         windows[surface]
+    }
+
+    /// Whether a surface's window is currently presented.
+    func isPresented(_ surface: Surface) -> Bool {
+        windows[surface] != nil
     }
 
     /// Replaces a presented surface's content, which is how an already-open window comes to
@@ -196,7 +204,7 @@ final class ConsoleWindowHost {
         window.close()
         // The delegate does the bookkeeping, so this is only a fallback for a window that
         // was never on screen; a second close is a no-op rather than a double removal.
-        windowClosed(surface)
+        windowClosed(window)
     }
 
     /// Closes every window, for the operator quitting with one open.
@@ -233,8 +241,9 @@ final class ConsoleWindowHost {
         application.activate()
     }
 
-    private func windowClosed(_ surface: Surface) {
-        guard windows.removeValue(forKey: surface) != nil else { return }
+    private func windowClosed(_ closingWindow: NSWindow) {
+        guard let surface = windows.first(where: { $0.value === closingWindow })?.key else { return }
+        windows.removeValue(forKey: surface)
         if windows.isEmpty {
             restoreRestingPolicy()
         }
@@ -255,15 +264,12 @@ final class ConsoleWindowHost {
 ///
 /// A SINGLE DELEGATE rather than one per window, because AppKit holds the delegate weakly
 /// and a per-window delegate would have to be retained somewhere for the window's whole
-/// life. The surface is the delegate's current field rather than a per-instance value, which
-/// is sound only because console windows are surfaced one at a time from the main actor and
-/// a window cannot be closed from two surfaces.
+/// life. The closing window is identified by matching against tracked windows.
 private final class SurfaceWindowDelegate: NSObject, NSWindowDelegate {
-    var surface: ConsoleWindowHost.Surface?
-    var onClose: ((ConsoleWindowHost.Surface) -> Void)?
+    var onClose: ((NSWindow) -> Void)?
 
-    func windowWillClose(_: Notification) {
-        guard let surface else { return }
-        onClose?(surface)
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        onClose?(window)
     }
 }

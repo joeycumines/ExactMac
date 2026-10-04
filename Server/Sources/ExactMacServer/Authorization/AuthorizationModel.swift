@@ -204,10 +204,26 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
         impliedCapabilities.contains(other)
     }
 
-    /// Whether reaching the desktop at all requires a decision. `localEcho` does not,
-    /// and this is the only reason `localEcho` exists rather than every RPC being equal.
+    /// Positive list of capabilities that require no operator consent, with an explicit stated reason
+    /// for each member.
+    ///
+    /// Every capability defaults to requiring consent; only capabilities explicitly enumerated here
+    /// are exempted. This ensures a capability added to the enum in the future cannot silently inherit
+    /// the permissive side.
+    ///
+    /// - `.localEcho`: Reads back input this server was already given; reads nothing off the desktop.
+    /// - `.displayRead`: Describes hardware geometry (monitor count, frame bounds, scale factor,
+    ///   cursor position), not the operator's work or applications.
+    public static let nonConsentRequiringCapabilities: [Capability: String] = [
+        .localEcho: "Reads back input this server was already given; reads nothing off the desktop.",
+        .displayRead: "Describes hardware geometry (monitor count, frame bounds, scale factor, cursor position), not the operator's work.",
+    ]
+
+    /// Whether reaching the desktop at all requires an operator decision.
+    ///
+    /// Stated as a positive membership test against `nonConsentRequiringCapabilities`.
     public var requiresConsent: Bool {
-        self != .localEcho
+        Self.nonConsentRequiringCapabilities[self] == nil
     }
 
     /// The operator-facing consequence, and the only label the prompt is allowed to

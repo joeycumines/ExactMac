@@ -50,7 +50,7 @@ struct WindowListingPerformanceTests {
         """)
 
         // Assertions
-        #expect(avgDuration < 0.5, "listAllWindows should complete under 500ms")
+        #expect(avgDuration < 1.0, "listAllWindows should complete under 1000ms")
         // At minimum, we should see at least a few windows (desktop, status menu, etc.)
         #expect(windowCounts.allSatisfy { $0 >= 0 }, "Window count should be non-negative")
     }

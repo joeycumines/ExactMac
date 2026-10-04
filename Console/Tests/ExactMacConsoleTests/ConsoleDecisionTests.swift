@@ -127,6 +127,42 @@ struct ConsoleDecisionTests {
         #expect(model.pendingPrompt?.requestID == "req-2", "the second is still the operator's to answer")
     }
 
+    @Test
+    func `cancelling the answer wait dismisses the approval window and clears pending state`() async {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (req, identity, decision) = ServerFixture.request(requestID: "req-cancel-1")
+
+        let answerTask = Task {
+            await model.answer(
+                request: req,
+                identity: identity,
+                decision: decision,
+            )
+        }
+
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(model.pendingPrompt?.requestID == "req-cancel-1")
+        #expect(model.pendingNotice != nil)
+        #expect(windows.isPresented(.approval))
+        #expect(model.serviceState == .pending)
+
+        answerTask.cancel()
+        let answer = await answerTask.value
+
+        #expect(answer == nil)
+        #expect(model.pendingPrompt == nil)
+        #expect(model.pendingNotice == nil)
+        #expect(!windows.isPresented(.approval))
+        #expect(model.serviceState == .running)
+    }
+
     // MARK: The ceremony
 
     @Test
@@ -446,5 +482,216 @@ struct ServerVocabularyTests {
         )
         #expect(request.offeredKinds == [.session, .deny], "all six were previously collapsed to deny")
         #expect(request.offeredKinds.first == .session, "not the refusal, which is what it was")
+    }
+
+    // MARK: - Concurrency and Queueing (E32)
+
+    @Test
+    @MainActor
+    func `two concurrent consent requests are queued and both resolved sequentially`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (req1, id1, dec1) = ServerFixture.request(requestID: "req-queue-1")
+        let (req2, id2, dec2) = ServerFixture.request(requestID: "req-queue-2")
+
+        let task1 = Task { @MainActor in
+            await model.answer(request: req1, identity: id1, decision: dec1)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(model.pendingPrompt?.requestID == "req-queue-1")
+        #expect(model.queuedRequests.isEmpty)
+        #expect(model.waitingCount == 1)
+
+        let task2 = Task { @MainActor in
+            await model.answer(request: req2, identity: id2, decision: dec2)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(model.pendingPrompt?.requestID == "req-queue-1")
+        #expect(model.queuedRequests.count == 1)
+        #expect(model.queuedRequests.first?.requestID == "req-queue-2")
+        #expect(model.waitingCount == 2)
+        #expect(model.blockedBy["req-queue-2"] != nil)
+
+        // Answer Request 1
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let answer1 = await task1.value
+
+        #expect(answer1?.isApproved == true)
+        #expect(answer1?.requestID == "req-queue-1")
+
+        // Request 2 is promoted to active prompt
+        #expect(model.pendingPrompt?.requestID == "req-queue-2")
+        #expect(model.queuedRequests.isEmpty)
+        #expect(model.waitingCount == 1)
+        #expect(windows.isPresented(.approval) == true)
+
+        // Answer Request 2
+        try await model.answer(.session, for: #require(model.pendingPrompt))
+        let answer2 = await task2.value
+
+        #expect(answer2?.isApproved == true)
+        #expect(answer2?.requestID == "req-queue-2")
+        #expect(model.pendingPrompt == nil)
+        #expect(model.waitingCount == 0)
+        #expect(windows.isPresented(.approval) == false)
+        #expect(model.serviceState == .running)
+    }
+
+    @Test
+    @MainActor
+    func `queued request cancelled while waiting leaves active prompt intact`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (req1, id1, dec1) = ServerFixture.request(requestID: "req-cancel-q-1")
+        let (req2, id2, dec2) = ServerFixture.request(requestID: "req-cancel-q-2")
+
+        let task1 = Task { @MainActor in
+            await model.answer(request: req1, identity: id1, decision: dec1)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+
+        let task2 = Task { @MainActor in
+            await model.answer(request: req2, identity: id2, decision: dec2)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(model.queuedRequests.count == 1)
+
+        // Cancel Request 2 while in queue
+        task2.cancel()
+        let answer2 = await task2.value
+
+        #expect(answer2 == nil)
+        #expect(model.pendingPrompt?.requestID == "req-cancel-q-1")
+        #expect(model.queuedRequests.isEmpty)
+        #expect(model.waitingCount == 1)
+        #expect(windows.isPresented(.approval) == true)
+
+        // Request 1 can still be answered normally
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let answer1 = await task1.value
+
+        #expect(answer1?.isApproved == true)
+        #expect(model.pendingPrompt == nil)
+        #expect(windows.isPresented(.approval) == false)
+    }
+
+    @Test
+    @MainActor
+    func `active prompt cancelled promotes next queued request immediately`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (req1, id1, dec1) = ServerFixture.request(requestID: "req-cancel-act-1")
+        let (req2, id2, dec2) = ServerFixture.request(requestID: "req-cancel-act-2")
+
+        let task1 = Task { @MainActor in
+            await model.answer(request: req1, identity: id1, decision: dec1)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+
+        let task2 = Task { @MainActor in
+            await model.answer(request: req2, identity: id2, decision: dec2)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+
+        // Cancel Request 1 (the active prompt)
+        task1.cancel()
+        let answer1 = await task1.value
+
+        #expect(answer1 == nil)
+
+        // Request 2 should immediately become active prompt
+        #expect(model.pendingPrompt?.requestID == "req-cancel-act-2")
+        #expect(model.queuedRequests.isEmpty)
+        #expect(model.waitingCount == 1)
+        #expect(windows.isPresented(.approval) == true)
+
+        // Request 2 is answered
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let answer2 = await task2.value
+
+        #expect(answer2?.isApproved == true)
+        #expect(model.pendingPrompt == nil)
+        #expect(windows.isPresented(.approval) == false)
+    }
+
+    @Test
+    @MainActor
+    func `queued request timeout records notice naming what timed out and what blocked it`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (req1, id1, dec1) = ServerFixture.request(requestID: "req-blocker")
+        let (req2, id2, dec2) = ServerFixture.request(requestID: "req-blocked")
+
+        let task1 = Task { @MainActor in
+            await model.answer(request: req1, identity: id1, decision: dec1)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+
+        let task2 = Task { @MainActor in
+            await model.answer(request: req2, identity: id2, decision: dec2)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(model.queuedRequests.count == 1)
+        let blockerTitle = model.pendingPrompt?.promptTitle ?? ""
+        #expect(!blockerTitle.isEmpty)
+
+        // Cancel/timeout Request 2 while in queue
+        task2.cancel()
+        let answer2 = await task2.value
+        #expect(answer2 == nil)
+
+        // Operator answers Request 1
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await task1.value
+
+        // Prompt is gone, and the operator sees the notice explaining that a request timed out behind the blocker
+        #expect(model.pendingPrompt == nil)
+        #expect(model.pendingNotice != nil)
+        #expect(model.pendingNotice?.contains("timed out while waiting behind") == true)
+        #expect(model.pendingNotice?.contains(blockerTitle) == true)
     }
 }

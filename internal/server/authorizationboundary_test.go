@@ -27,7 +27,7 @@ func TestTheGoLayerCannotReachACapabilityTheServerRefuses(t *testing.T) {
 	// The feature switch ON, so the request REACHES the server and the refusal under test
 	// is the server's rather than the switch's.
 	server.cfg.ShellCommandsEnabled = true
-	server.client = denyingClient(reasonRef("denied: reducedUnauthenticatedPosture"))
+	server.client = denyingClient(new("denied: reducedUnauthenticatedPosture"))
 
 	result, err := server.handleRun(&ToolCall{
 		Name:      "run",
@@ -51,7 +51,7 @@ func TestTheGoLayerCannotReachACapabilityTheServerRefuses(t *testing.T) {
 // success.
 func TestTheRefusalIsNotFlattenedIntoAnEmptyResult(t *testing.T) {
 	server := newTestServer()
-	server.client = denyingClient(reasonRef("denied: notPermitted"))
+	server.client = denyingClient(new("denied: notPermitted"))
 
 	result, err := server.handleClipboard(&ToolCall{
 		Name:      "clipboard",
@@ -94,7 +94,7 @@ func TestTheFeatureSwitchIsNotTheSecurityControl(t *testing.T) {
 	// And with the switch on, the request still goes to the server — the switch does not
 	// short-circuit the control, it removes the offer.
 	server.cfg.ShellCommandsEnabled = true
-	server.client = denyingClient(reasonRef("denied: notPermitted"))
+	server.client = denyingClient(new("denied: notPermitted"))
 	enabled, err := server.handleRun(&ToolCall{
 		Name:      "run",
 		Arguments: json.RawMessage(`{"type":"shell","command":"/bin/echo hi"}`),
@@ -123,5 +123,3 @@ func denyingClient(reason *string) *mockExactMacClient {
 		getClipboardFunc:        emptyClipboard,
 	}
 }
-
-func reasonRef(reason string) *string { return &reason }

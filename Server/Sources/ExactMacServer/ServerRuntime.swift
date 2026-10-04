@@ -47,6 +47,8 @@ private func performGracefulShutdown(
         logger.info("Released the Unix socket claim: \(listenerFactory.socketPath, privacy: .private)")
     }
 
+    ServerInspectionService.unregister()
+
     logger.info("Graceful shutdown complete")
 }
 

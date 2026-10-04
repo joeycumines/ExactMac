@@ -76,15 +76,32 @@ struct FailClosedPostureTests {
         let subject = model(presentation: .application)
         let before = subject.serviceState
 
-        subject.setServiceEnabled(false)
+        subject.setStartAtLoginEnabled(false)
 
         #expect(subject.serviceState == before, "start-at-login is not the service, and must not report as one")
         // And the reverse, on a process that cannot ask: the band stays whatever it was.
         let headless = model(presentation: .headless)
         headless.apply(.running)
-        headless.setServiceEnabled(true)
+        headless.setStartAtLoginEnabled(true)
         #expect(headless.serviceState != .running, "the veto still holds when the toggle is pressed")
         #expect(headless.failClosed != nil)
+    }
+
+    @Test
+    func `The service toggle stops and starts the service`() {
+        let subject = model(presentation: .application)
+        #expect(subject.serviceState == .running)
+        #expect(subject.isServiceRunning == true)
+
+        subject.toggleService()
+        #expect(subject.serviceState == .stopped)
+        #expect(subject.isServiceRunning == false)
+        #expect(subject.failClosed?.title == "The service is off")
+
+        subject.toggleService()
+        #expect(subject.serviceState == .running)
+        #expect(subject.isServiceRunning == true)
+        #expect(subject.failClosed == nil)
     }
 
     @Test

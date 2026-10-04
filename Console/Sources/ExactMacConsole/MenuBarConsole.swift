@@ -155,19 +155,22 @@ struct MenuBarPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.component) {
             head
-            if let notice = model.pendingNotice, model.pendingPrompt != nil {
+            if let pending = model.pendingPrompt {
                 // A BUTTON, and that is the whole change. This row used to be a `VStack` of
                 // `Text`: the console displayed that a request was waiting and there was
                 // nothing to click, which is the state the operator reported as "it does
                 // nothing". It is the request's only entry point, so it is presented as one.
-                PendingNotice(text: notice) { model.openApproval() }
-            } else if let notice = model.pendingNotice {
-                PendingNotice(text: notice) {}
+                PendingNotice(
+                    count: model.waitingCount,
+                    text: pending.popoverNoticeBody,
+                ) {
+                    model.openApproval()
+                }
             } else if let band = model.failClosed {
                 FailClosedBand(title: band.title, text: band.body)
             }
-            ServiceToggle(isOn: model.isServiceEnabled) { model.toggleService() }
-            Text("Start ExactMac when you log in. Turning this off does not revoke grants you already made.")
+            ServiceToggle(isOn: model.isServiceRunning) { model.toggleService() }
+            Text("Turning it back on does not restore grants you revoked.")
                 .font(.system(size: 10))
                 .foregroundStyle(Design.Ink.textTertiary)
             Rectangle().fill(Design.Ink.separator).frame(height: 1)
@@ -248,6 +251,7 @@ struct MenuBarPopover: View {
 /// states how many are waiting. A count the operator cannot see is a window they do not
 /// know is open.
 private struct PendingNotice: View {
+    var count: Int = 1
     let text: String
     var onOpen: () -> Void = {}
 
@@ -258,9 +262,13 @@ private struct PendingNotice: View {
         .buttonStyle(.plain)
     }
 
+    private var titleText: String {
+        count > 1 ? "\(count) requests waiting for you" : "1 request waiting for you"
+    }
+
     private var pendingBody: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
-            Text("1 request waiting for you")
+            Text(titleText)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Design.Ink.accentText)
             Text(text)
@@ -363,9 +371,9 @@ private struct ServiceToggle: View {
                 .frame(width: 38, height: 22)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Start ExactMac when you log in")
-            .accessibilityValue(isOn ? "On" : "Off")
-            .accessibilityHint("Turning this off does not revoke grants you already made.")
+            .accessibilityLabel("ExactMac service")
+            .accessibilityValue(isOn ? "Running" : "Stopped")
+            .accessibilityHint("Turning this off stops the ExactMac service.")
         }
         .padding(Design.Space.three)
         .background(

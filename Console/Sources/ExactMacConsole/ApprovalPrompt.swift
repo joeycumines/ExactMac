@@ -70,26 +70,31 @@ struct CallerTree: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
-                HStack(alignment: .center, spacing: Design.Space.leading) {
+                HStack(alignment: .top, spacing: Design.Space.leading) {
                     if row.depth > 0 {
                         RoundedRectangle(cornerRadius: 0)
                             .fill(Design.Ink.separator)
                             .frame(width: 1, height: 18)
+                            .padding(.top, 2)
                     }
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                         .fill(row.isRequester ? Design.Ink.accent : Design.Ink.separator)
                         .frame(width: 3, height: 16)
+                        .padding(.top, 2)
                     // The name and the role are separated by the design's own delimiter.
                     Text(Design.joined([row.name, row.role]))
                         .font(.system(size: 12, weight: row.isRequester ? .semibold : .regular))
                         .foregroundStyle(Design.Ink.textPrimary)
-                        .lineLimit(1)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: Design.Space.leading)
                     SignatureBadge(state: row.signature)
+                        .padding(.top, 1)
                 }
                 .padding(.leading, CGFloat(row.depth) * Design.Space.treeIndent + Design.Space.chip)
                 .padding(.trailing, Design.Space.chip)
-                .frame(height: 34)
+                .padding(.vertical, Design.Space.hair)
+                .frame(minHeight: 34)
             }
         }
         .padding(.vertical, Design.Space.hair)
@@ -198,12 +203,104 @@ struct ApprovalPrompt: View {
     let moreChoicesLabel: String?
     let showOptionsLabel: String?
     let selectedOption: OptionRow.Kind?
-    var onDecision: (OptionRow.Kind) -> Void = { _ in }
-    var onCopyPayload: () -> Void = {}
+    var onDecision: (OptionRow.Kind, String) -> Void
+    var onCopyPayload: () -> Void
     /// Expands the collapsed affordances into the full option set. The model owns the
     /// transition because it owns the state machine, and a view that held its own expansion
     /// flag would be a second state machine.
-    var onShowOptions: () -> Void = {}
+    var onShowOptions: () -> Void
+
+    @State var operatorNote: String
+
+    init(
+        state: State,
+        title: String,
+        capabilityLine: String,
+        risk: String,
+        riskDot: Color,
+        clock: String? = nil,
+        reason: String? = nil,
+        implication: String? = nil,
+        tree: [CallerTree.Row],
+        target: String? = nil,
+        payload: String,
+        biometricLine: String,
+        biometricDot: Color,
+        moreChoicesLabel: String? = nil,
+        showOptionsLabel: String? = nil,
+        selectedOption: OptionRow.Kind? = nil,
+        operatorNote: String = "",
+        onDecision: @escaping (OptionRow.Kind, String) -> Void = { _, _ in },
+        onCopyPayload: @escaping () -> Void = {},
+        onShowOptions: @escaping () -> Void = {},
+    ) {
+        self.state = state
+        self.title = title
+        self.capabilityLine = capabilityLine
+        self.risk = risk
+        self.riskDot = riskDot
+        self.clock = clock
+        self.reason = reason
+        self.implication = implication
+        self.tree = tree
+        self.target = target
+        self.payload = payload
+        self.biometricLine = biometricLine
+        self.biometricDot = biometricDot
+        self.moreChoicesLabel = moreChoicesLabel
+        self.showOptionsLabel = showOptionsLabel
+        self.selectedOption = selectedOption
+        self._operatorNote = SwiftUI.State(initialValue: operatorNote)
+        self.onDecision = onDecision
+        self.onCopyPayload = onCopyPayload
+        self.onShowOptions = onShowOptions
+    }
+
+    init(
+        state: State,
+        title: String,
+        capabilityLine: String,
+        risk: String,
+        riskDot: Color,
+        clock: String? = nil,
+        reason: String? = nil,
+        implication: String? = nil,
+        tree: [CallerTree.Row],
+        target: String? = nil,
+        payload: String,
+        biometricLine: String,
+        biometricDot: Color,
+        moreChoicesLabel: String? = nil,
+        showOptionsLabel: String? = nil,
+        selectedOption: OptionRow.Kind? = nil,
+        operatorNote: String = "",
+        onDecision: @escaping (OptionRow.Kind) -> Void,
+        onCopyPayload: @escaping () -> Void = {},
+        onShowOptions: @escaping () -> Void = {},
+    ) {
+        self.init(
+            state: state,
+            title: title,
+            capabilityLine: capabilityLine,
+            risk: risk,
+            riskDot: riskDot,
+            clock: clock,
+            reason: reason,
+            implication: implication,
+            tree: tree,
+            target: target,
+            payload: payload,
+            biometricLine: biometricLine,
+            biometricDot: biometricDot,
+            moreChoicesLabel: moreChoicesLabel,
+            showOptionsLabel: showOptionsLabel,
+            selectedOption: selectedOption,
+            operatorNote: operatorNote,
+            onDecision: { kind, _ in onDecision(kind) },
+            onCopyPayload: onCopyPayload,
+            onShowOptions: onShowOptions,
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -268,10 +365,16 @@ struct ApprovalPrompt: View {
         .padding(.leading, Design.Space.frame)
     }
 
+    /// Whether the agent gave no reason (nil or empty/whitespace).
+    var showsMissingReasonBanner: Bool {
+        guard let reason else { return true }
+        return reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// The agent's reason, or the state its absence puts the operator in.
     @ViewBuilder
     private var reasonBlock: some View {
-        if let reason {
+        if !showsMissingReasonBanner, let reason {
             UntrustedField(
                 caption: state == .noReason ? .caller : .agentReason,
                 value: reason,
@@ -413,7 +516,7 @@ struct ApprovalPrompt: View {
                         OptionRow(
                             kind: kind,
                             isDefault: kind == selectedOption,
-                        ) { onDecision(kind) }
+                        ) { onDecision(kind, operatorNote) }
                     }
                 }
             } else if isSettled {
@@ -425,11 +528,14 @@ struct ApprovalPrompt: View {
                 // timed out and was denied while the screen said "Allow once".
                 CollapsedActions(
                     primary: selectedOption ?? .once,
-                    onDecision: onDecision,
+                    onDecision: { kind in onDecision(kind, operatorNote) },
                 )
             }
 
-            NoteField()
+            NoteField(
+                text: $operatorNote,
+                isDenied: selectedOption == .deny,
+            )
 
             if !isSettled, state != .expanded {
                 Rectangle()
@@ -438,7 +544,7 @@ struct ApprovalPrompt: View {
                 DenyRow(
                     moreChoicesLabel: moreChoicesLabel,
                     showOptionsLabel: showOptionsLabel,
-                    onDeny: { onDecision(.deny) },
+                    onDeny: { onDecision(.deny, operatorNote) },
                     onShowOptions: onShowOptions,
                 )
             }
@@ -553,9 +659,15 @@ private struct DenyRow: View {
     }
 }
 
-private struct NoteField: View {
-    @State private var text = ""
-    let caption = "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
+struct NoteField: View {
+    @Binding var text: String
+    var isDenied: Bool = false
+
+    var caption: String {
+        isDenied
+            ? "NOTE TO THE AGENT — SENT BACK WITH YOUR DENIAL"
+            : "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
@@ -569,15 +681,16 @@ private struct NoteField: View {
             )
             .textFieldStyle(.plain)
             .font(.system(size: 12))
-            .foregroundStyle(Design.Ink.textTertiary)
+            .foregroundStyle(Design.Ink.textPrimary)
+            .lineLimit(2 ... 4)
         }
         .padding(Design.Space.three)
         .background(
-            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                .fill(Design.Ink.surface),
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surfaceSunken),
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
                 .strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
         )
     }
