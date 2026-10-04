@@ -1,4 +1,5 @@
 import Darwin
+import Synchronization
 @testable import ExactMacServer
 import Foundation
 import XCTest
@@ -384,6 +385,53 @@ final class GrantStoreTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
         XCTAssertTrue(try store.consume(granted.id, operations: 2))
         XCTAssertTrue(store.liveGrants().isEmpty, "an exhausted grant is removed, not left at zero")
+    }
+
+    /// THE PERSIST RACE, under load: a persist that snapshots, encodes and writes as
+    /// separate steps can land STALE content after a newer persist has already written —
+    /// a revoked grant back in the file the next boot reads. The write is serialized now,
+    /// so the property this asserts is: after concurrent issue and revoke quiesce, the
+    /// file on disk is EXACTLY the state memory holds, and no grant any task revoked is
+    /// in it. The assertion is made against a REOPENED store, because memory converging
+    /// while the file lags is precisely the failure this guards against.
+    func testConcurrentIssueAndRevokeLeaveTheFileEqualToMemoryAndNeverResurrect() async throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let tasks = 8
+        let rounds = 25
+        let revokedByID = Synchronization.Mutex<[String: Bool]>([:])
+        await withTaskGroup(of: Void.self) { group in
+            for task in 0..<tasks {
+                group.addTask {
+                    for round in 0..<rounds {
+                        let granted = try? store.issue(
+                            capability: .clipboardRead,
+                            scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),
+                            duration: .monotonicSeconds(6000),
+                            holder: Self.identity(),
+                        )
+                        if let granted {
+                            revokedByID.withLock { $0[granted.id] = false }
+                            try? store.revoke(granted.id)
+                            revokedByID.withLock { $0[granted.id] = true }
+                        }
+                        _ = task
+                        _ = round
+                    }
+                }
+            }
+        }
+
+        // Every issued grant was revoked by the task that issued it, so the live set —
+        // and therefore the file — must be EMPTY.
+        XCTAssertTrue(store.liveGrants().isEmpty, "every grant was revoked; none may be live")
+        let reopened = try GrantStore.openStore(path: path, clock: clock)
+        XCTAssertEqual(
+            reopened.liveGrants().count, 0,
+            "a revoked grant survived in the file: the persist race resurrected it",
+        )
     }
 
     /// The same spend against a grant INSIDE an envelope. Envelopes are granted as a unit

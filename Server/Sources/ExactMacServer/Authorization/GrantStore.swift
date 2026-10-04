@@ -212,6 +212,16 @@ final class GrantStore: Sendable {
     let bootWallClockSeconds: Int
     let maximumEnvelopeSeconds: Int
     private let state = Synchronization.Mutex<GrantStoreContents>(GrantStoreContents())
+    /// Serializes the whole persist — snapshot, encode, write, fsync — as one unit.
+    ///
+    /// THE STATE LOCK ALONE WAS NOT ENOUGH, and the failure it allowed was resurrection:
+    /// a mutator mutated under `state`, released, and THEN persisted, so a persist could
+    /// snapshot state that a concurrent mutator had already changed again and land that
+    /// content on disk after the newer content was already written — a revoked grant
+    /// back in the file the next boot reads. Snapshot and write are atomic under THIS
+    /// lock, so the last write to land is always the snapshot taken last, which is the
+    /// state as it stood.
+    private let persistenceLock = Synchronization.Mutex<()>(())
     private let logger = Logger(
         subsystem: "io.github.joeycumines.exactmac",
         category: "authorization.grants",
@@ -349,33 +359,37 @@ final class GrantStore: Sendable {
     // MARK: - Persistence
 
     private func persist() throws {
-        let contents = state.withLock { $0 }
-        let data = try JSONEncoder().encode(contents)
-        // The whole file, written through a fresh hardened descriptor, so a write cannot
-        // land in a file that was swapped after the open.
-        let descriptor = try openHardened()
-        defer { Self.closeDescriptor(descriptor) }
-        guard ftruncate(descriptor, 0) == 0 else {
-            throw GrantStoreError.unreadable(path: path, reason: "truncate failed with errno \(errno)")
-        }
-        try data.withUnsafeBytes { raw in
-            var offset = 0
-            while offset < raw.count {
-                let written = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                if written > 0 {
-                    offset += written
-                    continue
-                }
-                if written < 0, errno == EINTR {
-                    continue
-                }
-                throw GrantStoreError.unreadable(path: path, reason: "write failed with errno \(errno)")
+        // Snapshot, encode, write and fsync are ONE unit under this lock, or the last
+        // writer to land could be carrying stale content — see the declaration above.
+        try persistenceLock.withLock { _ in
+            let contents = state.withLock { $0 }
+            let data = try JSONEncoder().encode(contents)
+            // The whole file, written through a fresh hardened descriptor, so a write cannot
+            // land in a file that was swapped after the open.
+            let descriptor = try openHardened()
+            defer { Self.closeDescriptor(descriptor) }
+            guard ftruncate(descriptor, 0) == 0 else {
+                throw GrantStoreError.unreadable(path: path, reason: "truncate failed with errno \(errno)")
             }
-        }
-        // Durability before the caller is told the grant exists. A grant that is reported
-        // and then lost on power failure is a grant the operator believes they revoked.
-        guard fsync(descriptor) == 0 else {
-            throw GrantStoreError.unreadable(path: path, reason: "fsync failed with errno \(errno)")
+            try data.withUnsafeBytes { raw in
+                var offset = 0
+                while offset < raw.count {
+                    let written = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                    if written > 0 {
+                        offset += written
+                        continue
+                    }
+                    if written < 0, errno == EINTR {
+                        continue
+                    }
+                    throw GrantStoreError.unreadable(path: path, reason: "write failed with errno \(errno)")
+                }
+            }
+            // Durability before the caller is told the grant exists. A grant that is reported
+            // and then lost on power failure is a grant the operator believes they revoked.
+            guard fsync(descriptor) == 0 else {
+                throw GrantStoreError.unreadable(path: path, reason: "fsync failed with errno \(errno)")
+            }
         }
     }
 
