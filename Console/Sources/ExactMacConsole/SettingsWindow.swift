@@ -130,6 +130,50 @@ struct PostureControl: View {
             case .lockedDown: "Locked down"
             }
         }
+
+        /// What the option permits and what it refuses, in the operator's terms — the
+        /// sentences the design carries beside the control, mirrored here so one edit
+        /// cannot leave the other behind. Each clause is grounded in engine behaviour a
+        /// server test pins: strict prompts even over a live grant and withdraws the
+        /// durable options (AuthorizationPolicyTests' strict-posture pair), balanced
+        /// answers from a standing grant before asking, locked down refuses without
+        /// prompting. Invariant 17 holds because these are behaviours, not names.
+        var explanation: String {
+            switch self {
+            case .strict:
+                "Every request that needs approval prompts, even one a saved grant already "
+                    + "covers. Grants are kept but never let a request skip a question. When "
+                    + "you approve, the only options are this once or never — nothing is "
+                    + "offered that would outlive the request."
+            case .balanced:
+                "If a saved grant covers the request it is answered without a prompt; "
+                    + "otherwise you are asked, and what you are offered scales with breadth "
+                    + "— a narrow one-shot approval for a narrow request, broader standing "
+                    + "approvals for broader ones, and the broadest need your fingerprint."
+            case .lockedDown:
+                "Nothing asks you anything, because every request that would prompt is "
+                    + "refused outright."
+            }
+        }
+    }
+
+    /// The two statements the control owes the operator no matter which option is chosen:
+    /// why there is no permissive option to choose (the posture ladder deliberately stops
+    /// at Balanced — widening what happens without asking is what this product exists to
+    /// prevent), and that the never-prompt set is fixed in the server. Recording both HERE
+    /// is the acceptance's own demand: an absence is not an answer.
+    static let fixedStatements =
+        "The server cannot be made more permissive than Balanced, and the short list of "
+            + "requests that never prompt at all is fixed in the server, not set here."
+
+    /// Every option's explanation, in the order the control shows them, followed by the
+    /// fixed statements. ONE SOURCE for the block beside the control, so the design copy,
+    /// the rendered window and the tests all read the same string.
+    static var optionExplanations: String {
+        Choice.allCases
+            .map { "\($0.label) — \($0.explanation)" }
+            .joined(separator: "\n")
+            + "\n\n" + fixedStatements
     }
 
     @Binding var selection: Choice
@@ -222,13 +266,10 @@ struct SettingsWindow: View {
                     SectionLabel(text: "POSTURE")
                         .padding(.top, 1)
                     PostureControl(selection: $posture)
-                    Text(
-                        "The default. Friction scales with what a grant would actually permit, so "
-                            + "a narrow one asks nothing and a broad one asks for a biometric.",
-                    )
-                    .font(.system(size: 11))
-                    .foregroundStyle(Design.Ink.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(PostureControl.optionExplanations)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Design.Ink.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     SectionLabel(text: "BIOMETRIC REQUIREMENTS")
                     ForEach(Self.biometricRows) { SettingRow(setting: $0) }
