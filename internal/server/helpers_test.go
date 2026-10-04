@@ -4,11 +4,13 @@ package server
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
 	_type "github.com/joeycumines/ExactMac/gen/go/exactmac/type"
 	pb "github.com/joeycumines/ExactMac/gen/go/exactmac/v1"
+	"github.com/joeycumines/ExactMac/internal/config"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -308,7 +310,7 @@ func TestFormatGRPCError_GRPCStatusCodes(t *testing.T) {
 			message:        "operation timed out",
 			toolName:       "wait_element",
 			wantCode:       "DeadlineExceeded",
-			wantSuggestion: "Operation timed out",
+			wantSuggestion: "consent prompt was likely unanswered",
 		},
 		{
 			name:           "Internal",
@@ -395,6 +397,28 @@ func TestFormatGRPCError_GRPCStatusCodes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The deadline error QUOTES THE NUMBERS THE CALLER IS ACTUALLY WORKING WITH: this
+// client's own request timeout and the server's consent bound. Asserting both numbers
+// by their constants — not by literals in this file — is what makes the error's
+// arithmetic checked rather than decorated: if either constant moves and the suggestion
+// stops naming the values that produced the timeout, this fails.
+func TestFormatGRPCError_DeadlineExceededNamesTheConsentCause(t *testing.T) {
+	err := status.Error(codes.DeadlineExceeded, "context deadline exceeded")
+	result := formatGRPCError(err, "get_display")
+
+	if !strings.Contains(result, strconv.Itoa(requestTimeoutSeconds)) {
+		t.Errorf("deadline error should quote the client's own timeout %d: %s",
+			requestTimeoutSeconds, result)
+	}
+	if !strings.Contains(result, strconv.Itoa(config.ServerConsentTimeoutSeconds)) {
+		t.Errorf("deadline error should quote the server's consent bound %d: %s",
+			config.ServerConsentTimeoutSeconds, result)
+	}
+	if !strings.Contains(result, "EXACTMAC_CONSENT_TIMEOUT_SECONDS") {
+		t.Errorf("deadline error should name the server setting that governs the wait: %s", result)
 	}
 }
 

@@ -12,9 +12,20 @@ import (
 
 	_type "github.com/joeycumines/ExactMac/gen/go/exactmac/type"
 	pb "github.com/joeycumines/ExactMac/gen/go/exactmac/v1"
+	"github.com/joeycumines/ExactMac/internal/config"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
+
+// requestTimeoutSeconds is the per-request deadline this client applies, in seconds.
+//
+// IT IS THE CONFIG'S OWN VALUE, restated here so the deadline error can quote the number
+// the caller was actually given. formatGRPCError is a package function with no Config in
+// reach, and threading the whole config through 36 call sites to quote one number in one
+// error branch is not worth the churn; the config validates at startup that this value is
+// longer than the server's consent wait, so the error's arithmetic is checked once where
+// the value is born rather than re-derived at every failure.
+var requestTimeoutSeconds = config.DefaultRequestTimeoutSeconds
 
 // maxDisplayTextLen is the maximum length for text shown in result summaries.
 // Longer text is truncated with "..." suffix.
@@ -166,7 +177,24 @@ func formatGRPCError(err error, toolName string) string {
 	case codes.Unavailable:
 		suggestion = "The gRPC server may be down or unreachable. Check server status"
 	case codes.DeadlineExceeded:
-		suggestion = "Operation timed out. Try increasing timeout or simplifying the request"
+		// THE DEADLINE NAMES ITS CAUSE, because "Operation timed out. Try increasing
+		// timeout" sent operators to debug their network, their agent host and their
+		// permissions when the actual mechanism was the server's consent wait: the
+		// request was held for a person to answer and nobody answered in time. This
+		// client's own deadline is validated at startup to be longer than that wait
+		// (internal/config: validate() refuses a shorter one), so reaching here with the
+		// derived deadline almost always means the consent bound expired unanswered.
+		// The remedy is on the server — EXACTMAC_CONSENT_TIMEOUT_SECONDS — and naming
+		// it is what makes the error actionable instead of misleading.
+		suggestion = fmt.Sprintf(
+			"The request was not answered within %d seconds. If this call needs the operator's "+
+				"approval, the consent prompt was likely unanswered or expired before anyone saw it. "+
+				"Pass a reason so the request is worth approving, and if this deadline is genuinely "+
+				"too short, raise EXACTMAC_REQUEST_TIMEOUT here and the server's "+
+				"EXACTMAC_CONSENT_TIMEOUT_SECONDS (currently %d) to match",
+			requestTimeoutSeconds,
+			config.ServerConsentTimeoutSeconds,
+		)
 	case codes.Internal:
 		suggestion = "An internal server error occurred. Check server logs for details"
 	case codes.FailedPrecondition:
