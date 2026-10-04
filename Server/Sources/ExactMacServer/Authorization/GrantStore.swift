@@ -437,6 +437,11 @@ final class GrantStore: Sendable {
     /// which is the claim the code was making and was not keeping.
     func snapshot() async -> GrantSnapshot {
         let at = clock.now()
+        // The file is pruned on the read the interceptor performs each request, so a
+        // store cannot grow without limit between maintenance points. The prune is
+        // best-effort: a store that cannot be written is unreadable, and unreadable
+        // denies through `currentIntegrity` rather than through this path.
+        _ = try? pruneExpired(now: at)
         return GrantSnapshot(
             grants: liveGrants(now: at),
             envelopes: liveEnvelopes(now: at),
@@ -479,6 +484,13 @@ final class GrantStore: Sendable {
     ///
     /// - Returns: The issued grant, or the failure. A grant that cannot be persisted is not
     ///   issued, because reporting one the operator cannot rely on is worse than refusing.
+    ///
+    /// A `.once` grant is NOT persisted: it completes with the request it authorized and
+    /// `isExpired` at the instant of issue, so writing it to the file buys nothing and
+    /// accumulates one dead entry per approval for the life of the installation. The grant
+    /// is still RETURNED — the caller authorizes this request against it — it is just never
+    /// stored, because a live store is the only place a once-grant could sit around looking
+    /// reusable. The file therefore holds only grants that can authorize a FUTURE request.
     @discardableResult
     func issue(
         capability: Capability,
@@ -503,6 +515,9 @@ final class GrantStore: Sendable {
             request: request,
             envelopeIdentifier: envelopeIdentifier,
         )
+        guard duration != .once else {
+            return grant
+        }
         state.withLock { contents in
             contents.sequence += 1
             var stored = storedGrant(grant)
@@ -555,6 +570,45 @@ final class GrantStore: Sendable {
             remainingOperations: remainingOperations,
             targetIsHighConsequence: false,
         )
+    }
+
+    /// Removes grants that can no longer authorize anything, and persists the result.
+    ///
+    /// THE ONLY THING THAT GROWS THE FILE IS ISSUANCE, and issuance only stores grants
+    /// that outlive the request they authorized — `.once` is never written (see `issue`),
+    /// so what accumulates here is time-expired grants and count-exhausted ones. The
+    /// sweep is bounded by construction: it visits each entry once and writes the file
+    /// once, so a store cannot grow without limit between maintenance points. It is
+    /// called on the read paths (`liveGrants`, `snapshot`) rather than on a timer,
+    /// because a timer is a background thread with its own lifetime and failure modes,
+    /// and the store's own reads are the only moments that provably need it fresh.
+    ///
+    /// - Returns: The number of entries removed.
+    @discardableResult
+    func pruneExpired(now: MonotonicInstant? = nil) throws -> Int {
+        let at = now ?? clock.now()
+        let removed = state.withLock { contents -> Int in
+            let before = contents.grants.count
+            contents.grants.removeAll { stored in
+                MonotonicInstant(nanoseconds: stored.expiresAtNanoseconds) <= at
+                    || stored.remainingOperations == 0
+            }
+            let expiredEnvelopes = contents.envelopes.filter {
+                MonotonicInstant(nanoseconds: $0.expiresAtNanoseconds) <= at
+            }
+            for expired in expiredEnvelopes {
+                contents.envelopes.removeAll { $0.id == expired.id }
+            }
+            let envelopeGrants = Set(contents.envelopes.flatMap { $0.grants.map(\.id) })
+            contents.grants.removeAll {
+                $0.originEnvelopeIdentifier != nil && !envelopeGrants.contains($0.id)
+            }
+            return before - contents.grants.count
+        }
+        if removed > 0 {
+            try persist()
+        }
+        return removed
     }
 
     // MARK: - Consuming

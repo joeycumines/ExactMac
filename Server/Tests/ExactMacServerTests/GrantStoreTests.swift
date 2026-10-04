@@ -602,7 +602,9 @@ final class GrantStoreTests: XCTestCase {
     }
 
     /// A `.once` grant completes with the request it authorized and cannot be re-presented,
-    /// so the store holds it with an expiry of "now" and never shows it as live.
+    /// so it is never even WRITTEN: the store returns it for the request at hand, but the
+    /// file holds nothing, because a persisted once-grant is one dead entry per approval
+    /// for the life of the installation and nothing can read it back as live.
     func testAOnceGrantIsNeverLive() throws {
         let clock = MovableClock()
         let (store, path) = try makeStore(clock: clock)
@@ -617,7 +619,83 @@ final class GrantStoreTests: XCTestCase {
         )
         XCTAssertEqual(granted.expiresAt, clock.now())
         XCTAssertEqual(store.liveGrants().count, 0)
+        // THE FILE, not the model: the entry is absent from what was persisted, which is
+        // the claim E30 makes and the read path alone cannot prove.
+        XCTAssertTrue(store.persistedContents().grants.isEmpty)
         XCTAssertFalse(granted.authorizes(Self.clipboardRequest, identity: Self.identity(), now: clock.now()))
+    }
+
+    /// E30: an expired grant is REMOVED from the file, not merely filtered on read. The
+    /// acceptance is about the file, because the read path always filtered and the file
+    /// still grew — one dead entry per grant for the life of the installation.
+    func testExpiredGrantsAreRemovedFromTheStore() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        _ = try store.issue(
+            capability: .clipboardRead,
+            scope: AuthorizationScope(application: .any),
+            duration: .monotonicSeconds(60),
+            holder: Self.identity(),
+        )
+        XCTAssertEqual(store.persistedContents().grants.count, 1)
+
+        clock.advance(by: .seconds(61))
+        let removed = try store.pruneExpired()
+        XCTAssertEqual(removed, 1)
+        XCTAssertTrue(store.persistedContents().grants.isEmpty, "the file must not retain an expired grant")
+
+        // A PRUNE THAT FINDS NOTHING WRITES NOTHING: persist() is skipped when the count
+        // is zero, so the read path cannot turn into a disk write per request.
+        let next = try store.pruneExpired()
+        XCTAssertEqual(next, 0)
+    }
+
+    /// E30: a long run of expiring grants leaves a bounded file, because each sweep
+    /// removes every entry that can no longer authorize anything.
+    func testAWeekOfExpiringGrantsLeavesABoundedFile() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        for _ in 0 ..< 200 {
+            _ = try store.issue(
+                capability: .clipboardRead,
+                scope: AuthorizationScope(application: .any),
+                duration: .monotonicSeconds(1),
+                holder: Self.identity(),
+            )
+            clock.advance(by: .seconds(2))
+            try store.pruneExpired()
+        }
+        let contents = store.persistedContents()
+        XCTAssertTrue(contents.grants.isEmpty, "every short-lived grant expired and was swept")
+        XCTAssertLessThanOrEqual(contents.grants.count, 200)
+    }
+
+    /// E30: a revoked grant stops authorizing AND is not retained in the file.
+    func testARevokedGrantIsNotRetained() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let granted = try store.issue(
+            capability: .clipboardRead,
+            scope: AuthorizationScope(application: .any),
+            duration: .monotonicSeconds(3600),
+            holder: Self.identity(),
+        )
+        try store.revoke(granted.id)
+        XCTAssertTrue(store.persistedContents().grants.isEmpty)
+        // The store's own live view no longer carries the grant: revocation is total,
+        // and a grant the store cannot find cannot authorize through the store.
+        XCTAssertFalse(store.liveGrants().contains { $0.id == granted.id })
+        // And a reopened store over the same file — a torn-down-and-rebuilt store, not
+        // a re-read of the same object — has nothing to recover, which is the part the
+        // in-memory view alone cannot prove.
+        let reopened = try GrantStore.openStore(path: path, clock: clock)
+        XCTAssertFalse(reopened.liveGrants().contains { $0.id == granted.id })
     }
 
     // MARK: - The file itself
