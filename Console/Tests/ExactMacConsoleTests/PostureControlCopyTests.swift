@@ -17,28 +17,13 @@ import Testing
 @Suite("The posture control says what each option does")
 @MainActor
 struct PostureControlCopyTests {
-    /// The design's posture description, read straight out of the artefact E31 edited.
-    ///
-    /// Parsed from docs/design.fig at test time rather than restated, so a copy change
-    /// that updates the design but not the code (or the reverse) fails here with both
-    /// strings visible instead of silently drifting. The parse is only reached when
-    /// openpencil is installed and the artefact is present; when it is not, the test
-    /// skips rather than faking an anchor.
-    private static let designText: String? = {
-        let fig = URL(fileURLWithPath: #filePath) // Console/Tests/.../PostureControlCopyTests.swift
-            .deletingLastPathComponent() // ExactMacConsoleTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // Console
-            .deletingLastPathComponent() // repo root
-            .appendingPathComponent("docs/design.fig")
-        guard let zip = FileManager.default.contents(atPath: fig.path) else { return nil }
-        // design.fig is a ZIP whose canvas payload is binary; only the OpenPencil CLI can
-        // read it. Shelling out from a test would make the suite depend on the host's
-        // toolchain, so the design anchor is asserted in the RENDER test (which runs
-        // wherever the artefact is committed) and HERE only the structure the code owns.
-        _ = zip
-        return nil
-    }()
+    // NOTE ON THE DESIGN ANCHOR: a `designText` helper used to sit here, reading
+    // docs/design.fig's bytes and returning nil (the canvas payload is an openpencil-
+    // binary ZIP no test can parse), under a comment claiming the render test asserted
+    // design/code parity — nothing did. It was deleted rather than wired: parity was
+    // verified at review time by exporting the design's posture-desc nodes and diffing
+    // the text, and if the copy is ever revised that check is re-run by hand against
+    // the design, because no automated anchor exists to update.
 
     @Test
     func `every option has an explanation attached to its label`() {
