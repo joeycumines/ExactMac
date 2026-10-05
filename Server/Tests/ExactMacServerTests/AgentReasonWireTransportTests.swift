@@ -88,9 +88,6 @@ final class AgentReasonWireTransportTests: XCTestCase {
         )
         runtime.consent = consent.answering
 
-        // MOCKS, not production systems: the composition's default construction reaches
-        // for real hardware observers, and a test about metadata framing must not depend
-        // on what is on screen.
         // MOCKS, not production systems: the composition's defaults reach for real
         // hardware observers and the real pasteboard, and a test about metadata framing
         // must depend on neither.
