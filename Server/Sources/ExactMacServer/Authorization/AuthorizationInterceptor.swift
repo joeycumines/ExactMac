@@ -1007,14 +1007,14 @@ struct AuthorizationInterceptor: ServerInterceptor {
     static let agentReasonMetadataKey = "exactmac-agent-reason-bin"
     static let legacyAgentReasonMetadataKey = "exactmac-agent-reason"
 
-    public enum ReasonStatus: Sendable, Equatable {
+    enum ReasonStatus: Sendable, Equatable {
         case valid(String)
         case missing
         case unreadable
         case absent
     }
 
-    public static func reasonStatus(from metadata: Metadata) -> ReasonStatus {
+    static func reasonStatus(from metadata: Metadata) -> ReasonStatus {
         var iterator = metadata[binaryValues: agentReasonMetadataKey].makeIterator()
         if let bytes = iterator.next() {
             guard !bytes.isEmpty else {
@@ -1055,9 +1055,9 @@ struct AuthorizationInterceptor: ServerInterceptor {
     static func agentReason(from metadata: Metadata) -> String? {
         switch reasonStatus(from: metadata) {
         case let .valid(reason):
-            return reason
+            reason
         case .missing, .unreadable, .absent:
-            return nil
+            nil
         }
     }
 

@@ -175,12 +175,12 @@ struct ConsoleWindowHostTests {
     func `a presented surface really is on screen and really hosts the view`() throws {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
-        host.present(.settings, title: "Settings", activates: true) {
+        host.present(.activity, title: "Activity", activates: true) {
             Text("a real surface").frame(width: 120, height: 40)
         }
         defer { host.closeAll() }
-        let window = try #require(host.window(forTesting: .settings))
-        #expect(window.title == "Settings")
+        let window = try #require(host.window(forTesting: .activity))
+        #expect(window.title == "Activity")
         // The hosted view's TYPE is not asserted, because a caller that applies a modifier
         // produces a different type for the same body; what matters is that the surface is
         // hosted SwiftUI at all rather than an empty window.
@@ -189,9 +189,32 @@ struct ConsoleWindowHostTests {
             window.contentView != nil,
             "a surface with no content view is a blank window, which is the failure being guarded",
         )
-        // A console window is not resizable by dragging, because the design measures every
+        // Fixed console windows are not resizable by dragging, because the design measures every
         // surface and a resized one is a surface the design does not describe.
         #expect(window.minSize == window.maxSize)
+    }
+
+    @Test
+    func `the settings window is resizable within usable bounds while fixed surfaces remain pinned`() throws {
+        let application = FakeApplication()
+        let host = ConsoleWindowHost(application: application)
+        host.present(.settings, title: "Settings", activates: true) {
+            Text("settings")
+        }
+        host.present(.activity, title: "Activity", activates: true) {
+            Text("activity")
+        }
+        defer { host.closeAll() }
+
+        let settings = try #require(host.window(forTesting: .settings))
+        #expect(settings.styleMask.contains(.resizable), "the settings window must be resizable by dragging")
+        #expect(settings.minSize.width == Design.Layout.windowWidth)
+        #expect(settings.minSize.height == ConsoleWindowHost.minimumSettingsWindowHeight)
+        #expect(settings.maxSize.height > settings.minSize.height)
+
+        let activity = try #require(host.window(forTesting: .activity))
+        #expect(!activity.styleMask.contains(.resizable), "fixed surfaces must not be resizable")
+        #expect(activity.minSize == activity.maxSize, "fixed surfaces remain pinned to design measurements")
     }
 
     @Test

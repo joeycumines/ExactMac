@@ -702,6 +702,18 @@ struct RemainingRenderTests {
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "settings\(mode.suffix)",
             )
+            try RenderHarness.png(
+                SettingsWindow(model: makeTestConsoleModel()),
+                size: CGSize(width: 720, height: 480),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "settings-smaller\(mode.suffix)",
+            )
+            try RenderHarness.png(
+                SettingsWindow(model: makeTestConsoleModel()),
+                size: CGSize(width: 720, height: 1167),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "settings-larger\(mode.suffix)",
+            )
         }
     }
 

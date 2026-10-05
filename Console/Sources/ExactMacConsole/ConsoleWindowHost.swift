@@ -109,6 +109,8 @@ final class ConsoleWindowHost {
     /// ceiling, and anything past the ceiling scrolls inside the surface rather than off the
     /// bottom of the screen.
     static let maximumWindowHeight: CGFloat = 1008
+    /// The minimum height for the settings window, keeping the primary action (Posture control) visible.
+    static let minimumSettingsWindowHeight: CGFloat = 480
 
     func present(
         _ surface: Surface,
@@ -141,22 +143,39 @@ final class ConsoleWindowHost {
             max(fitted.height, 1),
             Self.maximumWindowHeight,
         )
+        let isSettings = (surface == .settings)
+        var styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
+        if isSettings {
+            styleMask.insert(.resizable)
+        }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: styleMask,
             backing: .buffered,
             defer: false,
         )
         window.title = title
         window.contentView = hosting
-        // A console window is not resizable by dragging, because the design measures every
-        // surface and a resized one is a surface the design does not describe. Equal minimum
-        // and maximum is the honest way to say fixed — and it is set AFTER the fitted height,
-        // because pinning the size before measuring is what produced the clipped settings
-        // window. No frame autosave: autosaving a size the design does not have is the same
-        // mistake one layer down.
-        window.minSize = window.frame.size
-        window.maxSize = window.frame.size
+        if isSettings {
+            // The settings window can be resized by dragging its corner, within limits that
+            // keep it usable — a minimum that shows the primary action and a maximum bounded
+            // by the display it is on rather than by the content's natural height.
+            let screenHeight = window.screen?.visibleFrame.height
+                ?? NSScreen.main?.visibleFrame.height
+                ?? Self.maximumWindowHeight
+            let maxHeight = max(screenHeight, height)
+            window.minSize = NSSize(width: width, height: Self.minimumSettingsWindowHeight)
+            window.maxSize = NSSize(width: width, height: maxHeight)
+        } else {
+            // A console window is not resizable by dragging, because the design measures every
+            // surface and a resized one is a surface the design does not describe. Equal minimum
+            // and maximum is the honest way to say fixed — and it is set AFTER the fitted height,
+            // because pinning the size before measuring is what produced the clipped settings
+            // window. No frame autosave: autosaving a size the design does not have is the same
+            // mistake one layer down.
+            window.minSize = window.frame.size
+            window.maxSize = window.frame.size
+        }
         window.isReleasedWhenClosed = false
         window.delegate = windowDelegate
         window.center()
