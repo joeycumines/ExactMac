@@ -31,8 +31,27 @@ struct ConsoleDecisionTests {
         requiresBiometric: Bool = false,
         requestID: String = "req-1",
         offered: [OptionRow.Kind] = [.once, .session, .deny],
+        /// Per-option ceremony requirements, passed through to the fixture. Nil inherits
+        /// the request-level requirement on every option.
+        perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> PendingRequest {
-        let (req, identity, decision) = ServerFixture.request(requestID: requestID)
+        // The option KINDS go into the fixture itself, because the fixture only builds the
+        // kinds it is told about: filtering a default list that never contained the kind
+        // the caller asked for silently dropped it — the exact shape of the mismatch that
+        // once offered the operator only Deny.
+        let (req, identity, decision) = ServerFixture.request(
+            requestID: requestID,
+            offeredKinds: offered.map(\.serverValue).compactMap(OfferedDecision.Kind.init(rawValue:)),
+            // An explicit per-option map wins; without one, every option carries the
+            // request-level requirement the caller named, which is what the old fixture
+            // expressed by overwriting the options after the fact.
+            perOptionBiometric: perOptionBiometric
+                ?? Dictionary(
+                    uniqueKeysWithValues: offered.compactMap { kind in
+                        OfferedDecision.Kind(rawValue: kind.serverValue).map { ($0, requiresBiometric) }
+                    },
+                ),
+        )
         return PendingRequest(
             request: req,
             identity: identity,
@@ -45,9 +64,7 @@ struct ConsoleDecisionTests {
                 biometric: requiresBiometric
                     ? .required(reason: "a standing clipboard grant")
                     : .notRequired,
-                offeredDecisions: decision.offeredDecisions.filter {
-                    offered.map(\.serverValue).contains($0.kind.rawValue)
-                },
+                offeredDecisions: decision.offeredDecisions,
                 expiresAt: nil,
             ),
         )
@@ -200,6 +217,34 @@ struct ConsoleDecisionTests {
             answer.kind == .deny,
             "the only thing a failed ceremony can produce is a refusal",
         )
+    }
+
+    @Test
+    func `the ceremony requirement is the SELECTED option's, not the focused one's`() async {
+        // THE BROAD OPTION WAS UNAPPROVABLE. The console gated its ceremony on the
+        // request-level requirement — the FOCUSED option's bar, the narrow default — so a
+        // request whose default needed no fingerprint while "Always allow" DID ran no
+        // ceremony for the global option, and the server refused the answer every time:
+        // fail-closed, but an option the prompt offered that could never be honoured.
+        // The requirement now travels per option, exactly as the server attaches it.
+        let ceremony = ScriptedCeremony(.performed)
+        let model = makeModel(ceremony: ceremony)
+        let request = Self.makeRequest(
+            requestID: "req-per-option",
+            offered: [.once, .global, .deny],
+            perOptionBiometric: [.allowOnce: false, .allowGlobalPersistent: true, .deny: false],
+        )
+
+        // The narrow option: no ceremony, straight through.
+        let once = await model.answerValue(.once, for: request)
+        #expect(ceremony.nonces.isEmpty, "the once option needs no sensor")
+        #expect(once.isApproved)
+
+        // The broad option: the ceremony RUNS, and the answer carries it.
+        let global = await model.answerValue(.global, for: request)
+        #expect(ceremony.nonces.count == 1, "the global option's own bar was not read")
+        #expect(global.isApproved)
+        #expect(global.biometricObtained)
     }
 
     @Test

@@ -445,7 +445,13 @@ final class ConsoleModel {
         note: String = "",
     ) async -> PendingAnswer {
         var biometricObtained = false
-        if request.requiresBiometric, kind != .deny {
+        // THE SELECTED OPTION'S OWN CEREMONY BAR, not the focused one's. The prompt's
+        // default is the NARROWEST option and the narrowest is the one most likely to need
+        // no sensor, while the broad options escalate: gating on `request.requiresBiometric`
+        // read the low bar while the operator chose the high one, so the broad option ran
+        // no ceremony at all and the server — which checks the SELECTED option's
+        // requirement — refused it every time. Fail-closed, but the option was a lie.
+        if request.requiresBiometric(for: kind) {
             // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
             // console is frontmost, so the app has to come forward — but only once the
             // operator has committed to an option that needs a sensor, which is the moment
@@ -853,6 +859,13 @@ struct PendingRequest: Equatable {
         /// The server's own description of what this option would permit, e.g. "this exact
         /// request", "one application", "every app this agent touches".
         let scope: String
+        /// Whether agreeing to THIS option costs a fingerprint, carried per option because
+        /// the server attaches the requirement to the option and not to the request. THE
+        /// FOCUSED OPTION'S REQUIREMENT IS `requiresBiometric` above; this is the one the
+        /// operator actually selects. Dropping it is what made a broad option unapprovable:
+        /// the console ran no ceremony for it (its gate read the focused option's bar) and
+        /// the server always refused an answer that skipped the selected option's own.
+        let requiresBiometric: Bool
     }
 
     /// The options, as kinds, for the call sites that only need to choose one.
@@ -929,12 +942,27 @@ struct PendingRequest: Equatable {
         biometricReason = decision.biometric.reason
         consentTimeoutSeconds = 0
         isRevokeAll = false
-        offered = decision.offeredDecisions.map {
+        offered = decision.offeredDecisions.map { option in
             Offered(
-                kind: OptionRow.Kind(serverValue: $0.kind.rawValue),
-                scope: ScopeDescription.describe($0.scope),
+                kind: OptionRow.Kind(serverValue: option.kind.rawValue),
+                scope: ScopeDescription.describe(option.scope),
+                requiresBiometric: option.biometric.isRequired,
             )
         }
+    }
+
+    /// The ceremony requirement OF THE OPTION THE OPERATOR SELECTED, falling back to the
+    /// focused one for an option the prompt did not offer — the same floor the server
+    /// applies, so the console never runs a cheaper ceremony than the server would have
+    /// accepted. `.deny` never costs a fingerprint, here as on the server.
+    func requiresBiometric(for kind: OptionRow.Kind) -> Bool {
+        if kind == .deny {
+            return false
+        }
+        if let selected = offered.first(where: { $0.kind == kind }) {
+            return selected.requiresBiometric
+        }
+        return requiresBiometric
     }
 
     /// The caller tree, in the order the design draws it: nearest ancestor first and the

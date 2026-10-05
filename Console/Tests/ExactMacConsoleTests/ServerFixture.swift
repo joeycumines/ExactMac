@@ -24,6 +24,8 @@ enum ServerFixture {
         argumentSummary: String = "the clipboard and its history",
         agentReason: String? = "answering a question about what you copied",
         operationLimit: Int? = nil,
+        offeredKinds: [OfferedDecision.Kind]? = nil,
+        perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> (AuthorizationRequest, CallerIdentity, AuthorizationDecision) {
         (
             AuthorizationRequest(
@@ -40,7 +42,10 @@ enum ServerFixture {
                 origin: .directSocket,
             ),
             identity(),
-            decision(),
+            decision(
+                offered: offeredKinds ?? [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+                perOptionBiometric: perOptionBiometric,
+            ),
         )
     }
 
@@ -92,6 +97,11 @@ enum ServerFixture {
         biometricReason: String? = nil,
         riskClass: RiskClass = .elevated,
         offered: [OfferedDecision.Kind] = [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+        /// WHICH OPTIONS COST A CEREMONY, per option — the engine attaches the requirement
+        /// to the option, not to the request, so the fixture does too. Nil means "the
+        /// request-level requirement applies to every option", which is the shape most
+        /// existing callers expect.
+        perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> AuthorizationDecision {
         AuthorizationDecision(
             outcome: .deny,
@@ -139,7 +149,18 @@ enum ServerFixture {
                         targetConsequence: 0.3,
                         signatureQuality: 0.2,
                     ),
-                    biometric: requiresBiometric ? .required(reason: biometricReason ?? "") : .notRequired,
+                    biometric: {
+                        // An explicit per-option entry wins; WITHOUT one, every option
+                        // inherits the request-level requirement, which is what the old
+                        // fixture expressed and what most callers still expect.
+                        if let perOption = perOptionBiometric, let perOptionEntry = perOption[kind] {
+                            return perOptionEntry
+                                ? .required(reason: biometricReason ?? "the option you chose")
+                                : .notRequired
+                        }
+                        return requiresBiometric
+                            ? .required(reason: biometricReason ?? "") : .notRequired
+                    }(),
                     isDestructive: isDestructive,
                     isDefault: kind == .allowSession,
                     isPrimary: kind == .allowOnce,
