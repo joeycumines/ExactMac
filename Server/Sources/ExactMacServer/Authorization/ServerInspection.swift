@@ -489,6 +489,10 @@ public final class ServerInspectionService: @unchecked Sendable {
             "grant store is unreadable"
         case "postureLockedDown":
             "security posture is locked down"
+        case "missingAgentReason":
+            "agent gave no reason for request"
+        case "unreadableAgentReason":
+            "agent reason could not be read"
         default:
             "action not permitted"
         }

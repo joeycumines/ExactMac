@@ -856,6 +856,8 @@ public enum DenialReason: String, Sendable, Equatable, CaseIterable {
     /// this system will act on: the log is what the operator afterwards asks.
     case auditUnavailable
     case notPermitted
+    case missingAgentReason
+    case unreadableAgentReason
 }
 
 /// One thing the operator can say, carrying its own breadth and duration on its face.

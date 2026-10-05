@@ -633,12 +633,14 @@ struct AuthorizationInterceptor: ServerInterceptor {
             // refusal rather than left to unwind, because an unwinding error reaches nobody
             // but the caller — which is the same blindness the consent refusals had.
             let outcome: ConsentOutcome
+            let status = Self.reasonStatus(from: metadata)
             do {
                 outcome = try await prompt(
                     request: request,
                     identity: identity,
                     decision: decision,
                     context: serverContext,
+                    reasonStatus: status,
                 )
             } catch let error as RPCError where error.code == .cancelled {
                 throw error
@@ -789,9 +791,17 @@ struct AuthorizationInterceptor: ServerInterceptor {
         identity: CallerIdentity,
         decision: AuthorizationDecision,
         context: ServerContext,
+        reasonStatus: ReasonStatus = .absent,
     ) async throws -> ConsentOutcome {
         if context.cancellation.isCancelled || Task.isCancelled {
             return .cancelled
+        }
+
+        if reasonStatus == .unreadable {
+            return .refused(decision, .unreadableAgentReason)
+        }
+        if reasonStatus == .missing || (reasonStatus == .absent && request.origin == .mcpProxy) {
+            return .refused(decision, .missingAgentReason)
         }
 
         guard runtime.isConsoleReachable(), let consent = runtime.consent else {
@@ -995,6 +1005,37 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// on the wire; reading it through `binaryValues` decodes it here, so the reason reaches
     /// the operator byte-identical to what the agent wrote.
     static let agentReasonMetadataKey = "exactmac-agent-reason-bin"
+    static let legacyAgentReasonMetadataKey = "exactmac-agent-reason"
+
+    public enum ReasonStatus: Sendable, Equatable {
+        case valid(String)
+        case missing
+        case unreadable
+        case absent
+    }
+
+    public static func reasonStatus(from metadata: Metadata) -> ReasonStatus {
+        var iterator = metadata[binaryValues: agentReasonMetadataKey].makeIterator()
+        if let bytes = iterator.next() {
+            guard !bytes.isEmpty else {
+                if let legacy = metadata[stringValues: legacyAgentReasonMetadataKey].first(where: { _ in true }) {
+                    let trimmed = legacy.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? .missing : .valid(trimmed)
+                }
+                return .missing
+            }
+            guard let string = String(data: Data(bytes), encoding: .utf8) else {
+                return .unreadable
+            }
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? .missing : .valid(trimmed)
+        }
+        if let legacy = metadata[stringValues: legacyAgentReasonMetadataKey].first(where: { _ in true }) {
+            let trimmed = legacy.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? .missing : .valid(trimmed)
+        }
+        return .absent
+    }
 
     /// The agent's reason, or nil.
     ///
@@ -1003,24 +1044,21 @@ struct AuthorizationInterceptor: ServerInterceptor {
     /// escalates a reasonless request rather than treating it as routine, and that
     /// escalation is only honest if an empty string does not count as a reason.
     ///
-    /// READ THROUGH `binaryValues`, because the key carries the "-bin" suffix and the bytes
-    /// are base64 on the wire; the subscript decodes them. Reading `stringValues` here would
-    /// hand back the base64 text itself, and the operator would be shown a string of
-    /// alphanumerics in a field captioned NOT VERIFIED.
+    /// READ THROUGH `binaryValues` first, because modern callers use "-bin" and the bytes
+    /// are base64 on the wire; the subscript decodes them. If absent, falls back to the
+    /// legacy plain `exactmac-agent-reason` string key so that stale or non-binary callers
+    /// still have their reason delivered to the operator rather than being dropped.
     ///
-    /// NOT VALID UTF-8 IS DISCARDED rather than repaired, and it is discarded quietly: the
-    /// reason is caller-supplied text and a reason that cannot be decoded is not one, which
-    /// the policy already handles by escalating the request as reasonless. Substituting
-    /// replacement characters would put text in front of the operator that the agent never
-    /// wrote — in the one field whose entire purpose is distinguishing the agent's own words
-    /// from what the system derived. An error is logged by the caller that can; a static
-    /// function has no instance logger and inventing one for a path that the policy already
-    /// handles correctly would be noise.
+    /// NOT VALID UTF-8 IS MARKED UNREADABLE: a reason that cannot be decoded is not one, and
+    /// substituting replacement characters would put text in front of the operator that the
+    /// agent never wrote.
     static func agentReason(from metadata: Metadata) -> String? {
-        var iterator = metadata[binaryValues: agentReasonMetadataKey].makeIterator()
-        guard let bytes = iterator.next(), !bytes.isEmpty else { return nil }
-        guard let value = String(data: Data(bytes), encoding: .utf8) else { return nil }
-        return value.isEmpty ? nil : value
+        switch reasonStatus(from: metadata) {
+        case let .valid(reason):
+            return reason
+        case .missing, .unreadable, .absent:
+            return nil
+        }
     }
 
     /// Where the request came from, which the policy escalates when it cannot attribute one.

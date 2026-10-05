@@ -151,6 +151,7 @@ final class ConsentPathAuditTests: XCTestCase {
         consent: ConsentAnswering?,
         audit: DecisionAudit,
         consoleReachable: Bool = true,
+        metadata: Metadata = Metadata(),
     ) async throws -> Bool {
         let runtime = try runtime(
             consent: consent,
@@ -162,6 +163,7 @@ final class ConsentPathAuditTests: XCTestCase {
             _ = try await interceptor.intercept(
                 request: Self.request(
                     Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
+                    metadata: metadata,
                 ),
                 context: Self.context(),
                 next: { _, _ -> StreamingServerResponse<Exactmac_V1_Clipboard> in
@@ -177,9 +179,10 @@ final class ConsentPathAuditTests: XCTestCase {
 
     private static func request<Input: Sendable>(
         _ message: Input,
+        metadata: Metadata = Metadata(),
     ) -> StreamingServerRequest<Input> {
         StreamingServerRequest(
-            metadata: Metadata(),
+            metadata: metadata,
             messages: RPCAsyncSequence<Input, any Error>(wrapping: AsyncThrowingStream { continuation in
                 continuation.yield(message)
                 continuation.finish()
@@ -363,6 +366,88 @@ final class ConsentPathAuditTests: XCTestCase {
         let entry = try XCTUnwrap(try entries().first)
         XCTAssertEqual(entry.decision, "allow")
         XCTAssertNil(entry.refusalReason, "an allowed request recorded a refusal reason")
+    }
+
+    /// An unreadable agent reason (invalid UTF-8 bytes) is diagnosed accurately as
+    /// unreadableAgentReason rather than misreported as consoleUnreachable.
+    func testAnUnreadableAgentReasonIsRefusedAndRecorded() async throws {
+        let audit = try makeAudit()
+        var metadata = Metadata()
+        metadata.addBinary([0xFF, 0xFE], forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        metadata.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
+        let refused = try await drive(
+            consent: { _, _, _ in nil },
+            audit: audit,
+            metadata: metadata,
+        )
+        XCTAssertTrue(refused, "an unreadable agent reason authorized a request")
+
+        let entry = try XCTUnwrap(try entries().first)
+        XCTAssertEqual(entry.decision, "deny")
+        XCTAssertEqual(entry.refusalReason, DenialReason.unreadableAgentReason.rawValue)
+        XCTAssertNil(entry.agentReason, "unreadable reason was not nil")
+        XCTAssertTrue(audit.verify().isIntact, "audit hash chain was broken")
+    }
+
+    /// A missing agent reason from an MCP caller is diagnosed as missingAgentReason
+    /// rather than misreported as consoleUnreachable.
+    func testAMissingAgentReasonFromMCPCallerIsRefusedAndRecorded() async throws {
+        let audit = try makeAudit()
+        var metadata = Metadata()
+        metadata.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
+        let refused = try await drive(
+            consent: { _, _, _ in nil },
+            audit: audit,
+            metadata: metadata,
+        )
+        XCTAssertTrue(refused, "a missing agent reason from an MCP caller authorized a request")
+
+        let entry = try XCTUnwrap(try entries().first)
+        XCTAssertEqual(entry.decision, "deny")
+        XCTAssertEqual(entry.refusalReason, DenialReason.missingAgentReason.rawValue)
+        XCTAssertNil(entry.agentReason)
+        XCTAssertTrue(audit.verify().isIntact, "audit hash chain was broken")
+    }
+
+    /// A legacy caller sending the plain exactmac-agent-reason string key has its reason
+    /// delivered to the prompt and preserved in the audit log.
+    func testALegacyAgentReasonKeyIsDeliveredToPromptAndAuditLog() async throws {
+        let audit = try makeAudit()
+        var metadata = Metadata()
+        metadata.addString("Inspecting TextEdit window for operator", forKey: AuthorizationInterceptor.legacyAgentReasonMetadataKey)
+        metadata.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
+
+        final class ReasonBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var _value: String?
+            var value: String? {
+                get { lock.withLock { _value } }
+                set { lock.withLock { _value = newValue } }
+            }
+        }
+        let box = ReasonBox()
+        let refused = try await drive(
+            consent: { request, _, _ in
+                box.value = request.agentReason
+                return ConsentAnswer(
+                    requestID: request.id,
+                    isApproved: false,
+                    selected: .allowOnce,
+                    note: nil,
+                    ceremonyProof: nil,
+                )
+            },
+            audit: audit,
+            metadata: metadata,
+        )
+        XCTAssertTrue(refused)
+        XCTAssertEqual(box.value, "Inspecting TextEdit window for operator")
+
+        let entry = try XCTUnwrap(try entries().first)
+        XCTAssertEqual(entry.decision, "deny")
+        XCTAssertEqual(entry.refusalReason, DenialReason.notPermitted.rawValue)
+        XCTAssertEqual(entry.agentReason, "Inspecting TextEdit window for operator")
+        XCTAssertTrue(audit.verify().isIntact, "audit hash chain was broken")
     }
 
     /// A grant supply that always reports the same grants.

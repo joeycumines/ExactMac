@@ -1104,7 +1104,47 @@ extension AuthorizationInterceptorTests {
         var blank = Metadata()
         blank.addBinary(Array(), forKey: AuthorizationInterceptor.agentReasonMetadataKey)
         XCTAssertNil(AuthorizationInterceptor.agentReason(from: blank), "a blank reason counted")
+        XCTAssertEqual(AuthorizationInterceptor.reasonStatus(from: blank), .missing)
         XCTAssertNil(AuthorizationInterceptor.agentReason(from: Metadata()))
+        XCTAssertEqual(AuthorizationInterceptor.reasonStatus(from: Metadata()), .absent)
+
+        // Legacy string key fallback
+        var legacy = Metadata()
+        legacy.addString("legacy plain reason", forKey: AuthorizationInterceptor.legacyAgentReasonMetadataKey)
+        XCTAssertEqual(
+            AuthorizationInterceptor.reasonStatus(from: legacy),
+            .valid("legacy plain reason"),
+        )
+        XCTAssertEqual(
+            AuthorizationInterceptor.agentReason(from: legacy),
+            "legacy plain reason",
+        )
+
+        // Binary key takes precedence over legacy key when both are present
+        var bothKeys = Metadata()
+        bothKeys.addBinary(Array("binary reason".utf8), forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        bothKeys.addString("legacy reason", forKey: AuthorizationInterceptor.legacyAgentReasonMetadataKey)
+        XCTAssertEqual(
+            AuthorizationInterceptor.reasonStatus(from: bothKeys),
+            .valid("binary reason"),
+        )
+        XCTAssertEqual(
+            AuthorizationInterceptor.agentReason(from: bothKeys),
+            "binary reason",
+        )
+
+        // Invalid UTF-8 bytes in binary key produce .unreadable
+        var unreadable = Metadata()
+        unreadable.addBinary([0xFF, 0xFE], forKey: AuthorizationInterceptor.agentReasonMetadataKey)
+        XCTAssertEqual(AuthorizationInterceptor.reasonStatus(from: unreadable), .unreadable)
+        XCTAssertNil(AuthorizationInterceptor.agentReason(from: unreadable))
+
+        // Empty legacy string produces .missing
+        var emptyLegacy = Metadata()
+        emptyLegacy.addString("   ", forKey: AuthorizationInterceptor.legacyAgentReasonMetadataKey)
+        XCTAssertEqual(AuthorizationInterceptor.reasonStatus(from: emptyLegacy), .missing)
+        XCTAssertNil(AuthorizationInterceptor.agentReason(from: emptyLegacy))
+
         XCTAssertEqual(AuthorizationInterceptor.origin(of: Metadata()), .directSocket)
         var viaMCP = Metadata()
         viaMCP.addString("mcp", forKey: AuthorizationInterceptor.mcpProxyMetadataKey)
@@ -1117,6 +1157,7 @@ extension AuthorizationInterceptorTests {
         // Unicode bug, and it would do so at the client, in a different process, where no
         // server-side test can see it.
         XCTAssertEqual(AuthorizationInterceptor.agentReasonMetadataKey, "exactmac-agent-reason-bin")
+        XCTAssertEqual(AuthorizationInterceptor.legacyAgentReasonMetadataKey, "exactmac-agent-reason")
         XCTAssertEqual(AuthorizationInterceptor.mcpProxyMetadataKey, "exactmac-origin")
     }
 }
