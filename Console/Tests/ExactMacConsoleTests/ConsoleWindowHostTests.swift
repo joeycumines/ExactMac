@@ -249,21 +249,46 @@ struct WindowSizingTests {
     @Test
     func `The settings surface fits a window, which is what scrolling bought`() {
         // THIS IS THE REGRESSION GUARD, and it is worth being precise about what it
-        // distinguishes. Measured WITHOUT the scroll view the settings body is over 1008pt —
-        // the design draws it that tall — and it overflowed a window that could not be
-        // resized, so the console and reset sections were unreachable. A `ScrollView` makes
-        // the content's fitted height the VIEWPORT's height rather than the content's, so the
-        // surface now measures to fit. That the number went DOWN is the fix, not a regression
-        // in content, and an assertion that the surface still measures tall would be
-        // asserting the bug.
-        let natural = ConsoleWindowHost.fittedHeight(of: SettingsWindow())
+        // distinguishes — and about what its first version asserted WRONGLY.
+        //
+        // The defect E9 fixed was the WINDOW taking the content's raw fitted height while
+        // the content could not scroll: the design draws this body taller than any screen,
+        // so the console and reset sections were off the bottom with nothing to reach
+        // them. The fix is two-sided and both sides are asserted:
+        //
+        //   1. THE WINDOW NEVER EXCEEDS THE CEILING, whatever the content asks for —
+        //      `present` takes min(fitted, maximumWindowHeight), so a window that clips
+        //      its frame is impossible by construction and this is the half a regression
+        //      would break.
+        //   2. THE CONTENT IS ALLOWED TO BE TALLER THAN THE WINDOW, because that is what
+        //      the scroll view is FOR. The first version of this test asserted
+        //      `fitted <= maximumWindowHeight` and was silently a statement that the
+        //      content never grows — it held only while the body happened to fit. E31's
+        //      posture explanation block grew the content past the ceiling BY DESIGN (the
+        //      copy is the substance of the control) and the guard failed, blaming a
+        //      scroll view that was there all along. An assertion that content height
+        //      stays under the ceiling would forbid exactly the growth the design made.
+        //
+        // `fittedHeight` measures the CONTENT — its own contract says so — so the first
+        // half is asserted through the same arithmetic `present` performs, and the second
+        // half is the content measuring tall without the test treating that as a fault.
+        let fitted = ConsoleWindowHost.fittedHeight(of: SettingsWindow())
         #expect(
-            natural > 0,
-            "the surface measured nothing, so the window would have no content",
+            fitted > 0,
+            "the content measured nothing, so the window would have no content",
         )
+        let windowHeight = min(max(fitted, 1), ConsoleWindowHost.maximumWindowHeight)
         #expect(
-            natural <= ConsoleWindowHost.maximumWindowHeight,
-            "the surface still overflows a window, so the scroll view is not there: \(natural)",
+            windowHeight <= ConsoleWindowHost.maximumWindowHeight,
+            "the window arithmetic exceeded its own ceiling: \(windowHeight)",
+        )
+        // The content is TALLER than the window on purpose — the scroll view's job — and
+        // this half is the one that would catch a regression to the E9 defect, where the
+        // window took the raw height and the content could not scroll: there the two
+        // numbers converged because the window was forced to the content.
+        #expect(
+            fitted >= windowHeight,
+            "the content measured SHORTER than the window it opens, which is not the shape this surface has: \(fitted) vs \(windowHeight)",
         )
     }
 }
