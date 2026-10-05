@@ -229,6 +229,86 @@ public final class ServerInspectionService: @unchecked Sendable {
         try store.revokeAll()
     }
 
+    /// THE CONSOLE'S WRITE INTO THE DECISION LOG, for the one local act that is a decision:
+    /// the operator asking to weaken or restore the biometric gate on the console's own
+    /// revealing surfaces. EVERY ATTEMPT is recorded, successful or not, because a gate
+    /// whose downgrades could happen off the record is a gate an auditor cannot trust.
+    ///
+    /// THE ENTRY IS BUILT AND APPENDED HERE, inside the server module, because
+    /// `AuthorizationRequest` and `AuthorizationDecision` have no public inits: their
+    /// constructors are boundary-enforced facts, and an operator action that never crossed
+    /// the wire should not be able to fabricate them from the console either. The entry
+    /// names `rpcName: "console.operatorAction"` — a label, not an RPC — and the console's
+    /// own identity as the caller, resolved from this process.
+    ///
+    /// THE AUDIT IS THE REGISTERED LIVE ONE, and the reason is the chain: a
+    /// `DecisionAudit` caches its next sequence and last hash at open, so a SECOND instance
+    /// opened on the same path would append from a stale chain position and break every
+    /// entry after it. When no audit is registered — a host that never started a runtime —
+    /// the action FAILS CLOSED: `nil` is returned, nothing is applied on the console side,
+    /// and the operator is told the change did not happen. An unrecordable change is not
+    /// applied, which is the same discipline as `auditUnavailable` on the RPC path.
+    ///
+    /// - Parameter outcome: what the attempt ended in — the operator approved the change
+    ///   after a successful ceremony, or the ceremony failed and nothing changed.
+    /// - Returns: whether the entry reached the log. A `false` return means the log could
+    ///   not take the record and the caller must treat the action as not having happened.
+    @discardableResult
+    public static func recordOperatorAction(
+        action: String,
+        approved: Bool,
+        biometricObtained: Bool,
+        refusalReason: DenialReason?,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) -> Bool {
+        lock.lock()
+        let audit = activeState?.audit
+        lock.unlock()
+        guard let audit else {
+            return false
+        }
+
+        let identity = SelfIdentityResolver.resolve()
+        // The decision that is recorded: an approved toggle is an ALLOW on the operator's
+        // own action; a failed ceremony is a DENY with the refusal named, so the log can
+        // be asked "what was refused and why" the same way it can for an RPC.
+        let decision = AuthorizationDecision(
+            outcome: approved ? .allow : .deny,
+            basis: approved ? .noConsentRequired : .denied(.notPermitted),
+            effectiveCapabilities: [],
+            blastRadius: BlastRadius(
+                capability: 0.1,
+                breadth: 0.1,
+                duration: 0.1,
+                remainingCount: 0.1,
+                targetConsequence: 0.1,
+                signatureQuality: 1.0,
+            ),
+            riskClass: .routine,
+            biometric: .notRequired,
+            offeredDecisions: [],
+            ceremonyNonce: nil,
+            expiresAt: nil,
+        )
+        let request = AuthorizationRequest(
+            id: AuthorizationRequestID(rawValue: "console-\(UUID().uuidString)"),
+            rpcName: "console.operatorAction",
+            capability: .authorizationManage,
+            scope: AuthorizationScope(),
+            argumentSummary: action,
+            agentReason: nil,
+            origin: .directSocket,
+        )
+        return audit.record(
+            request: request,
+            identity: identity,
+            decision: decision,
+            operatorNote: approved ? nil : "The change was not applied.",
+            biometricObtained: biometricObtained,
+            refusalReason: refusalReason,
+        ) != nil
+    }
+
     /// Formats a dynamic, design-aligned subtitle for the Grants manager window.
     public static func grantsSubtitle(for grants: [DisplayGrant]) -> String {
         let count = grants.count
