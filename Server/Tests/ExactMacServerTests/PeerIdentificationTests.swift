@@ -478,7 +478,7 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
             interceptors: productionServerInterceptors(
                 AuthorizationInterceptor(
                     runtime: .unixSocket(
-                        descriptorPolicy: try PublicRequestDescriptorPolicy.load(),
+                        descriptorPolicy: PublicRequestDescriptorPolicy.load(),
                         postureSource: PostureSource(override: nil),
                         isConsoleReachable: true,
                         peerEvidence: .registry(registry),

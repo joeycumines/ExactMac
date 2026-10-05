@@ -391,6 +391,11 @@ struct ProductionAuthorizationRuntime {
     /// OVERRIDE IS SETTLED AT CONSTRUCTION, below — an operator preference cannot
     /// override a deployment-level setting, and the control says so when it holds.
     let postureSource: PostureSource
+    /// The live console gate, shared with the host the same way: whether opening Grants
+    /// or Activity costs a ceremony is enforcement state the console displays and the
+    /// toggle writes. `make` SEEDS it from the stored gate, so the control's first render
+    /// after a relaunch shows the choice that survived it.
+    let biometricGate: BiometricGateSource
 
     /// - Throws: when the state directory, the audit log or the grant store cannot be
     ///   established. Startup fails rather than continuing with a component missing, because a
@@ -413,18 +418,22 @@ struct ProductionAuthorizationRuntime {
         // survive a relaunch), then strict — the engine's own fail-closed default. An
         // unparseable preference file is NOT a preference, so it reads as strict rather
         // than as a guess.
-        let envOverride: Posture? = {
-            switch environment["EXACTMAC_POSTURE"]?.lowercased() {
-            case "balanced": .balanced
-            case "lockeddown", "locked_down", "locked-down": .lockedDown
-            case "strict": .strict
-            default: nil
-            }
-        }()
+        let envOverride: Posture? = switch environment["EXACTMAC_POSTURE"]?.lowercased() {
+        case "balanced": .balanced
+        case "lockeddown", "locked_down", "locked-down": .lockedDown
+        case "strict": .strict
+        default: nil
+        }
         let postureSource = PostureSource(override: envOverride)
         if envOverride == nil, let stored = PostureSource.loadStoredPreference(environment: environment) {
             postureSource.setStoredPreference(stored)
         }
+        // THE GATE IS SEEDED FROM ITS STORED CHOICE — default true, and the loader
+        // already answers true for every corrupt shape, so the seed is unconditional.
+        let biometricGateSource = BiometricGateSource()
+        biometricGateSource.setCeremonyRequired(
+            BiometricGateSource.loadStoredGate(environment: environment),
+        )
 
         let audit: DecisionAudit
         do {
@@ -480,6 +489,7 @@ struct ProductionAuthorizationRuntime {
             authorizationRuntime: runtime,
             consentTimeout: consentTimeout,
             postureSource: postureSource,
+            biometricGate: biometricGateSource,
         )
     }
 }

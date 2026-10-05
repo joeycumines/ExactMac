@@ -56,6 +56,18 @@ struct GrantsAndActivityTests {
         }
     }
 
+    /// A model whose gate is adopted and OFF, for tests whose subject is something other
+    /// than the gate: with the gate up, opening costs a ceremony, and these tests isolate
+    /// pendingNotice and window tracking, not the gate. The gate's behaviour has its own
+    /// suite below.
+    private static func gateOffFixture() -> ConsoleModel {
+        let model = ConsoleModel()
+        let gate = BiometricGateSource()
+        gate.setCeremonyRequired(false)
+        model.adoptBiometricGateHandle(HostedBiometricGateHandle(source: gate))
+        return model
+    }
+
     private static func sampleCaller(
         path: String = "/Applications/Terminal.app/Contents/MacOS/Terminal",
         bundle: String? = "com.apple.Terminal",
@@ -93,13 +105,14 @@ struct GrantsAndActivityTests {
     // MARK: - Decoupling from pendingNotice (Acceptance requirement)
 
     @Test
-    func `openGrants leaves pendingNotice nil and opens grants window`() {
-        let model = ConsoleModel()
+    func `openGrants leaves pendingNotice nil and opens grants window`() async {
+        let model = Self.gateOffFixture()
+        #expect(model.displayedBiometricGate == false)
         #expect(model.pendingNotice == nil)
         #expect(model.pendingPrompt == nil)
         #expect(!model.windows.isPresented(.grants))
 
-        model.openGrants()
+        await model.openGrants()
 
         #expect(model.pendingNotice == nil, "openGrants must NEVER write to pendingNotice")
         #expect(model.pendingPrompt == nil)
@@ -107,13 +120,14 @@ struct GrantsAndActivityTests {
     }
 
     @Test
-    func `openActivity leaves pendingNotice nil and opens activity window`() {
-        let model = ConsoleModel()
+    func `openActivity leaves pendingNotice nil and opens activity window`() async {
+        let model = Self.gateOffFixture()
+        #expect(model.displayedBiometricGate == false)
         #expect(model.pendingNotice == nil)
         #expect(model.pendingPrompt == nil)
         #expect(!model.windows.isPresented(.activity))
 
-        model.openActivity()
+        await model.openActivity()
 
         #expect(model.pendingNotice == nil, "openActivity must NEVER write to pendingNotice")
         #expect(model.pendingPrompt == nil)
@@ -133,13 +147,13 @@ struct GrantsAndActivityTests {
     }
 
     @Test
-    func `no menu action performs a bare string assignment`() {
-        let model = ConsoleModel()
+    func `no menu action performs a bare string assignment`() async {
+        let model = Self.gateOffFixture()
 
-        model.openGrants()
+        await model.openGrants()
         #expect(model.pendingNotice == nil)
 
-        model.openActivity()
+        await model.openActivity()
         #expect(model.pendingNotice == nil)
 
         model.openSettings()
@@ -149,10 +163,12 @@ struct GrantsAndActivityTests {
     // MARK: - Multiple Window Lifecycle (Follow-Up 2)
 
     @Test
-    func `closing one window does not untrack another`() {
-        let model = ConsoleModel()
-        model.openGrants()
-        model.openActivity()
+    func `closing one window does not untrack another`() async {
+        let model = Self.gateOffFixture()
+        #expect(model.displayedBiometricGate == false)
+
+        await model.openGrants()
+        await model.openActivity()
 
         #expect(model.windows.isPresented(.grants))
         #expect(model.windows.isPresented(.activity))
@@ -216,7 +232,7 @@ struct GrantsAndActivityTests {
     // MARK: - Live Server Inspection and Revocation
 
     @Test
-    func `live inspection formats grants and activity correctly`() throws {
+    func `live inspection formats grants and activity correctly`() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ExactMacE27Tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -299,9 +315,10 @@ struct GrantsAndActivityTests {
         #expect(activityModel.isAllowed == true)
         #expect(activityModel.signature == .signed)
 
-        // Test single revocation through ConsoleModel
-        let model = ConsoleModel()
-        model.openGrants()
+        // Test single revocation through ConsoleModel. The gate is adopted and OFF —
+        // this test's subject is inspection formatting, not the gate.
+        let model = Self.gateOffFixture()
+        await model.openGrants()
         #expect(model.windows.isPresented(.grants))
 
         model.revokeGrant(id: grant.id)

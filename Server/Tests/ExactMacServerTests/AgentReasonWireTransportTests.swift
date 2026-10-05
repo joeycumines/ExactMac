@@ -36,16 +36,15 @@ final class AgentReasonWireTransportTests: XCTestCase {
                 // system clock the server validates against — a fixed fixture would be
                 // expired before it was checked.
                 let now = MonotonicInstant.now()
-                let proof: BiometricProof?
-                if let nonce = decision.ceremonyNonce {
-                    proof = BiometricProof(
+                let proof: BiometricProof? = if let nonce = decision.ceremonyNonce {
+                    BiometricProof(
                         requestID: request.id,
                         nonce: nonce,
                         decidedAt: now,
                         expiresAt: now.advanced(by: .seconds(120)),
                     )
                 } else {
-                    proof = nil
+                    nil
                 }
                 return ConsentAnswer(
                     requestID: request.id,
@@ -180,7 +179,6 @@ final class AgentReasonWireTransportTests: XCTestCase {
             Data(Self.multibyteReason.utf8),
             "the reason was altered in transit",
         )
-
     }
 
     /// The pasteboard stub, because reading the REAL general pasteboard from a test
@@ -190,11 +188,15 @@ final class AgentReasonWireTransportTests: XCTestCase {
             Exactmac_V1_Clipboard.with { $0.name = "clipboard" }
         }
 
-        func changeCount() -> Int { 0 }
+        func changeCount() -> Int {
+            0
+        }
 
         func clear() {}
 
-        func write(_: Exactmac_V1_ClipboardContent) -> Bool { true }
+        func write(_: Exactmac_V1_ClipboardContent) -> Bool {
+            true
+        }
     }
 
     private func pollUntil(

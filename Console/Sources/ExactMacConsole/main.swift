@@ -155,6 +155,7 @@ Task { @MainActor in
         try await ExactMacServer.serveHosted(
             consent: consentHandler,
             onPostureReady: { consoleModel.adoptPostureHandle($0) },
+            onBiometricGateReady: { consoleModel.adoptBiometricGateHandle($0) },
         )
     } catch {
         let reason = String(describing: error)

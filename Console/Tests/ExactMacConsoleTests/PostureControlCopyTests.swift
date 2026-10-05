@@ -1,6 +1,6 @@
 import AppKit
-import ExactMacServer
 @testable import ExactMacConsole
+import ExactMacServer
 import Testing
 
 /// What the posture control SAYS, which is E31's whole surface.

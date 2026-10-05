@@ -58,9 +58,11 @@ struct NoStandingGrants: GrantSupply {
         GrantSnapshot()
     }
 
-    func consume(_ grantIdentifier: String, operations: Int) async -> Bool { false }
+    func consume(_: String, operations _: Int) async -> Bool {
+        false
+    }
 
-    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+    func consumeEnvelope(_: String, operations _: Int) async -> Bool {
         false
     }
 }
@@ -245,7 +247,7 @@ struct AuthorizationRuntime: Sendable {
     /// wires the composition's session manager at `serve`, and a nil here is why the
     /// count was decoration for so long. A request with no transaction id, or a
     /// transaction that has gone away, derives with no count rather than a guessed one.
-    var declaredOperationCount: (@Sendable (_ sessionName: String, _ transactionId: String) async -> Int?)? = nil
+    var declaredOperationCount: (@Sendable (_ sessionName: String, _ transactionId: String) async -> Int?)?
     /// The kernel's answer about the socket this call arrived on, WHEN THE TRANSPORT CAN
     /// SUPPLY ONE.
     ///
@@ -543,7 +545,8 @@ struct AuthorizationInterceptor: ServerInterceptor {
             // RequestFacts keys are camelCased PROTO names, so the field spelled
             // `transaction_id` on the wire reads as `transactionId` here.
             if let sessionName = facts.text("name"), !sessionName.isEmpty,
-               let transactionId = facts.text("transactionId"), !transactionId.isEmpty {
+               let transactionId = facts.text("transactionId"), !transactionId.isEmpty
+            {
                 operationLimit = await source(sessionName, transactionId)
             }
         }

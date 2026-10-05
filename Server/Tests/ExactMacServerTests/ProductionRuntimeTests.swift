@@ -444,11 +444,13 @@ private struct FixedGrantSupply: GrantSupply {
         GrantSnapshot(grants: grants)
     }
 
-    // No spend is ever honoured: these fixtures are about recording and consent, not
-    // about counts, and the refusal is what a supply that cannot spend must return.
-    func consume(_ grantIdentifier: String, operations: Int) async -> Bool { false }
+    /// No spend is ever honoured: these fixtures are about recording and consent, not
+    /// about counts, and the refusal is what a supply that cannot spend must return.
+    func consume(_: String, operations _: Int) async -> Bool {
+        false
+    }
 
-    func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
+    func consumeEnvelope(_: String, operations _: Int) async -> Bool {
         false
     }
 }

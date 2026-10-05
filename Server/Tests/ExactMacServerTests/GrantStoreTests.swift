@@ -1,7 +1,7 @@
 import Darwin
-import Synchronization
 @testable import ExactMacServer
 import Foundation
+import Synchronization
 import XCTest
 
 /// C5's acceptance suite.
@@ -403,9 +403,9 @@ final class GrantStoreTests: XCTestCase {
         let rounds = 25
         let revokedByID = Synchronization.Mutex<[String: Bool]>([:])
         await withTaskGroup(of: Void.self) { group in
-            for task in 0..<tasks {
+            for task in 0 ..< tasks {
                 group.addTask {
-                    for round in 0..<rounds {
+                    for round in 0 ..< rounds {
                         let granted = try? store.issue(
                             capability: .clipboardRead,
                             scope: AuthorizationScope(application: .bundleIdentifier("com.apple.TextEdit")),

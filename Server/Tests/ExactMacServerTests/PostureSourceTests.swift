@@ -116,7 +116,7 @@ final class PostureSourceTests: XCTestCase {
     /// The env spellings the deployment names, and anything else is the absence of an
     /// override rather than a guess — EXCEPT that the parser in make() defaults strict,
     /// so the override is nil only when the variable is absent or blank.
-    func testTheEnvironmentOverrideSpellings() throws {
+    func testTheEnvironmentOverrideSpellings() {
         func override(_ value: String?) -> Posture? {
             let environment = ["EXACTMAC_POSTURE": value ?? ""]
             return PostureSourceTests.envOverride(in: environment)

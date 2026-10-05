@@ -301,6 +301,124 @@ final class ConsoleModel {
         displayedPosture = postureHandle?.current ?? posture
     }
 
+    // MARK: The operator's biometric gate
+
+    /// The live console gate the hosted server holds, captured at server startup beside
+    /// the posture handle. NIL UNTIL THEN, for the same reason: until the gate exists the
+    /// row displays the server's default (the ceremony) and its writes are dropped,
+    /// because there is no live source to write into yet.
+    private(set) var biometricGateHandle: HostedBiometricGateHandle?
+
+    /// Whether the gate row DISPLAYS the ceremony as on. A STORED, OBSERVABLE MIRROR for
+    /// exactly the reason `displayedPosture` is one: the toggle writes the mutex inside
+    /// the source, and only a stored-property write schedules the re-render.
+    private(set) var displayedBiometricGate: Bool = true
+
+    /// Called with the gate handle at server startup, through `serveHosted`'s
+    /// `onBiometricGateReady` — the same hop the posture handle rides, so the console
+    /// adopts both together or neither. The handle carries the loaded stored gate, so
+    /// this first write is the row's display becoming the server's actual state.
+    func adoptBiometricGateHandle(_ handle: HostedBiometricGateHandle) {
+        biometricGateHandle = handle
+        displayedBiometricGate = handle.isCeremonyRequired
+    }
+
+    /// Guards against concurrent or re-entrant gate toggles while a ceremony is in flight.
+    private var isPerformingBiometricGateChange: Bool = false
+
+    /// THE TOGGLE, AND THE ORDER IS THE WHOLE ACCEPTANCE.
+    ///
+    /// 1. CEREMONY FIRST, IN BOTH DIRECTIONS. Turning the gate OFF is a request to weaken
+    ///    the system's own authentication; turning it back ON is a change to what the
+    ///    ceremony protects. An actor who cannot authenticate can do neither, which is
+    ///    the property the control exists for. No ceremony installed is a refusal, not a
+    ///    downgrade path: the same-uid residual this product accepts for its state files
+    ///    does not extend to letting a headless or compromised console silently strip
+    ///    its own protection.
+    /// 2. THEN THE RECORD. Every attempt, successful or not, reaches the decision log
+    ///    through `recordOperatorAction` — the approved change as an allow, the failed
+    ///    ceremony as a deny naming `biometricUnavailable`.
+    /// 3. THEN THE APPLY, AND ONLY ON A RECORD THAT TOOK. An unrecordable change is not
+    ///    applied, which is the same discipline as `auditUnavailable` on the RPC path:
+    ///    the log is what the operator afterwards asks, and a downgrade that happened
+    ///    off the record is a downgrade an auditor cannot see. A persist failure after a
+    ///    good record still applies — the change is live and logged, while the persist is
+    ///    best-effort (logged to unified logging) mirroring posture preference persistence.
+    func setBiometricGate(_ requiring: Bool) {
+        Task { @MainActor in
+            await performBiometricGateChange(requiring)
+        }
+    }
+
+    /// The toggle's body, awaited so a test can drive the whole flow — ceremony, record,
+    /// apply — without a window server or a sensor.
+    func performBiometricGateChange(_ requiring: Bool) async {
+        guard !isPerformingBiometricGateChange else { return }
+        isPerformingBiometricGateChange = true
+        defer { isPerformingBiometricGateChange = false }
+
+        let action = requiring
+            ? "the console biometric gate was turned on"
+            : "the console biometric gate was turned off"
+        // NO CEREMONY INSTALLED REFUSES THE CHANGE, recorded. The branch mirrors
+        // answerValue's discipline: a protection that cannot be checked is not skipped.
+        guard let ceremony else {
+            logger.error(
+                "The biometric gate was asked to change and no ceremony is installed; refusing rather than changing without the check",
+            )
+            let recorded = ServerInspectionService.recordOperatorAction(
+                action: action,
+                approved: false,
+                biometricObtained: false,
+                refusalReason: .biometricUnavailable,
+                environment: stateEnvironment,
+            )
+            if !recorded {
+                pendingNotice = "The setting was not changed: the decision log could not record the attempt."
+            }
+            return
+        }
+        // ACTIVATION IS PAID HERE, as in answerValue: the ceremony refuses unless the
+        // console is frontmost, and the operator just committed to a change that needs
+        // the sensor.
+        windows.activateForCeremony()
+        let outcome = await ceremony.perform(
+            nonce: UUID().uuidString,
+            reason: requiring
+                ? "ExactMac asks to require Touch ID again to open Grants and Activity"
+                : "ExactMac asks before Touch ID stops protecting Grants and Activity",
+        )
+        guard case .performed = outcome else {
+            logger.notice("The biometric gate change was refused: the ceremony did not complete")
+            let recorded = ServerInspectionService.recordOperatorAction(
+                action: action,
+                approved: false,
+                biometricObtained: false,
+                refusalReason: .biometricUnavailable,
+                environment: stateEnvironment,
+            )
+            if !recorded {
+                pendingNotice = "The setting was not changed: the decision log could not record the attempt."
+            }
+            return
+        }
+        // THE RECORD BEFORE THE APPLY: an entry that did not land leaves the gate alone.
+        let recorded = ServerInspectionService.recordOperatorAction(
+            action: action,
+            approved: true,
+            biometricObtained: true,
+            refusalReason: nil,
+            environment: stateEnvironment,
+        )
+        guard recorded else {
+            pendingNotice = "The setting was not changed: the decision log could not take the record."
+            logger.error("The biometric gate change was not applied: the audit could not record it")
+            return
+        }
+        biometricGateHandle?.setCeremonyRequired(requiring, environment: stateEnvironment)
+        displayedBiometricGate = biometricGateHandle?.isCeremonyRequired ?? requiring
+    }
+
     /// Reports that the server this process hosts could not start, and says why.
     ///
     /// IT IS DISTINCT FROM "THE SERVICE IS OFF" because the operator turned nothing off.
@@ -622,7 +740,16 @@ final class ConsoleModel {
     /// Opens the Grants management window, reading live standing grants from the server.
     ///
     /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
-    func openGrants() {
+    ///
+    /// GATED, AND THE GATE IS THE SERVER'S: when the live gate says a ceremony is
+    /// required, the window costs a fingerprint, because what it reveals — every standing
+    /// permission — is exactly what the row's own detail text says it protects. The
+    /// ceremony happens BEFORE anything is read or shown; a refusal opens nothing. THE
+    /// FUNCTION IS ASYNC RATHER THAN FIRE-AND-FORGET so a caller (and a test) can await
+    /// the whole flow: a spawn-and-return here would make the ceremony race the very
+    /// window it is supposed to precede.
+    func openGrants() async {
+        guard await passBiometricGate(for: "Grants") else { return }
         refreshGrants()
     }
 
@@ -708,8 +835,44 @@ final class ConsoleModel {
     /// Opens the Activity timeline window, reading and verifying the decision audit log from the server.
     ///
     /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
-    func openActivity() {
+    ///
+    /// GATED like Grants, and for the matching half of the row's reason: what was ASKED
+    /// is the other thing an operator at the keyboard can read that someone else may not
+    /// be meant to see. ASYNC for the same reason Grants is.
+    func openActivity() async {
+        guard await passBiometricGate(for: "Activity") else { return }
         refreshActivity()
+    }
+
+    /// The gate an open passes: false means the window did NOT open. With no handle the
+    /// server has not come up, and the server's default is the ceremony — but with no
+    /// gate to ask and no ceremony to pay, the open REFUSES rather than skips, which is
+    /// the same fail-closed direction the toggle takes. A nil ceremony under an on-gate
+    /// refuses too: a protection that cannot be checked is not skipped.
+    private func passBiometricGate(for surface: String) async -> Bool {
+        guard let handle = biometricGateHandle else {
+            logger.notice("Opening \(surface, privacy: .public) was refused: the server's gate has not come up")
+            return false
+        }
+        guard handle.isCeremonyRequired else {
+            return true
+        }
+        guard let ceremony else {
+            logger.notice(
+                "Opening \(surface, privacy: .public) was refused: the gate requires a ceremony and none is installed",
+            )
+            return false
+        }
+        windows.activateForCeremony()
+        let outcome = await ceremony.perform(
+            nonce: UUID().uuidString,
+            reason: "ExactMac asks before showing \(surface) — what is permitted and what was asked",
+        )
+        guard case .performed = outcome else {
+            logger.notice("Opening \(surface, privacy: .public) was refused: the ceremony did not complete")
+            return false
+        }
+        return true
     }
 
     /// Refreshes the Activity timeline window with current server state and verified hash chain.

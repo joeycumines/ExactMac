@@ -58,7 +58,7 @@ final class OperatorActionAuditTests: XCTestCase {
         try AuditEntry.readAll(from: stateDirectory + "/audit.log").whole
     }
 
-    func testAnUnregisteredHostFailsClosedAndRecordsNothing() throws {
+    func testAnUnregisteredHostFailsClosedAndRecordsNothing() {
         // No register call: the shape of a host that never started a runtime.
         let recorded = ServerInspectionService.recordOperatorAction(
             action: "the console biometric gate was turned off",

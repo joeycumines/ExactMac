@@ -1,6 +1,5 @@
-import XCTest
-
 @testable import ExactMacServer
+import XCTest
 
 /// The biometric gate: what it defaults to, what a corrupt file reads as, and that a
 /// choice survives the file round trip.

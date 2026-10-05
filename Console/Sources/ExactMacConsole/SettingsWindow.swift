@@ -27,11 +27,21 @@ struct SettingRow: View {
         var detail: String
         var isOn: Bool
         var isLocked = false
+        /// What a LOCKED row says beneath itself. The default is the on-row's standing
+        /// statement; an OFF locked row (the allow-once exemption) carries its own,
+        /// because "required — this cannot be turned off" over a switch that reads OFF
+        /// would be a contradiction on screen.
+        var lockedCaption = "Required — this cannot be turned off"
         var isDestructive = false
         var actionTitle: String?
     }
 
     let setting: Model
+    /// The row's own toggle, when the setting is genuinely operable. NIL means the row
+    /// cannot be changed and its track is drawn locked-explained, never greyed: the
+    /// design has no disabled state, and a live-looking switch that absorbs clicks
+    /// silently is the exact defect E22 exists to end.
+    var onToggle: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.one) {
@@ -45,7 +55,7 @@ struct SettingRow: View {
                     ConsoleButton(title: actionTitle, kind: .deny)
                         .frame(width: 138)
                 } else {
-                    Track(isOn: setting.isOn, isLocked: setting.isLocked)
+                    Track(isOn: setting.isOn, isLocked: setting.isLocked, onToggle: onToggle)
                 }
             }
             Text(setting.detail)
@@ -55,8 +65,10 @@ struct SettingRow: View {
             if setting.isLocked {
                 // 10/600 and NOT tertiary: a locked setting is a standing statement about the
                 // operator's security, and it is the one note in this window that is
-                // emphasised rather than whispered.
-                Text("Required — this cannot be turned off")
+                // emphasised rather than whispered. The caption is the row's own: an ON
+                // locked row says the requirement cannot be removed, and an OFF locked row
+                // says the exemption is the server's policy rather than a switch here.
+                Text(setting.lockedCaption)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Design.Ink.textSecondary)
             }
@@ -205,10 +217,6 @@ struct PostureControl: View {
 
     unowned let model: ConsoleModel
 
-    init(model: ConsoleModel) {
-        self.model = model
-    }
-
     var body: some View {
         HStack(spacing: Design.Space.tight) {
             ForEach(Choice.allCases, id: \.self) { choice in
@@ -286,7 +294,6 @@ struct TargetChip: View {
 struct SettingsWindow: View {
     @Bindable var model: ConsoleModel
     @State private var targets: [String] = ["1Password", "Keychain Access", "Xcode"]
-    @State private var requireTouchIDToOpen = true
 
     var body: some View {
         ConsoleWindow(
@@ -319,7 +326,7 @@ struct SettingsWindow: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     SectionLabel(text: "BIOMETRIC REQUIREMENTS")
-                    ForEach(Self.biometricRows) { SettingRow(setting: $0) }
+                    ForEach(Self.biometricRows(model: model)) { SettingRow(setting: $0) }
 
                     SectionLabel(text: "HIGH-CONSEQUENCE TARGETS")
                     VStack(alignment: .leading, spacing: Design.Space.one) {
@@ -351,13 +358,21 @@ struct SettingsWindow: View {
                     )
 
                     SectionLabel(text: "CONSOLE")
+                    // THE ROW IS LIVE, and what it is live to is the model: it displays
+                    // the server's actual gate and writes through the ceremony-gated
+                    // toggle — the state is NOT held here, so it survives a relaunch and
+                    // a second window cannot disagree with the first.
                     SettingRow(setting: SettingRow.Model(
                         id: "console",
                         title: "Require Touch ID to open the console",
-                        detail: "Opening the console reveals what is permitted and what was asked. "
-                            + "Without this, anyone at the keyboard can read both.",
-                        isOn: requireTouchIDToOpen,
-                    ))
+                        detail: "Opening Grants or Activity reveals what is permitted and "
+                            + "what was asked. Without this, anyone at the keyboard can "
+                            + "read both. Turning it off — and back on — costs a "
+                            + "fingerprint, and the attempt is recorded either way.",
+                        isOn: model.displayedBiometricGate,
+                    ), onToggle: {
+                        model.setBiometricGate(!model.displayedBiometricGate)
+                    })
 
                     SectionLabel(text: "RESET")
                     SettingRow(setting: SettingRow.Model(
@@ -376,47 +391,60 @@ struct SettingsWindow: View {
     }
 
     /// The design's four locked rows, verbatim, and the fifth which is the opposite case:
-    /// friction deliberately NOT spent on a narrow one-shot ask, which is the only setting
-    /// here that is optional in the other direction.
-    private static let biometricRows: [SettingRow.Model] = [
-        .init(
-            id: "script",
-            title: "Run a shell, AppleScript or JavaScript",
-            detail: "A shell can read the screen, the clipboard and the interface, so no "
-                + "script runs without a fingerprint.",
-            isOn: true,
-            isLocked: true,
-        ),
-        .init(
-            id: "global",
-            title: "Grant every application, indefinitely",
-            detail: "The broadest grant ExactMac can issue. It stays in force until you "
-                + "revoke it, so approving it proves you are you.",
-            isOn: true,
-            isLocked: true,
-        ),
-        .init(
-            id: "observe",
-            title: "Observe any application continuously",
-            detail: "Reads everything on screen, in every application, for as long as the "
-                + "grant lasts.",
-            isOn: true,
-            isLocked: true,
-        ),
-        .init(
-            id: "revokeAll",
-            title: "Revoke every grant at once",
-            detail: "If someone else has your session, this is the first control they "
-                + "would use.",
-            isOn: true,
-            isLocked: true,
-        ),
-        .init(
-            id: "allowOnce",
-            title: "Allow once — this exact request",
-            detail: "A single narrow request does not need a fingerprint. With this on, "
-                + "it does.",
-            isOn: false,
-        ),
-    ]
+    /// friction deliberately NOT spent on a narrow one-shot ask. THE FIFTH IS LOCKED TOO,
+    /// and the reason is E22's own finding: an unlocked row with no closure was a
+    /// live-looking switch that absorbed clicks — the same pretend-control as the toggle
+    /// in the CONSOLE section was. What it states is true of the server (a routine narrow
+    /// one-shot costs no fingerprint; a script, an unsigned caller, a global standing
+    /// grant or a high-consequence target always does — `AuthorizationPolicy
+    /// .biometricRequirement` is the policy the captions paraphrase), and it is not the
+    /// operator's to change from here, so the row says so instead of offering a switch.
+    static func biometricRows(model _: ConsoleModel) -> [SettingRow.Model] {
+        [
+            .init(
+                id: "script",
+                title: "Run a shell, AppleScript or JavaScript",
+                detail: "A shell can read the screen, the clipboard and the interface, so no "
+                    + "script runs without a fingerprint.",
+                isOn: true,
+                isLocked: true,
+            ),
+            .init(
+                id: "global",
+                title: "Grant every application, indefinitely",
+                detail: "The broadest grant ExactMac can issue. It stays in force until you "
+                    + "revoke it, so approving it proves you are you.",
+                isOn: true,
+                isLocked: true,
+            ),
+            .init(
+                id: "observe",
+                title: "Observe any application continuously",
+                detail: "Reads everything on screen, in every application, for as long as the "
+                    + "grant lasts.",
+                isOn: true,
+                isLocked: true,
+            ),
+            .init(
+                id: "revokeAll",
+                title: "Revoke every grant at once",
+                detail: "If someone else has your session, this is the first control they "
+                    + "would use.",
+                isOn: true,
+                isLocked: true,
+            ),
+            .init(
+                id: "allowOnce",
+                title: "Allow once — this exact request",
+                detail: "A narrow one-shot ask is where friction is deliberately not spent. "
+                    + "The bar is set by what each request actually is — a routine read "
+                    + "costs nothing, a script or an unsigned caller always costs a "
+                    + "fingerprint.",
+                isOn: false,
+                isLocked: true,
+                lockedCaption: "Fixed — the bar is set by what each request is, not by a "
+                    + "switch here",
+            ),
+        ]
+    }
 }

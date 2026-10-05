@@ -97,10 +97,10 @@ enum ServerFixture {
         biometricReason: String? = nil,
         riskClass: RiskClass = .elevated,
         offered: [OfferedDecision.Kind] = [.allowOnce, .allowTargetApplication, .allowSession, .deny],
-        /// WHICH OPTIONS COST A CEREMONY, per option — the engine attaches the requirement
-        /// to the option, not to the request, so the fixture does too. Nil means "the
-        /// request-level requirement applies to every option", which is the shape most
-        /// existing callers expect.
+        // WHICH OPTIONS COST A CEREMONY, per option — the engine attaches the requirement
+        // to the option, not to the request, so the fixture does too. Nil means "the
+        // request-level requirement applies to every option", which is the shape most
+        // existing callers expect.
         perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> AuthorizationDecision {
         AuthorizationDecision(

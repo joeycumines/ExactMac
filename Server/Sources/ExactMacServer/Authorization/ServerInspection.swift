@@ -259,7 +259,7 @@ public final class ServerInspectionService: @unchecked Sendable {
         approved: Bool,
         biometricObtained: Bool,
         refusalReason: DenialReason?,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
+        environment _: [String: String] = ProcessInfo.processInfo.environment,
     ) -> Bool {
         lock.lock()
         let audit = activeState?.audit

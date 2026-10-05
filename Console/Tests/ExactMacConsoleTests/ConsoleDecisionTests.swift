@@ -31,8 +31,8 @@ struct ConsoleDecisionTests {
         requiresBiometric: Bool = false,
         requestID: String = "req-1",
         offered: [OptionRow.Kind] = [.once, .session, .deny],
-        /// Per-option ceremony requirements, passed through to the fixture. Nil inherits
-        /// the request-level requirement on every option.
+        // Per-option ceremony requirements, passed through to the fixture. Nil inherits
+        // the request-level requirement on every option.
         perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> PendingRequest {
         // The option KINDS go into the fixture itself, because the fixture only builds the

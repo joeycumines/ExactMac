@@ -221,7 +221,7 @@ final class GrantStore: Sendable {
     /// back in the file the next boot reads. Snapshot and write are atomic under THIS
     /// lock, so the last write to land is always the snapshot taken last, which is the
     /// state as it stood.
-    private let persistenceLock = Synchronization.Mutex<()>(())
+    private let persistenceLock = Synchronization.Mutex<Void>(())
     private let logger = Logger(
         subsystem: "io.github.joeycumines.exactmac",
         category: "authorization.grants",

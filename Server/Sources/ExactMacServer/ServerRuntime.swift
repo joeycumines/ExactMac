@@ -358,7 +358,6 @@ func serve(
 /// NOT `main()` WITH A FLAG, because the two have genuinely different jobs and a flag would
 /// make "am I the app or the server" a question asked at runtime rather than answered by
 /// the entry point the process chose to call.
-@MainActor
 /// The live posture the hosted server enforces, published so the console — the same
 /// process, per gf-4 — can write the operator's choice into it. THE ENVIRONMENT OVERRIDE
 /// WINS over anything stored here, and `isOverriddenByEnvironment` is what the settings
@@ -367,6 +366,7 @@ func serve(
 ///
 /// A PUBLIC HANDLE RATHER THAN THE WHOLE RUNTIME, because a public function may not name
 /// an internal type and the runtime's other fields have no business being public.
+@MainActor
 public struct HostedPostureHandle: Sendable {
     private let source: PostureSource
 
@@ -378,14 +378,20 @@ public struct HostedPostureHandle: Sendable {
     }
 
     /// The posture actually in force right now, which is what the control displays.
-    public var current: Posture { source.current }
+    public var current: Posture {
+        source.current
+    }
 
     /// Whether the environment override holds — the control states that the setting is
     /// controlled by the server's environment when this is true.
-    public var isOverriddenByEnvironment: Bool { source.isOverriddenByEnvironment }
+    public var isOverriddenByEnvironment: Bool {
+        source.isOverriddenByEnvironment
+    }
 
     /// The operator's own stored choice, or nil when nothing has been stored.
-    public var storedPreference: Posture? { source.storedPreference }
+    public var storedPreference: Posture? {
+        source.storedPreference
+    }
 
     /// Records the operator's choice and persists it, so it survives a relaunch. The
     /// in-memory write is in force immediately for every later request; the persist is
@@ -424,6 +430,47 @@ enum ExactMacServerLogger {
         // unified log is readable by other processes on the machine.
         logger.error("The posture preference could not be persisted: \(String(describing: error), privacy: .private)")
     }
+
+    static func gatePersistFailed(_ error: any Error) {
+        logger.error("The biometric gate could not be persisted: \(String(describing: error), privacy: .private)")
+    }
+}
+
+/// THE CONSOLE'S BIOMETRIC GATE, AS THE SERVER HOLDS IT — the public handle over the
+/// `BiometricGateSource`, delivered to the console on the same `serveHosted` callback the
+/// posture handle rides. The gate governs whether opening Grants or Activity costs a
+/// ceremony; whether it does is ENFORCEMENT state, not console preference, so it lives in
+/// the server library beside the posture and reaches the console the same way.
+public struct HostedBiometricGateHandle: Sendable {
+    private let source: BiometricGateSource
+
+    /// TEST-VISIBLE, for the same reason the posture handle's is: the console suite
+    /// drives the gate's display and write path against a handle built directly, because
+    /// hosting a real server in a test is the thing the suite exists to avoid.
+    public nonisolated init(source: BiometricGateSource) {
+        self.source = source
+    }
+
+    /// Whether opening Grants or Activity costs a ceremony right now.
+    public var isCeremonyRequired: Bool {
+        source.isCeremonyRequired
+    }
+
+    /// Records the operator's gate choice and persists it. THE PERSIST IS BEST-EFFORT and
+    /// the forwarding seam exists for the test suite for the same reason the posture
+    /// handle's does: the suite drives the real persist path and must not rewrite the
+    /// operator's real state directory on every run.
+    public func setCeremonyRequired(
+        _ required: Bool,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
+        source.setCeremonyRequired(required)
+        do {
+            try source.persist(environment: environment)
+        } catch {
+            ExactMacServerLogger.gatePersistFailed(error)
+        }
+    }
 }
 
 /// The hosted entry, and the seam through which the console reaches the server's live
@@ -445,6 +492,7 @@ enum ExactMacServerLogger {
 public func serveHosted(
     consent: ConsentAnswering?,
     onPostureReady: (@MainActor @Sendable (HostedPostureHandle) -> Void)? = nil,
+    onBiometricGateReady: (@MainActor @Sendable (HostedBiometricGateHandle) -> Void)? = nil,
 ) async throws -> HostedPostureHandle {
     _ = setServerProcessUmask()
     let config = ServerConfig.fromEnvironment()
@@ -462,7 +510,14 @@ public func serveHosted(
         // strict to no override would let an operator write overwrite a deployment that
         // said strict — the opposite of the rule the source enforces everywhere else.
         let source = PostureSource(override: config.defaultPosture)
-        await MainActor.run { onPostureReady?(HostedPostureHandle(source: source)) }
+        // THE GATE DELIVERS LIKE THE POSTURE DOES, and carries the STORED gate when one
+        // exists — the loaded value is what the control must display at first render.
+        let gate = BiometricGateSource()
+        gate.setCeremonyRequired(BiometricGateSource.loadStoredGate())
+        await MainActor.run {
+            onPostureReady?(HostedPostureHandle(source: source))
+            onBiometricGateReady?(HostedBiometricGateHandle(source: gate))
+        }
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Posix(
@@ -485,7 +540,14 @@ public func serveHosted(
         registry: runtime.registry,
     )
     logger.info("Hosted server listening on a Unix socket: \(socketPath, privacy: .private)")
-    await MainActor.run { onPostureReady?(HostedPostureHandle(source: runtime.postureSource)) }
+    // BOTH HANDLES ARRIVE BEFORE THE SERVER RUNS, in the same hop: the console adopts
+    // them together or neither, and a display that starts from one without the other
+    // would show a gate state the server is not holding.
+    let hostedGate = HostedBiometricGateHandle(source: runtime.biometricGate)
+    await MainActor.run {
+        onPostureReady?(HostedPostureHandle(source: runtime.postureSource))
+        onBiometricGateReady?(hostedGate)
+    }
     try await serve(
         config: config,
         transport: HTTP2ServerTransport.Custom(listenerFactory: listener),

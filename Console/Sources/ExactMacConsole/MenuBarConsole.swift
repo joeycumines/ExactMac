@@ -223,12 +223,12 @@ struct MenuBarPopover: View {
             MenuRow(
                 title: "Grants",
                 detail: nil,
-                action: { model.openGrants() },
+                action: { Task { await model.openGrants() } },
             )
             MenuRow(
                 title: "Activity",
                 detail: nil,
-                action: { model.openActivity() },
+                action: { Task { await model.openActivity() } },
             )
             MenuRow(title: "Settings", detail: nil, action: { model.openSettings() })
         }

@@ -13,7 +13,8 @@ GO_MODULE_SLUGS_NO_PACKAGES ?= hack.google-api-linter
 GO_MODULE_SLUGS_NO_UPDATE ?= hack.google-api-linter
 # excludes generated files from linting/formatting
 SWIFT_PACKAGE_FILES_NO_LINT_OR_FORMAT ?= \
-./Server/Sources/ExactMacProto/%
+./Server/Sources/ExactMacProto/% \
+./scratch/%
 SWIFT_PACKAGE_FILES_NO_LINT ?= $(SWIFT_PACKAGE_FILES_NO_LINT_OR_FORMAT)
 SWIFT_PACKAGE_FILES_NO_FORMAT ?= $(SWIFT_PACKAGE_FILES_NO_LINT_OR_FORMAT)
 BUF_BREAKING_AGAINST ?= .#branch=main
