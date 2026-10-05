@@ -72,11 +72,16 @@ public final class PostureSource: Sendable {
         ExactMacRuntimePaths.stateDirectory(environment: environment) + "/posture.json"
     }
 
-    /// Writes the stored preference to disk, atomically, at 0600 in the 0700 state
-    /// directory. A FAILED PERSIST DOES NOT FAIL THE WRITE — the in-memory preference is
-    /// already in force for every later request, and the honest report of a failed
-    /// persist is that the choice will not survive a relaunch, which is what the caller
-    /// is told.
+    /// Writes the stored preference to disk, at 0600 in the 0700 state directory. THE
+    /// WRITE IS NOT TEMP-AND-RENAME ATOMIC: the file is truncated in place, so a crash
+    /// mid-write can leave it short. That residual is accepted deliberately, because the
+    /// read side fails closed — a truncated file parses as nothing and the preference
+    /// falls back to strict, which is the safe direction — while a rename-based write
+    /// would need the recovery discipline `DecisionAudit` carries, which a preference
+    /// whose worst case is "the operator re-picks strict" does not justify. A FAILED
+    /// PERSIST DOES NOT FAIL THE WRITE — the in-memory preference is already in force
+    /// for every later request, and the honest report of a failed persist is that the
+    /// choice will not survive a relaunch, which is what the caller is told.
     public func persist(environment: [String: String] = ProcessInfo.processInfo.environment) throws {
         let path = Self.storedPath(environment: environment)
         let posture = stored.withLock { $0 }

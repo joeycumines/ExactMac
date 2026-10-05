@@ -167,4 +167,41 @@ extension PostureControlCopyTests {
         #expect(model.postureHandle?.isOverriddenByEnvironment == true)
         #expect(model.postureHandle?.storedPreference == .balanced)
     }
+
+    /// THE MIRROR IS AN OBSERVABLE WRITE, NOT JUST A FRESH READ. The E34 review found the
+    /// re-render defect the wiring exists to fix REINTRODUCED through the display path:
+    /// `setPosture` wrote only the mutex inside `PostureSource`, so no `@Observable`
+    /// stored property changed, so SwiftUI never invalidated, and the control kept
+    /// showing the pre-click posture while the server enforced the post-click one. A
+    /// computed read here would pass while the screen lied — the same test that could not
+    /// catch it. So THIS test observes the model the way SwiftUI does:
+    /// `withObservationTracking` registers for the next invalidation of exactly the
+    /// properties a body would read, and the await completes only if `setPosture` WROTE
+    /// one. `onChange` fires synchronously during the write and off the actor, so the
+    /// handler resumes a continuation the test is already awaiting — if the write does
+    /// not invalidate, this test hangs, which under the suite's harness is the failure.
+    @Test @MainActor
+    func `setting the posture invalidates the display the way a view would observe`() async throws {
+        let model = makeTestConsoleModel()
+        let handle = HostedPostureHandle(source: PostureSource(override: nil))
+        model.adoptPostureHandle(handle)
+        #expect(model.displayedPosture == .strict)
+
+        // THE OBSERVATION IS REGISTERED BEFORE THE WRITE, and the invalidation fires
+        // DURING it: `setPosture` writes the stored mirror, Observation signals, the
+        // handler resumes the continuation, and the await below completes. With the old
+        // computed getter the tracking would register on nothing writable and this await
+        // would never return — which is the defect, made unmissable.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            _ = Observation.withObservationTracking {
+                _ = model.displayedPosture
+            } onChange: {
+                continuation.resume()
+            }
+            // Registered; now write, from the actor the model lives on. The handler
+            // fires synchronously inside this call.
+            model.setPosture(.balanced)
+        }
+        #expect(model.displayedPosture == .balanced)
+    }
 }

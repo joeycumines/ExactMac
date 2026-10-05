@@ -12,12 +12,23 @@ import Testing
 /// A console model for renders and layout tests: no ceremony (none is exercised by a
 /// render), and no server handle — the posture control renders its truthful no-server
 /// state (strict, inert), which is itself a state worth having drawn.
+///
+/// THE STATE ENVIRONMENT IS A TEMPORARY DIRECTORY, and the seam exists because the model
+/// drives the REAL persist path: without it, any test that writes a posture would rewrite
+/// the operator's actual `~/.exactmac/posture.json` on every run — a state-corrupting
+/// test that never fails, because persist failures are swallowed. Every model the suite
+/// builds goes through this helper, so every persist lands here or nowhere.
 @MainActor
 func makeTestConsoleModel() -> ConsoleModel {
-    ConsoleModel(
+    let directory = NSTemporaryDirectory() + "exactmac-console-tests-\(UUID().uuidString)"
+    try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    // The scratch directory is removed when the process exits; per-model cleanup would
+    // need ownership the harness does not have, and the temp area is swept by the system.
+    return ConsoleModel(
         presentation: ServerHosting.current(),
         windows: ConsoleWindowHost(),
         ceremony: nil,
+        stateEnvironment: ["EXACTMAC_STATE_DIRECTORY": directory],
     )
 }
 

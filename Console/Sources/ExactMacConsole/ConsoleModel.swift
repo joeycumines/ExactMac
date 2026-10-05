@@ -93,16 +93,27 @@ final class ConsoleModel {
     // module cannot call. Keeping three properties that nothing writes and a window that
     // renders them is the shape of a lie that compiles.
 
+    /// The environment every PERSISTING write through the server goes out under, and a
+    /// DEPENDENCY RATHER THAN A CONSTANT for the same reason the ceremony is: the test
+    /// suite drives the real write path, and without the seam a console test that toggles
+    /// the posture rewrites the OPERATOR's real `~/.exactmac/posture.json` — a
+    /// state-corrupting test that never fails, because persist failures are swallowed.
+    /// Production uses the default, which is the process environment; the suite passes a
+    /// temporary state directory via `EXACTMAC_STATE_DIRECTORY`.
+    private let stateEnvironment: [String: String]
+
     init(
         startAtLogin: StartAtLogin = StartAtLogin(),
         presentation: OperatorInterface = ServerHosting.current(),
         windows: ConsoleWindowHost = ConsoleWindowHost(),
         ceremony: (any CeremonyPerforming)? = BiometricCeremony(),
+        stateEnvironment: [String: String] = ProcessInfo.processInfo.environment,
     ) {
         self.startAtLogin = startAtLogin
         self.presentation = presentation
         self.windows = windows
         self.ceremony = ceremony
+        self.stateEnvironment = stateEnvironment
     }
 
     // MARK: Answering a request the server asked
@@ -262,22 +273,32 @@ final class ConsoleModel {
     /// write into yet.
     func adoptPostureHandle(_ handle: HostedPostureHandle) {
         postureHandle = handle
+        // THE MIRROR IS SET HERE TOO, because adoption is when the control's display first
+        // becomes the server's actual posture: the handle already carries the loaded
+        // stored preference, so the very first render after startup shows it.
+        displayedPosture = handle.current
     }
+
+    /// What the control DISPLAYS. A STORED, OBSERVABLE MIRROR of the handle's live value,
+    /// and the mirror is the whole point: `@Observable` schedules invalidation on writes to
+    /// STORED properties, and `setPosture` writes only the mutex inside `PostureSource`, so
+    /// a computed read of `postureHandle?.current` never re-rendered anything — the control
+    /// kept showing the pre-click posture while the server enforced the post-click one.
+    /// The mirror is written by every path that changes the live posture (adoption, and
+    /// every set), so a selection re-renders in the moment the operator is looking at it.
+    /// The getter still falls back to the live handle so a drift between mirror and source
+    /// can display as the truth rather than as a stale copy.
+    private(set) var displayedPosture: Posture = .strict
 
     /// The operator's choice, written through the handle and persisted. THE WRITE IS A
     /// REAL ONE: the source is the same object the interceptor consults per request, so
     /// the next request is judged under the posture the operator just chose — no restart,
-    /// no propagation delay beyond the request already in flight.
+    /// no propagation delay beyond the request already in flight. THE MIRROR IS WRITTEN
+    /// WITH IT, which is what turns the write into a re-render; without that the control
+    /// was a live switch wired to a frozen display.
     func setPosture(_ posture: Posture) {
-        postureHandle?.setStoredPreference(posture)
-    }
-
-    /// What the control should DISPLAY, in force right now: the environment override when
-    /// it holds, else the stored preference, else strict. NEVER a hardcoded default —
-    /// that was the second half of the defect, a control showing Balanced while the
-    /// engine's actual unconfigured posture was strict.
-    var displayedPosture: Posture {
-        postureHandle?.current ?? .strict
+        postureHandle?.setStoredPreference(posture, environment: stateEnvironment)
+        displayedPosture = postureHandle?.current ?? posture
     }
 
     /// Reports that the server this process hosts could not start, and says why.

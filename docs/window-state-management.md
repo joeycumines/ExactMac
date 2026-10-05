@@ -370,3 +370,51 @@ This implementation accepts the reality of macOS's fractured windowing APIs.
 Quartz provides the broad immutable inventory; AX provides detailed state for
 one exact retained object. Private IDs bootstrap identity, but geometry and
 title never rescue an unreadable, absent, or ambiguous target.
+
+-----
+
+## 10\. The Enforcement Posture and Its Two Parsers (2026-10-05)
+
+The server's enforcement posture lives in `PostureSource`
+(`Server/Sources/ExactMacServer/Authorization/PostureSource.swift`): an
+environment override fixed at construction, above a mutex-guarded stored
+preference, above the `.strict` fallback. The interceptor reads
+`postureSource.current` **per request** — never a captured value — so a
+console selection lands on the next request without a rebuild, and a change
+can never alter a decision already made. The console writes through
+`HostedPostureHandle`, delivered at startup via `serveHosted(onPostureReady:)`
+(before `serve` is awaited; the function's return value only fires at
+shutdown). Storage is `~/.exactmac/posture.json` at 0600; an absent,
+unreadable, malformed, or unknown-valued file reads as *no preference*
+(→ strict, fail-closed).
+
+### 10.1 One environment variable, two parsers, two typo semantics
+
+`EXACTMAC_POSTURE` is parsed in two places with **deliberately different**
+failure semantics:
+
+- **`ServerConfig` (`ServerConfig.swift`)** — strict on typo. Unknown
+  spellings are a deployment configuration error, refused at startup. This
+  is the general-purpose config surface, where failing loudly is correct.
+- **`ProductionAuthorizationRuntime.make`
+  (`ProductionAuthorizationRuntime.swift`)** — nil on typo. `balanced`,
+  `lockeddown`/`locked_down`/`locked-down`, and `strict` are accepted; any
+  other value yields **no override**, so the operator's stored preference
+  stays in force.
+
+The divergence is intentional and must survive both directions of "cleanup":
+
+- Strict-on-typo in the runtime parser would make a single mistyped
+  environment variable **silently revoke the operator's stored choice** —
+  a deployment editing one variable in a plist would flip enforcement from
+  the operator's balanced to strict (or vice versa) with no signal.
+- Nil-on-typo in `ServerConfig` would let a mistyped deployment posture
+  fall back to strict *quietly* while the deployment believed it had said
+  otherwise — for a TCP deployment, that difference is the reduced-posture
+  denial itself.
+
+The distinction is pinned by `PostureSourceTests.testTheEnvironmentOverrideSpellings`.
+If you are reading this because a linter or reviewer flagged the two parsers
+as duplication: they are not duplication; they are two different failure
+policies for two different audiences. Change neither without changing this
+paragraph first.

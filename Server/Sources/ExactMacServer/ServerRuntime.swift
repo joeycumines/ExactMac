@@ -392,10 +392,20 @@ public struct HostedPostureHandle: Sendable {
     /// best-effort for the same reason a failed disk write elsewhere in the product is:
     /// the choice is honest until the process dies, and a persist failure is logged
     /// rather than thrown into the control's face.
-    public func setStoredPreference(_ posture: Posture) {
+    ///
+    /// THE ENVIRONMENT IS FORWARDABLE, and the forwarder exists for the test suite: a
+    /// console test that drives the model drives the REAL persist path, and without this
+    /// seam that persist writes the OPERATOR's real `~/.exactmac/posture.json` on every
+    /// test run — a state-corrupting test that never fails either way, because persist
+    /// failures are swallowed. Production callers use the default, which is the process
+    /// environment; the suite passes a temporary state directory.
+    public func setStoredPreference(
+        _ posture: Posture,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
         source.setStoredPreference(posture)
         do {
-            try source.persist()
+            try source.persist(environment: environment)
         } catch {
             ExactMacServerLogger.posturePersistFailed(error)
         }
@@ -409,7 +419,10 @@ enum ExactMacServerLogger {
     )
 
     static func posturePersistFailed(_ error: any Error) {
-        logger.error("The posture preference could not be persisted: \(String(describing: error), privacy: .public)")
+        // `.private` ON THE DESCRIPTION, because `ExactMacRuntimeError.systemCall` embeds
+        // the state-directory path and the sibling call sites mark paths `.private` — the
+        // unified log is readable by other processes on the machine.
+        logger.error("The posture preference could not be persisted: \(String(describing: error), privacy: .private)")
     }
 }
 
