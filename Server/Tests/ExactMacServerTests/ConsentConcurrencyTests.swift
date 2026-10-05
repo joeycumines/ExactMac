@@ -131,6 +131,7 @@ final class ConsentConcurrencyTests: XCTestCase {
             consent: consent,
             issuance: issuance,
             clock: FixedClock(),
+            postureSource: PostureSource(override: nil),
             consentTimeout: consentTimeout,
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),

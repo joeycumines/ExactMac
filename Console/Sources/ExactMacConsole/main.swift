@@ -146,7 +146,16 @@ Task { @MainActor in
         // stops. Waiting for it to tell us it started would mean the app sat in its
         // initialiser state for the whole life of the server.
         consoleModel.reportServerStarted()
-        try await ExactMacServer.serveHosted(consent: consentHandler)
+        // THE HANDLE IS THE CONSOLE'S ONLY WRITE PATH INTO THE SERVER'S LIVE STATE, and it
+        // exists the moment the runtime is built — long before the server stops. It is
+        // therefore adopted in `onPostureReady`, which fires at startup, and NOT after
+        // the await, which fires at shutdown: a handle adopted at shutdown leaves the
+        // control inert for the whole life of the server, which is the pretend-button
+        // shape this wiring exists to end.
+        try await ExactMacServer.serveHosted(
+            consent: consentHandler,
+            onPostureReady: { consoleModel.adoptPostureHandle($0) },
+        )
     } catch {
         let reason = String(describing: error)
         launchLogger.error(

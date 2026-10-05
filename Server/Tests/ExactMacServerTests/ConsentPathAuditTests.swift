@@ -117,6 +117,15 @@ final class ConsentPathAuditTests: XCTestCase {
             consent: consent,
             issuance: NoGrantIssuance(),
             clock: FixedClock(),
+            // BALANCED, because this suite is about what the audit records on the ALLOW
+            // path, and the allow depends on a standing grant being honoured — which is
+            // what balanced is FOR. A fresh strict source would ignore the grant and the
+            // test would fail for the posture's sake rather than for anything it tests.
+            postureSource: {
+                let source = PostureSource(override: nil)
+                source.setStoredPreference(.balanced)
+                return source
+            }(),
             // SHORT, so a handler that waits rather than answering is decided by the test
             // rather than by the wall clock.
             consentTimeout: .milliseconds(50),

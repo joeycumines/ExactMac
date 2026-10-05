@@ -386,6 +386,11 @@ struct ProductionAuthorizationRuntime {
     let grantStorePath: String
     let authorizationRuntime: AuthorizationRuntime
     let consentTimeout: Duration
+    /// The live posture, shared with the host: the console's settings control writes the
+    /// operator's choice HERE, and the interceptor reads it per request. THE ENVIRONMENT
+    /// OVERRIDE IS SETTLED AT CONSTRUCTION, below — an operator preference cannot
+    /// override a deployment-level setting, and the control says so when it holds.
+    let postureSource: PostureSource
 
     /// - Throws: when the state directory, the audit log or the grant store cannot be
     ///   established. Startup fails rather than continuing with a component missing, because a
@@ -402,6 +407,24 @@ struct ProductionAuthorizationRuntime {
         let auditPath = ExactMacRuntimePaths.auditLogPath(environment: environment)
         let grantStorePath = ExactMacRuntimePaths.grantStorePath(environment: environment)
         let registry = ConnectionPeerRegistry()
+
+        // THE POSTURE ORDERING, decided once here: the environment override wins, then the
+        // operator's stored preference (loaded from the state directory, because it must
+        // survive a relaunch), then strict — the engine's own fail-closed default. An
+        // unparseable preference file is NOT a preference, so it reads as strict rather
+        // than as a guess.
+        let envOverride: Posture? = {
+            switch environment["EXACTMAC_POSTURE"]?.lowercased() {
+            case "balanced": .balanced
+            case "lockeddown", "locked_down", "locked-down": .lockedDown
+            case "strict": .strict
+            default: nil
+            }
+        }()
+        let postureSource = PostureSource(override: envOverride)
+        if envOverride == nil, let stored = PostureSource.loadStoredPreference(environment: environment) {
+            postureSource.setStoredPreference(stored)
+        }
 
         let audit: DecisionAudit
         do {
@@ -434,7 +457,7 @@ struct ProductionAuthorizationRuntime {
             consent: consent,
             issuance: GrantStoreIssuance(store: store),
             clock: clock,
-            posture: config.defaultPosture,
+            postureSource: postureSource,
             consentTimeout: consentTimeout,
             // Reachability now agrees with the handler: a process that was given something to
             // ask with can ask, and one that was given nothing cannot. Deriving the two from
@@ -456,6 +479,7 @@ struct ProductionAuthorizationRuntime {
             grantStorePath: grantStorePath,
             authorizationRuntime: runtime,
             consentTimeout: consentTimeout,
+            postureSource: postureSource,
         )
     }
 }

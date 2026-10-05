@@ -158,6 +158,7 @@ final class PeerIdentificationTests: XCTestCase {
         let handler = HandlerEntry()
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: PostureSource(override: nil),
             isConsoleReachable: true,
             peerEvidence: .fixed(nil),
         )
@@ -477,7 +478,8 @@ private final class PeerIdentifyingHarness: @unchecked Sendable {
             interceptors: productionServerInterceptors(
                 AuthorizationInterceptor(
                     runtime: .unixSocket(
-                        descriptorPolicy: PublicRequestDescriptorPolicy.load(),
+                        descriptorPolicy: try PublicRequestDescriptorPolicy.load(),
+                        postureSource: PostureSource(override: nil),
                         isConsoleReachable: true,
                         peerEvidence: .registry(registry),
                     ),

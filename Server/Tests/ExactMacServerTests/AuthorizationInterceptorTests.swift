@@ -27,7 +27,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         XCTAssertEqual(methods.count, 76, "the API's method count moved; this proof must be re-derived")
 
         let counters = AuthorizationCounters()
-        let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy)
+        let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource())
         // One representative request for every method. The authorization OUTCOME is decided
         // by the method and the posture, not by which fields the caller happened to set, so
         // this is a faithful probe of interception; each method's own payload is derived and
@@ -60,7 +60,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     func testAnUnmappedMethodIsRefusedRatherThanPassedThrough() async throws {
         let policy = try Self.loadPolicy()
         let entered = await Self.drive(
-            runtime: .unixSocket(descriptorPolicy: policy),
+            runtime: .unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource()),
             counters: AuthorizationCounters(),
             method: "\(RPCAuthorizationMap.serviceName)/ExfiltrateEverything",
             message: Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
@@ -77,7 +77,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     func testAServiceOutsideTheAuthorizedSetIsNotGated() async throws {
         let policy = try Self.loadPolicy()
         let entered = await Self.drive(
-            runtime: .unixSocket(descriptorPolicy: policy),
+            runtime: .unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource()),
             counters: AuthorizationCounters(),
             method: "grpc.health.v1.Health/Check",
             message: Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" },
@@ -94,7 +94,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     func testEveryOperationsMethodIsGatedAndNoneReachesItsHandler() async throws {
         let policy = try Self.loadPolicy()
         let counters = AuthorizationCounters()
-        let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy)
+        let runtime = AuthorizationRuntime.unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource())
         let message = Google_Longrunning_GetOperationRequest.with {
             $0.name = "operations/\(UUID().uuidString)"
         }
@@ -155,6 +155,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             grants: supply,
+            postureSource: Self.balancedSource(),
             peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
@@ -207,6 +208,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             grants: supply,
+            postureSource: Self.balancedSource(),
             peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
@@ -269,6 +271,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
             grants: supply,
+            postureSource: Self.balancedSource(),
             peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
@@ -299,6 +302,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let recorder = ConsentCallCounter()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
         )
         runtime.consent = recorder.answering
@@ -322,7 +326,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         let counters = AuthorizationCounters()
         let recorder = ConsentCallCounter()
-        var runtime = AuthorizationRuntime.tcp(descriptorPolicy: policy)
+        var runtime = AuthorizationRuntime.tcp(descriptorPolicy: policy, postureSource: Self.balancedSource())
         runtime.consent = recorder.answering
 
         for method in ["GetClipboard", "ExecuteShellCommand", "CaptureScreenshot", "CreateInput"] {
@@ -344,10 +348,10 @@ final class AuthorizationInterceptorTests: XCTestCase {
     /// The variant is a property of the LISTENER, and the two runtimes say so.
     func testTheVariantIsNamedRatherThanInferredFromAMissingDependency() throws {
         let policy = try Self.loadPolicy()
-        XCTAssertEqual(AuthorizationRuntime.tcp(descriptorPolicy: policy).transport, .tcp)
-        XCTAssertEqual(AuthorizationRuntime.unixSocket(descriptorPolicy: policy).transport, .unixSocket)
+        XCTAssertEqual(AuthorizationRuntime.tcp(descriptorPolicy: policy, postureSource: Self.balancedSource()).transport, .tcp)
+        XCTAssertEqual(AuthorizationRuntime.unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource()).transport, .unixSocket)
         XCTAssertNil(
-            AuthorizationRuntime.tcp(descriptorPolicy: policy).identity.resolver,
+            AuthorizationRuntime.tcp(descriptorPolicy: policy, postureSource: Self.balancedSource()).identity.resolver,
             "the TCP variant must not carry a resolver to be reached",
         )
     }
@@ -360,6 +364,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -383,6 +388,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -405,11 +411,12 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
         runtime.consent = approvingAnswer(obtainsCeremony: false)
-        runtime.posture = .balanced
+        runtime.postureSource.setStoredPreference(.balanced)
         let counters = AuthorizationCounters()
         _ = await Self.drive(
             runtime: runtime,
@@ -435,6 +442,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         _ = await Self.drive(
             runtime: .unixSocket(
                 descriptorPolicy: policy,
+                postureSource: Self.balancedSource(),
                 isConsoleReachable: false,
                 peerEvidence: .fixed(Self.thisProcess),
             ),
@@ -458,6 +466,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let counters = AuthorizationCounters()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -499,6 +508,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let policy = try Self.loadPolicy()
         let interceptor = AuthorizationInterceptor(runtime: .unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             peerEvidence: .fixed(Self.thisProcess),
         ))
         do {
@@ -525,7 +535,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     /// "the server broke", or a crash looks like a policy and a policy looks like a crash.
     func testAnInternalFailureIsNotReportedAsADenial() async throws {
         let policy = try Self.loadPolicy()
-        let interceptor = AuthorizationInterceptor(runtime: .unixSocket(descriptorPolicy: policy))
+        let interceptor = AuthorizationInterceptor(runtime: .unixSocket(descriptorPolicy: policy, postureSource: Self.balancedSource()))
         do {
             _ = try await interceptor.intercept(
                 request: Self.request("not a protobuf message"),
@@ -551,7 +561,10 @@ final class AuthorizationInterceptorTests: XCTestCase {
     /// asserted here; the second is asserted by the fact that no handler runs.
     func testAuthorizationRunsAfterWireValidation() throws {
         let chain = try productionServerInterceptors(AuthorizationInterceptor(
-            runtime: .unixSocket(descriptorPolicy: Self.loadPolicy()),
+            runtime: .unixSocket(
+                descriptorPolicy: Self.loadPolicy(),
+                postureSource: Self.balancedSource(),
+            ),
         ))
         guard chain.count == 2 else {
             return XCTFail("expected two interceptors, found \(chain.count)")
@@ -585,6 +598,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
         let recorder = ConsentCallCounter()
         var runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: policy,
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -623,6 +637,17 @@ final class AuthorizationInterceptorTests: XCTestCase {
     /// `.unauthenticatedPeer` before the consent path, which is the fail-closed rule
     /// arriving early and not a bug; `testWithoutPeerEvidenceTheIdentityIsUnresolved` pins
     /// that separately.
+    /// A source whose stored preference is BALANCED: the posture the old factory default
+    /// encoded, and the only one under which standing grants are honoured at all. A test
+    /// about a grant being spent must not silently run under strict, where grants are
+    /// ignored — the first run of these tests failed for exactly that reason, and it was
+    /// the engine being right about strict, not the test being right about the grant.
+    private static func balancedSource() -> PostureSource {
+        let source = PostureSource(override: nil)
+        source.setStoredPreference(.balanced)
+        return source
+    }
+
     private static var thisProcess: PeerProcessEvidence {
         PeerProcessEvidence(processIdentifier: getpid(), effectiveUserIdentifier: getuid())
     }
@@ -713,6 +738,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
 
         var runtime = try AuthorizationRuntime.unixSocket(
             descriptorPolicy: Self.loadPolicy(),
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -1173,6 +1199,7 @@ extension AuthorizationInterceptorTests {
         var runtime = try AuthorizationRuntime.unixSocket(
             descriptorPolicy: Self.loadPolicy(),
             clock: FrozenClock(now: now),
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
@@ -1240,6 +1267,7 @@ extension AuthorizationInterceptorTests {
         var runtime = try AuthorizationRuntime.unixSocket(
             descriptorPolicy: Self.loadPolicy(),
             clock: FrozenClock(now: MonotonicInstant(nanoseconds: 1_000_000_000_000)),
+            postureSource: Self.balancedSource(),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )

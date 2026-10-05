@@ -78,6 +78,7 @@ final class AgentReasonWireTransportTests: XCTestCase {
             descriptorPolicy: policy,
             grants: GrantStoreSupply(store: grantStore),
             issuance: GrantStoreIssuance(store: grantStore),
+            postureSource: PostureSource(override: nil),
             isConsoleReachable: true,
             peerEvidence: .fixed(
                 PeerProcessEvidence(

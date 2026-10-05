@@ -671,7 +671,7 @@ public struct PreAuthorizationEnvelope: Sendable, Equatable, Hashable {
 ///
 /// PUBLIC because it is a configuration surface: it arrives from the environment, and an
 /// operator choosing a posture is making a security decision rather than a tuning one.
-public enum Posture: Sendable, Equatable, Hashable, CaseIterable {
+public enum Posture: String, Sendable, Equatable, Hashable, CaseIterable {
     /// Grants and envelopes are ignored; every request that needs consent prompts.
     case strict
     /// Friction scales with blast radius. The default.

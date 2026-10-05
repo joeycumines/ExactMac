@@ -246,6 +246,40 @@ final class ConsoleModel {
         apply(.running)
     }
 
+    // MARK: The operator's posture
+
+    /// The live posture the hosted server enforces, captured when the server starts.
+    /// NIL UNTIL THEN, and the control treats nil as "the server has not come up" rather
+    /// than inventing a selection: a control that displays a choice nobody made and that
+    /// nothing enforces is E27's pretend-button shape, which is the exact defect this
+    /// wiring exists to end.
+    private(set) var postureHandle: HostedPostureHandle?
+
+    /// Called with the handle at server startup, through `serveHosted`'s
+    /// `onPostureReady` — which fires the moment the runtime exists, not when the server
+    /// stops. Until it fires the control is inert, and truthful about it: it displays the
+    /// engine's fallback and its writes are dropped, because there is no live source to
+    /// write into yet.
+    func adoptPostureHandle(_ handle: HostedPostureHandle) {
+        postureHandle = handle
+    }
+
+    /// The operator's choice, written through the handle and persisted. THE WRITE IS A
+    /// REAL ONE: the source is the same object the interceptor consults per request, so
+    /// the next request is judged under the posture the operator just chose — no restart,
+    /// no propagation delay beyond the request already in flight.
+    func setPosture(_ posture: Posture) {
+        postureHandle?.setStoredPreference(posture)
+    }
+
+    /// What the control should DISPLAY, in force right now: the environment override when
+    /// it holds, else the stored preference, else strict. NEVER a hardcoded default —
+    /// that was the second half of the defect, a control showing Balanced while the
+    /// engine's actual unconfigured posture was strict.
+    var displayedPosture: Posture {
+        postureHandle?.current ?? .strict
+    }
+
     /// Reports that the server this process hosts could not start, and says why.
     ///
     /// IT IS DISTINCT FROM "THE SERVICE IS OFF" because the operator turned nothing off.
@@ -713,7 +747,7 @@ final class ConsoleModel {
 
     func openSettings() {
         windows.present(.settings, title: "Settings") {
-            SettingsWindow()
+            SettingsWindow(model: self)
         }
     }
 

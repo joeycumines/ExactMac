@@ -359,7 +359,80 @@ func serve(
 /// make "am I the app or the server" a question asked at runtime rather than answered by
 /// the entry point the process chose to call.
 @MainActor
-public func serveHosted(consent: ConsentAnswering?) async throws {
+/// The live posture the hosted server enforces, published so the console — the same
+/// process, per gf-4 — can write the operator's choice into it. THE ENVIRONMENT OVERRIDE
+/// WINS over anything stored here, and `isOverriddenByEnvironment` is what the settings
+/// control consults to say so: those orderings are settled where the source is built and
+/// this handle cannot disturb them.
+///
+/// A PUBLIC HANDLE RATHER THAN THE WHOLE RUNTIME, because a public function may not name
+/// an internal type and the runtime's other fields have no business being public.
+public struct HostedPostureHandle: Sendable {
+    private let source: PostureSource
+
+    /// TEST-VISIBLE: the console suite drives the control's display and write path
+    /// against a handle built directly, because hosting a real server in a test is the
+    /// thing the suite exists to avoid.
+    public nonisolated init(source: PostureSource) {
+        self.source = source
+    }
+
+    /// The posture actually in force right now, which is what the control displays.
+    public var current: Posture { source.current }
+
+    /// Whether the environment override holds — the control states that the setting is
+    /// controlled by the server's environment when this is true.
+    public var isOverriddenByEnvironment: Bool { source.isOverriddenByEnvironment }
+
+    /// The operator's own stored choice, or nil when nothing has been stored.
+    public var storedPreference: Posture? { source.storedPreference }
+
+    /// Records the operator's choice and persists it, so it survives a relaunch. The
+    /// in-memory write is in force immediately for every later request; the persist is
+    /// best-effort for the same reason a failed disk write elsewhere in the product is:
+    /// the choice is honest until the process dies, and a persist failure is logged
+    /// rather than thrown into the control's face.
+    public func setStoredPreference(_ posture: Posture) {
+        source.setStoredPreference(posture)
+        do {
+            try source.persist()
+        } catch {
+            ExactMacServerLogger.posturePersistFailed(error)
+        }
+    }
+}
+
+enum ExactMacServerLogger {
+    static let logger = Logger(
+        subsystem: "io.github.joeycumines.exactmac",
+        category: "server.hosting",
+    )
+
+    static func posturePersistFailed(_ error: any Error) {
+        logger.error("The posture preference could not be persisted: \(String(describing: error), privacy: .public)")
+    }
+}
+
+/// The hosted entry, and the seam through which the console reaches the server's live
+/// state. RETURNS A HANDLE over the live posture, because the app and the server are ONE
+/// PROCESS (gf-4) and the operator's settings are writes into shared enforcement state
+/// rather than RPCs: the posture control writes into the handle, the interceptor reads
+/// the source per request from then on. The environment override still wins over
+/// anything the operator stores — that ordering is settled at construction and the
+/// control states when it holds.
+///
+/// THE HANDLE ARRIVES BEFORE THE SERVER RUNS, not after it stops. This function still
+/// does not return until the server has stopped — that is the contract the console's
+/// startup task is written against — so the handle is delivered through
+/// `onPostureReady`, invoked the moment the runtime exists, and the console adopts it
+/// there. A return value cannot do that job: `serve` awaits termination, so anything the
+/// caller reads after the await is read at shutdown, when there is no server left to
+/// enforce the posture it names.
+@discardableResult
+public func serveHosted(
+    consent: ConsentAnswering?,
+    onPostureReady: (@MainActor @Sendable (HostedPostureHandle) -> Void)? = nil,
+) async throws -> HostedPostureHandle {
     _ = setServerProcessUmask()
     let config = ServerConfig.fromEnvironment()
     logger.info("Hosted server starting; operator interface: \(consent != nil ? "installed" : "absent", privacy: .public)")
@@ -372,16 +445,24 @@ public func serveHosted(consent: ConsentAnswering?) async throws {
             "Hosted server: no Unix socket is configured, so the reduced unauthenticated posture applies and every consent-requiring capability is denied.",
         )
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
+        // THE OVERRIDE IS WHAT THE ENVIRONMENT NAMED, INCLUDING STRICT. Mapping a named
+        // strict to no override would let an operator write overwrite a deployment that
+        // said strict — the opposite of the rule the source enforces everywhere else.
+        let source = PostureSource(override: config.defaultPosture)
+        await MainActor.run { onPostureReady?(HostedPostureHandle(source: source)) }
         try await serve(
             config: config,
             transport: HTTP2ServerTransport.Posix(
                 address: .ipv4(host: config.listenAddress, port: config.port),
                 transportSecurity: .plaintext,
             ),
-            authorizationRuntime: .tcp(descriptorPolicy: descriptorPolicy),
+            authorizationRuntime: .tcp(
+                descriptorPolicy: descriptorPolicy,
+                postureSource: source,
+            ),
             listenerFactory: nil,
         )
-        return
+        return HostedPostureHandle(source: source)
     }
 
     let runtime = try ProductionAuthorizationRuntime.make(config: config, consent: consent)
@@ -391,12 +472,14 @@ public func serveHosted(consent: ConsentAnswering?) async throws {
         registry: runtime.registry,
     )
     logger.info("Hosted server listening on a Unix socket: \(socketPath, privacy: .private)")
+    await MainActor.run { onPostureReady?(HostedPostureHandle(source: runtime.postureSource)) }
     try await serve(
         config: config,
         transport: HTTP2ServerTransport.Custom(listenerFactory: listener),
         authorizationRuntime: runtime.authorizationRuntime,
         listenerFactory: listener,
     )
+    return HostedPostureHandle(source: runtime.postureSource)
 }
 
 /// Chooses the listener, and with it the authorization posture, before anything is built.

@@ -216,7 +216,13 @@ struct AuthorizationRuntime: Sendable {
     var consent: ConsentAnswering?
     var issuance: any GrantIssuing
     var clock: any MonotonicClock
-    var posture: Posture
+    /// THE POSTURE ACTUALLY IN FORCE, asked at the moment a decision needs it rather
+    /// than captured at construction. A captured value is what made the settings control
+    /// a lie: the operator changed their mind, and every later request was judged by the
+    /// posture the server STARTED with. The source consults the environment override,
+    /// then the operator's stored preference, then strict — the same ordering the control
+    /// displays.
+    var postureSource: PostureSource
     /// A bounded wait for the operator. Past it, deny.
     var consentTimeout: Duration
     /// Whether an operator is able to answer RIGHT NOW, asked at the moment a request needs
@@ -295,7 +301,7 @@ struct AuthorizationRuntime: Sendable {
         consent: ConsentAnswering? = nil,
         issuance: any GrantIssuing = NoGrantIssuance(),
         clock: any MonotonicClock = SystemMonotonicClock(),
-        posture: Posture = .balanced,
+        postureSource: PostureSource,
         consentTimeout: Duration = .seconds(120),
         isConsoleReachable: Bool = false,
         biometric: AuthorizationContext.BiometricAvailability = .available,
@@ -314,7 +320,7 @@ struct AuthorizationRuntime: Sendable {
             consent: consent,
             issuance: issuance,
             clock: clock,
-            posture: posture,
+            postureSource: postureSource,
             consentTimeout: consentTimeout,
             isConsoleReachable: { isConsoleReachable },
             biometric: biometric,
@@ -333,7 +339,7 @@ struct AuthorizationRuntime: Sendable {
         descriptorPolicy: PublicRequestDescriptorPolicy,
         grants: any GrantSupply = NoStandingGrants(),
         clock: any MonotonicClock = SystemMonotonicClock(),
-        posture: Posture = .balanced,
+        postureSource: PostureSource,
     ) -> AuthorizationRuntime {
         AuthorizationRuntime(
             descriptorPolicy: descriptorPolicy,
@@ -342,7 +348,7 @@ struct AuthorizationRuntime: Sendable {
             consent: nil,
             issuance: NoGrantIssuance(),
             clock: clock,
-            posture: posture,
+            postureSource: postureSource,
             consentTimeout: .seconds(120),
             // The operator is irrelevant here: the posture denies before anything is asked,
             // and reporting it reachable would let a caller infer a working consent path.
@@ -580,7 +586,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
             identity: identity,
             grants: context.peerAuthenticated ? snapshot.grants : [],
             envelopes: context.peerAuthenticated ? snapshot.envelopes : [],
-            posture: runtime.posture,
+            posture: runtime.postureSource.current,
             context: context,
             now: now,
         )

@@ -165,6 +165,13 @@ final class ProductionRuntimeTests: XCTestCase {
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
             grants: FixedGrantSupply(grants: [Self.clipboardGrant]),
+            // BALANCED: the test is about the allow path, which needs the standing grant
+            // honoured — strict ignores grants by definition.
+            postureSource: {
+                let source = PostureSource(override: nil)
+                source.setStoredPreference(.balanced)
+                return source
+            }(),
             isConsoleReachable: false,
             peerEvidence: .fixed(Self.thisProcess),
             audit: recorder,
@@ -195,6 +202,79 @@ final class ProductionRuntimeTests: XCTestCase {
         }
     }
 
+    /// E34's live-apply acceptance, as behaviour on the real path: the same interceptor,
+    /// the same grant, three calls that differ ONLY in the posture the source reports at
+    /// the moment of the call. Allowed under balanced on the grant's basis; ignored under
+    /// strict, where the grant is not consulted at all and the answer is the consent-path
+    /// denial of a server with nobody to ask; allowed again on the grant's basis after
+    /// switching back. THE POINT IS THAT THE SWITCH TAKES EFFECT ON THE NEXT REQUEST
+    /// without rebuilding the runtime — which is the property the console's settings
+    /// control depends on and the reason the posture is a source consulted per request
+    /// rather than a value captured at construction.
+    func testAPostureChangeTakesEffectOnTheNextRequestWithoutRebuilding() async throws {
+        let recorder = RecordingAuditSpy()
+        let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
+        let source = PostureSource(override: nil)
+        source.setStoredPreference(.balanced)
+        let runtime = AuthorizationRuntime.unixSocket(
+            descriptorPolicy: descriptorPolicy,
+            grants: FixedGrantSupply(grants: [Self.clipboardGrant]),
+            postureSource: source,
+            isConsoleReachable: false,
+            peerEvidence: .fixed(Self.thisProcess),
+            audit: recorder,
+            auditRequired: true,
+        )
+        let interceptor = AuthorizationInterceptor(runtime: runtime)
+
+        func call() async throws {
+            let context = try await Self.context(method: "GetClipboard")
+            _ = try await interceptor.intercept(
+                request: Self.request(Exactmac_V1_GetClipboardRequest.with { $0.name = "clipboard" }),
+                context: context,
+                next: { _, _ -> StreamingServerResponse<Exactmac_V1_Clipboard> in
+                    recorder.entered = true
+                    return StreamingServerResponse(metadata: Metadata(), producer: { _ in Metadata() })
+                },
+            )
+        }
+
+        // BALANCED: the grant is honoured and the handler runs.
+        try await call()
+        XCTAssertEqual(recorder.decisions.count, 1)
+        guard case .grant = recorder.decisions.first?.basis else {
+            XCTFail("balanced must answer on the grant's basis, got \(String(describing: recorder.decisions.first?.basis))")
+            return
+        }
+
+        // STRICT: the grant is ignored — the refusal is enforced as a thrown
+        // permissionDenied AND recorded, and the handler is not reached.
+        source.setStoredPreference(.strict)
+        recorder.entered = false
+        do {
+            try await call()
+            XCTFail("strict must refuse a request its standing grant would have answered")
+        } catch {
+            // The throw is the enforcement; the record is checked below.
+        }
+        XCTAssertEqual(recorder.decisions.count, 2, "the strict refusal must also be on the record")
+        XCTAssertEqual(recorder.decisions[1].outcome, .deny, "strict must ignore the standing grant")
+        guard case .denied = recorder.decisions[1].basis else {
+            XCTFail("strict's refusal must be a denial, got \(recorder.decisions[1].basis)")
+            return
+        }
+        XCTAssertFalse(recorder.entered, "the handler must not run for a grant strict ignores")
+
+        // BALANCED AGAIN: the same grant answers again, on the same basis.
+        source.setStoredPreference(.balanced)
+        try await call()
+        XCTAssertEqual(recorder.decisions.count, 3)
+        guard case .grant = recorder.decisions[2].basis else {
+            XCTFail("switching back must restore the grant, got \(String(describing: recorder.decisions[2].basis))")
+            return
+        }
+    }
+
     /// The REFUSED half: a decision that denies is on the record too. The half that is easy to
     /// omit, and a log that records what was permitted cannot be asked what was refused.
     func testARefusedDecisionIsRecordedAndNoHandlerRuns() async throws {
@@ -202,6 +282,7 @@ final class ProductionRuntimeTests: XCTestCase {
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
+            postureSource: PostureSource(override: nil),
             isConsoleReachable: false,
             peerEvidence: .fixed(Self.thisProcess),
             audit: recorder,
@@ -237,6 +318,7 @@ final class ProductionRuntimeTests: XCTestCase {
         // default nil, which is the state the server is in until the host installs one.
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
+            postureSource: PostureSource(override: nil),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
             audit: FailingAuditSpy(),
@@ -268,6 +350,7 @@ final class ProductionRuntimeTests: XCTestCase {
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
         let runtime = AuthorizationRuntime.unixSocket(
             descriptorPolicy: descriptorPolicy,
+            postureSource: PostureSource(override: nil),
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )

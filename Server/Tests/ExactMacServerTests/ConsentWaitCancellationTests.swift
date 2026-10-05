@@ -106,6 +106,7 @@ final class ConsentWaitCancellationTests: XCTestCase {
             consent: consent,
             issuance: NoGrantIssuance(),
             clock: FixedClock(),
+            postureSource: PostureSource(override: nil),
             consentTimeout: consentTimeout,
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),

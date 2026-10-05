@@ -272,7 +272,7 @@ struct WindowSizingTests {
         // `fittedHeight` measures the CONTENT — its own contract says so — so the first
         // half is asserted through the same arithmetic `present` performs, and the second
         // half is the content measuring tall without the test treating that as a fault.
-        let fitted = ConsoleWindowHost.fittedHeight(of: SettingsWindow())
+        let fitted = ConsoleWindowHost.fittedHeight(of: SettingsWindow(model: makeTestConsoleModel()))
         #expect(
             fitted > 0,
             "the content measured nothing, so the window would have no content",

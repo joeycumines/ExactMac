@@ -1,3 +1,4 @@
+import ExactMacServer
 import SwiftUI
 
 /// A 10/600 uppercase section label. Four in this window and it is the only thing that
@@ -131,6 +132,22 @@ struct PostureControl: View {
             }
         }
 
+        init(_ posture: Posture) {
+            switch posture {
+            case .strict: self = .strict
+            case .balanced: self = .balanced
+            case .lockedDown: self = .lockedDown
+            }
+        }
+
+        var posture: Posture {
+            switch self {
+            case .strict: .strict
+            case .balanced: .balanced
+            case .lockedDown: .lockedDown
+            }
+        }
+
         /// What the option permits and what it refuses, in the operator's terms — the
         /// sentences the design carries beside the control, mirrored here so one edit
         /// cannot leave the other behind. Each clause is grounded in engine behaviour a
@@ -176,14 +193,28 @@ struct PostureControl: View {
             + "\n\n" + fixedStatements
     }
 
-    @Binding var selection: Choice
+    /// The operator's choice, read from and written through the model: the getter is the
+    /// posture the server is ACTUALLY enforcing (override, then stored, then strict), so
+    /// the control's display can never be a hardcoded default, and the setter writes the
+    /// same source the interceptor consults, so the next request is judged under the
+    /// posture just chosen.
+    private var selection: Choice {
+        get { Choice(model.displayedPosture) }
+        set { model.setPosture(newValue.posture) }
+    }
+
+    unowned let model: ConsoleModel
+
+    init(model: ConsoleModel) {
+        self.model = model
+    }
 
     var body: some View {
         HStack(spacing: Design.Space.tight) {
             ForEach(Choice.allCases, id: \.self) { choice in
                 let isChosen = choice == selection
                 Button {
-                    selection = choice
+                    model.setPosture(choice.posture)
                 } label: {
                     Text(choice.label)
                         .font(.system(size: 11, weight: isChosen ? .semibold : .regular))
@@ -245,8 +276,15 @@ struct TargetChip: View {
 
 /// Settings, 720pt, and the one window whose job is to let the operator change the
 /// defaults everything else is measured against.
+///
+/// THE POSTURE CONTROL IS WIRED, and what it is wired to is the whole point: the model's
+/// handle writes into the same source the interceptor consults per request, so selecting
+/// a posture changes enforcement on the NEXT request in this process, with no restart.
+/// The control displays `model.displayedPosture` — the posture actually in force, never
+/// a hardcoded default — and when the environment override holds it says so, because an
+/// operator changing a setting that is not taking effect deserves to be told why.
 struct SettingsWindow: View {
-    @State private var posture: PostureControl.Choice = .balanced
+    @Bindable var model: ConsoleModel
     @State private var targets: [String] = ["1Password", "Keychain Access", "Xcode"]
     @State private var requireTouchIDToOpen = true
 
@@ -265,7 +303,16 @@ struct SettingsWindow: View {
                 VStack(alignment: .leading, spacing: Design.Space.chip) {
                     SectionLabel(text: "POSTURE")
                         .padding(.top, 1)
-                    PostureControl(selection: $posture)
+                    PostureControl(model: model)
+                    if model.postureHandle?.isOverriddenByEnvironment == true {
+                        // STATED, NOT SILENT: the environment override wins over anything
+                        // the operator stores, and a selection that is not taking effect
+                        // without an explanation is a lie wearing a control.
+                        Text("Controlled by the server's environment (EXACTMAC_POSTURE); your choice here is not taking effect.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Design.Ink.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(PostureControl.optionExplanations)
                         .font(.system(size: 11))
                         .foregroundStyle(Design.Ink.textSecondary)

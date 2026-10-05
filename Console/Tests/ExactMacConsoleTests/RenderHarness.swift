@@ -9,6 +9,18 @@ import Testing
 ///
 /// Screen Recording permission is not available here, so the only honest way to see what
 /// the app draws is to have the app draw it itself.
+/// A console model for renders and layout tests: no ceremony (none is exercised by a
+/// render), and no server handle — the posture control renders its truthful no-server
+/// state (strict, inert), which is itself a state worth having drawn.
+@MainActor
+func makeTestConsoleModel() -> ConsoleModel {
+    ConsoleModel(
+        presentation: ServerHosting.current(),
+        windows: ConsoleWindowHost(),
+        ceremony: nil,
+    )
+}
+
 enum RenderHarness {
     enum AppearanceMode: Sendable, CaseIterable {
         case light
@@ -674,7 +686,7 @@ struct RemainingRenderTests {
     func `the settings window renders at 720pt`() throws {
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
-                SettingsWindow(),
+                SettingsWindow(model: makeTestConsoleModel()),
                 size: CGSize(width: 720, height: 1008),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "settings\(mode.suffix)",

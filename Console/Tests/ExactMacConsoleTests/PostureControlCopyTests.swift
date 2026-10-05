@@ -1,4 +1,5 @@
 import AppKit
+import ExactMacServer
 @testable import ExactMacConsole
 import Testing
 
@@ -115,7 +116,7 @@ struct PostureControlCopyTests {
         // string — and the artefacts land in the committed render directory, where a
         // reviewer reads them. Height measured, per RenderHarness's own rule against a
         // hardcoded window that clips its content.
-        let view = SettingsWindow()
+        let view = SettingsWindow(model: makeTestConsoleModel())
         let width: CGFloat = 720
         let height = RenderHarness.fittedHeight(of: view, width: width)
         for mode in RenderHarness.AppearanceMode.allCases {
@@ -126,5 +127,44 @@ struct PostureControlCopyTests {
                 to: RenderHarness.outputDirectory + "settings-posture-e31\(mode.suffix)",
             )
         }
+    }
+}
+
+extension PostureControlCopyTests {
+    /// E34's console-side acceptance, as behaviour: the control DISPLAYS the posture the
+    /// server is actually enforcing, and a selection writes through to the model's live
+    /// handle. The no-handle state — server not yet up — displays strict, which is what
+    /// the engine is actually applying in that state, and the control is inert rather
+    /// than pretending a choice exists. The VIEW's display is the model's
+    /// `displayedPosture` by construction (the getter reads it), so asserting the model
+    /// IS asserting what the control draws.
+    @Test @MainActor
+    func `the control displays the posture in force and writes through to the model`() {
+        let model = makeTestConsoleModel()
+
+        // NO SERVER YET: no handle, so the truthful display is the engine's fallback.
+        #expect(model.displayedPosture == .strict)
+        #expect(model.postureHandle == nil)
+        _ = PostureControl(model: model)
+
+        // A SERVER WITH NO STORED PREFERENCE AND NO OVERRIDE: still strict — the display
+        // is never a hardcoded balanced, which was the second half of the defect.
+        let handle = HostedPostureHandle(source: PostureSource(override: nil))
+        model.adoptPostureHandle(handle)
+        #expect(model.displayedPosture == .strict)
+
+        // THE OPERATOR CHOOSES: the write lands in the source the interceptor consults.
+        model.setPosture(.lockedDown)
+        #expect(model.displayedPosture == .lockedDown)
+        #expect(model.postureHandle?.storedPreference == .lockedDown)
+
+        // THE OVERRIDE HOLDS: the operator's write is stored but the display shows what is
+        // IN FORCE, and the control states that the environment is controlling it.
+        let overridden = HostedPostureHandle(source: PostureSource(override: .strict))
+        model.adoptPostureHandle(overridden)
+        model.setPosture(.balanced)
+        #expect(model.displayedPosture == .strict)
+        #expect(model.postureHandle?.isOverriddenByEnvironment == true)
+        #expect(model.postureHandle?.storedPreference == .balanced)
     }
 }
