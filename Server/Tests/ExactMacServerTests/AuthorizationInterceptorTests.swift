@@ -178,6 +178,66 @@ final class AuthorizationInterceptorTests: XCTestCase {
         XCTAssertEqual(counters.total, 0)
     }
 
+    /// A SOURCE THAT CANNOT ANSWER — the shape production is in today, where no session
+    /// records operations — derives with NO count, so a standing grant still covers the
+    /// commit and the prompt is approvable. This is the negative control for the guard the
+    /// store-side count depends on: a source that returned 0 instead of nil would make
+    /// every commit unapprovable, because a scope with a zero declared count is
+    /// unsatisfiable and no grant can cover it.
+    func testASourceWithoutAnAnswerDerivesUnboundedAndTheGrantCoversIt() async throws {
+        let policy = try Self.loadPolicy()
+        let caller = Self.resolvedCaller
+        let issuedAt = MonotonicInstant.now()
+        let grant = Grant(
+            id: "grant-unbounded",
+            capability: .transactionManage,
+            scope: AuthorizationScope(operationLimit: 5),
+            duration: .monotonicSeconds(600),
+            holder: caller.code.binding,
+            issuedAt: issuedAt,
+            expiresAt: issuedAt.advanced(by: .seconds(600)),
+            origin: .prompt(decidedAt: issuedAt),
+            remainingOperations: 5,
+            targetIsHighConsequence: false,
+        )
+        let supply = RecordingGrantSupply(
+            snapshot: GrantSnapshot(grants: [grant]),
+            consumeResult: true,
+        )
+        var runtime = AuthorizationRuntime.unixSocket(
+            descriptorPolicy: policy,
+            grants: supply,
+            peerEvidence: .fixed(Self.thisProcess),
+        )
+        runtime.identity = .unixSocket(CallerIdentityResolver(inspector: FixedInspector(identity: caller.code)))
+        // NIL, which is what the session manager returns for a transaction with no
+        // recorded operations — and what a runtime without a source at all behaves as.
+        runtime.declaredOperationCount = { _, _ in nil }
+        let counters = AuthorizationCounters()
+        let entered = await Self.drive(
+            runtime: runtime,
+            counters: counters,
+            method: "\(RPCAuthorizationMap.serviceName)/CommitTransaction",
+            message: Exactmac_V1_CommitTransactionRequest.with {
+                $0.name = "sessions/s1"
+                $0.transactionID = "t1"
+            },
+        )
+        // THE REAL PROPERTY, and the test's first version asserted the wrong one: a
+        // count-bounded grant NEVER covers an unbounded request — that is the engine's own
+        // rule, and it is the reason a transaction carries a count at all. So the nil-
+        // source commit is NOT served by this grant; it goes to the CONSENT path, which is
+        // exactly the approvable shape the first version's zero-count bug destroyed. What
+        // must hold: no spend was attempted (no grant matched), and the refusal is the
+        // consent path's own — nobody to ask in this fixture — not a malformed-count
+        // refusal and not the false auditUnavailable the zero-count bug produced.
+        XCTAssertFalse(entered, "the handler must not run without an operator")
+        XCTAssertEqual(
+            counters.counts[DenialReason.consoleUnreachable.rawValue], 1,
+            "the nil-source commit must reach the consent path and be refused there: \(counters.counts)",
+        )
+    }
+
     /// The store refusing the spend — a revoke or a concurrent spend landing between the
     /// snapshot the engine judged and the write — DENIES, and the denial is on the record.
     /// A grant that could not cover the count after all must not leave an allow standing,

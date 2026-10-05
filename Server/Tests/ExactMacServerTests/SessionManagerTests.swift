@@ -296,6 +296,92 @@ final class SessionManagerTests: XCTestCase {
         _ = await manager.deleteSession(name: session.name)
     }
 
+    /// THE ZERO-COUNT GUARD, which is what makes the declared count usable in production.
+    /// A scope whose declared count is ZERO is unsatisfiable — no grant can cover a request
+    /// for zero operations — so a transaction with NO RECORDED OPERATIONS must derive with
+    /// NO count (the unbounded shape every commit prompt has always offered), not with a
+    /// count that turns every option the operator is shown into one that cannot be issued.
+    /// The first version returned the raw arithmetic, which was 0 for every live
+    /// transaction because nothing records operations in production, and every commit
+    /// prompt became unapprovable with the refusal logged under a false audit reason.
+    func testAnEmptyTransactionDeclaresNoCountAndARecordedOneDeclaresItsCount() async throws {
+        let manager = SessionManager()
+        let session = try await manager.createSession(
+            sessionId: "test-tx-count",
+            displayName: "Transaction Count Test",
+            metadata: [:],
+        )
+
+        // No operations recorded: the count is absent, not zero.
+        let (emptyTxn, _, _) = try await manager.beginTransaction(
+            sessionName: session.name,
+            isolationLevel: .serializable,
+            timeout: 60,
+        )
+        let emptyCount = await manager.declaredOperationCount(
+            sessionName: session.name,
+            transactionId: emptyTxn,
+        )
+        XCTAssertNil(
+            emptyCount,
+            "a transaction with no recorded operations must declare NO count, not zero",
+        )
+
+        // Unknown session and unknown transaction: also absent, never guessed.
+        let absentCount = await manager.declaredOperationCount(
+            sessionName: "sessions/absent",
+            transactionId: "t",
+        )
+        XCTAssertNil(absentCount)
+        let mismatchedCount = await manager.declaredOperationCount(
+            sessionName: session.name,
+            transactionId: "wrong-id",
+        )
+        XCTAssertNil(mismatchedCount)
+
+        // Close the empty transaction before recording, because a session holds one.
+        _ = try await manager.commitTransaction(
+            sessionName: session.name,
+            transactionId: emptyTxn,
+        )
+
+        // With operations recorded, the count is the transactions' own share.
+        await manager.recordOperation(
+            sessionName: session.name,
+            operationType: "click",
+            resource: "applications/x",
+            success: true,
+            error: nil,
+        )
+        await manager.recordOperation(
+            sessionName: session.name,
+            operationType: "type",
+            resource: "applications/x",
+            success: true,
+            error: nil,
+        )
+        let (fullTxn, _, _) = try await manager.beginTransaction(
+            sessionName: session.name,
+            isolationLevel: .serializable,
+            timeout: 60,
+        )
+        // The two recorded operations predate THIS transaction, so its declared share is
+        // still empty — recording is cumulative across the session and the count is the
+        // span of the transaction itself.
+        let spanCount = await manager.declaredOperationCount(
+            sessionName: session.name,
+            transactionId: fullTxn,
+        )
+        XCTAssertNil(spanCount)
+
+        // Cleanup - commit and delete
+        _ = try await manager.commitTransaction(
+            sessionName: session.name,
+            transactionId: fullTxn,
+        )
+        _ = await manager.deleteSession(name: session.name)
+    }
+
     func testBeginTransactionTwiceThrows() async throws {
         let manager = SessionManager()
 

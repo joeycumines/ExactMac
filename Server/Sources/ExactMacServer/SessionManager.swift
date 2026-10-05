@@ -359,11 +359,25 @@ actor SessionManager {
         else {
             return nil
         }
-        return state.operations.count - transactionState.operationStartIndex
+        let count = state.operations.count - transactionState.operationStartIndex
+        // NIL WHEN NOTHING IS RECORDED, and this is the guard the first version lacked: a
+        // scope whose declared count is ZERO is unsatisfiable — no grant can ever cover a
+        // request for zero operations — so a commit of a transaction with no recorded
+        // operations must derive with NO count, which is the unbounded shape the prompt
+        // has always offered, rather than with a count that turns every option the
+        // operator is shown into one that cannot be issued. `recordOperation` has no
+        // production caller today, so an unguarded `count` here was 0 for every live
+        // transaction and every commit prompt was unapprovable, with the interceptor's
+        // catch-all recording the failure as `auditUnavailable` — a false cause in the log.
+        guard count > 0 else {
+            return nil
+        }
+        return count
     }
 
     /// Record an operation in session history
-    func recordOperation(        sessionName: String,
+    func recordOperation(
+        sessionName: String,
         operationType: String,
         resource: String,
         success: Bool,
