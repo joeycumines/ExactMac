@@ -433,7 +433,7 @@ private class AccessibilityTraversalOperation {
     }
 
     /// Copy descriptive metadata without letting an attribute-local absence
-    /// invalidate an otherwise readable element. Identity, hierarchy, value,
+    /// invalidate an otherwise readable element. Identity, hierarchy,
     /// geometry, and focus reads continue to fail closed.
     func copyOptionalMetadataAttributeValue(element: AXUIElement, attribute: String) throws -> CFTypeRef? {
         try copyAttributeValue(element: element, attribute: attribute, optionalMetadata: true)
@@ -561,14 +561,7 @@ private class AccessibilityTraversalOperation {
             "AXLabel", "AXHelp",
         ]
         for attr in textAttributes {
-            let attrValue = if attr == kAXDescriptionAttribute as String ||
-                attr == "AXLabel" ||
-                attr == "AXHelp"
-            {
-                try copyOptionalMetadataAttributeValue(element: element, attribute: attr)
-            } else {
-                try copyAttributeValue(element: element, attribute: attr)
-            }
+            let attrValue = try copyOptionalMetadataAttributeValue(element: element, attribute: attr)
             if let attrValue,
                let text = getDisplayString(attrValue),
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -610,13 +603,7 @@ private class AccessibilityTraversalOperation {
             kAXHelpAttribute as String,
         ]
         for attr in commonAttributes {
-            let attrValue = if attr == kAXDescriptionAttribute as String ||
-                attr == kAXHelpAttribute as String
-            {
-                try copyOptionalMetadataAttributeValue(element: element, attribute: attr)
-            } else {
-                try copyAttributeValue(element: element, attribute: attr)
-            }
+            let attrValue = try copyOptionalMetadataAttributeValue(element: element, attribute: attr)
             if let attrValue,
                let strValue = getDisplayString(attrValue)
             {
@@ -713,7 +700,7 @@ private class AccessibilityTraversalOperation {
 
         // 5. Recursively traverse children, windows, main window
         // a) Windows (use negative indices starting from -1 to distinguish from regular children)
-        if let windowsValue = try copyAttributeValue(
+        if let windowsValue = try copyOptionalMetadataAttributeValue(
             element: element, attribute: kAXWindowsAttribute as String,
         ) {
             if let windowsArray = windowsValue as? [AXUIElement] {
@@ -728,7 +715,7 @@ private class AccessibilityTraversalOperation {
         }
 
         // b) Main Window (use special index -10000 to distinguish)
-        if let mainWindowValue = try copyAttributeValue(
+        if let mainWindowValue = try copyOptionalMetadataAttributeValue(
             element: element, attribute: kAXMainWindowAttribute as String,
         ) {
             if CFGetTypeID(mainWindowValue) == AXUIElementGetTypeID() {
@@ -741,7 +728,7 @@ private class AccessibilityTraversalOperation {
         }
 
         // c) Regular Children (use 0-based indices)
-        if let childrenValue = try copyAttributeValue(
+        if let childrenValue = try copyOptionalMetadataAttributeValue(
             element: element, attribute: kAXChildrenAttribute as String,
         ) {
             if let childrenArray = childrenValue as? [AXUIElement] {
