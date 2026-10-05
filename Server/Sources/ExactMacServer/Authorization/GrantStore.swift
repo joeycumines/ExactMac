@@ -709,6 +709,14 @@ final class GrantStore: Sendable {
     /// enough remaining, not expired — because the decision carries the envelope's id and
     /// not the inner grant's: the first grant that could have covered the request is the
     /// one that did.
+    ///
+    /// RECORDED RESIDUAL: the first COULD-HAVE-COVERED grant is not provably the grant
+    /// the engine's own match picked — with two count-bounded grants in one envelope, a
+    /// spend may land on the other one. The envelope's aggregate remaining count
+    /// decreases by exactly the declared amount either way, so no authorization is
+    /// extended; what can be wrong is which grant's row shows the decrement. That is
+    /// bookkeeping display, not a boundary, and tightening it would mean carrying the
+    /// inner grant's id in the decision rather than the envelope's.
     @discardableResult
     func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) throws -> Bool {
         precondition(operations >= 1, "a batch of zero or fewer operations is not a spend")
