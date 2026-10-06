@@ -414,6 +414,40 @@ exactmac.build-mcp: ## Build and install the exactmac CLI (MCP served via `exact
 	if ! GOBIN="$(EXACTMAC_MCP_BIN_DIR)" go install ./cmd/exactmac 2>&1 | tee "$(EXACTMAC_MCP_BUILD_LOG)" | tail -n 30; then printf '%s\n' 'ERROR: exactmac build failed.' >&2; exit 1; fi; \
 	test -x "$(EXACTMAC_MCP_BIN)" || { printf 'ERROR: MCP binary missing: %s\n' "$(EXACTMAC_MCP_BIN)" >&2; exit 1; }; \
 	printf 'MCP binary: %s\n' "$(EXACTMAC_MCP_BIN)"
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.check-mcp-host
+
+.PHONY: exactmac.check-mcp-host
+exactmac.check-mcp-host: ## Check running exactmac mcp processes against on-disk binary mtime to catch stale processes.
+	@set -uo pipefail; \
+	bin="$(EXACTMAC_MCP_BIN)"; \
+	if [ ! -x "$$bin" ]; then printf 'ERROR: MCP binary missing: %s\n' "$$bin" >&2; exit 1; fi; \
+	bin_mtime=$$(stat -f %m "$$bin"); \
+	printf '=== MCP Process Attribution Check ===\n'; \
+	printf 'On-disk binary: %s (mtime: %s)\n' "$$bin" "$$(date -r "$$bin_mtime")"; \
+	stale_count=0; \
+	pids=$$(pgrep -f "exactmac mcp" || true); \
+	if [ -z "$$pids" ]; then \
+		printf 'No running exactmac mcp processes found.\n'; \
+	else \
+		for pid in $$pids; do \
+			lstart=$$(ps -o lstart= -p "$$pid" 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]\{2,\}/ /g'); \
+			if [ -n "$$lstart" ]; then \
+				start=$$(date -j -f "%a %b %d %T %Y" "$$lstart" +%s 2>/dev/null || echo 0); \
+				if [ "$$start" -lt "$$bin_mtime" ]; then \
+					printf '  [STALE] PID %s started %s (predates binary)\n' "$$pid" "$$lstart"; \
+					stale_count=$$((stale_count + 1)); \
+				else \
+					printf '  [FRESH] PID %s started %s (postdates binary)\n' "$$pid" "$$lstart"; \
+				fi; \
+			fi; \
+		done; \
+		if [ "$$stale_count" -gt 0 ]; then \
+			printf '\nWARNING: %d stale exactmac mcp process(es) detected!\n' "$$stale_count"; \
+			printf 'The MCP host (IDE / client) must be restarted or stale processes killed for the new binary to take effect.\n'; \
+		else \
+			printf 'All running exactmac mcp processes are fresh.\n'; \
+		fi; \
+	fi
 
 .PHONY: exactmac.build
 exactmac.build: ## Build the Swift server, then the Go MCP proxy.

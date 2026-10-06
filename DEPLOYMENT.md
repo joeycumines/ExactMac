@@ -317,6 +317,24 @@ directly and read stderr:
 The likeliest cause is a socket pathname another server still holds, which the
 app reports as a sentence rather than a trap.
 
+**Rebuilding `exactmac` did not take effect in the MCP host (stale MCP process).**
+The agent host (IDE or MCP runner) spawns `exactmac mcp` as a long-lived child
+process at session start. Rebuilding the Go binary (`gmake exactmac.build-mcp`)
+replaces the binary file on disk but does not reload running processes, so the
+MCP client continues communicating with the old in-memory image. Check process
+attribution against the binary's modification time:
+
+```sh
+gmake exactmac.check-mcp-host
+```
+
+If stale processes are reported, restart the MCP host (IDE / agent session) or
+terminate the stale processes so the host spawns the fresh binary:
+
+```sh
+pkill -f "exactmac mcp"
+```
+
 **A TCC grant disappears after rebuilding.** An ad-hoc signature changes on
 every rebuild, and the grant is keyed to the signature. This is expected; a
 Developer ID signature does not have the problem. See [Signing](#signing).
