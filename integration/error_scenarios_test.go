@@ -253,6 +253,25 @@ func TestErrorScenarios_AppCrashDuringOperation(t *testing.T) {
 
 	// Verify we can open a new app (full recovery)
 	t.Log("Verifying new app can be opened...")
+	if err := PollUntilContext(ctx, 100*time.Millisecond, func() (bool, error) {
+		processGone, err := exactProcessGone(app.Pid)
+		if err != nil || !processGone {
+			return false, err
+		}
+		listResp, err := client.ListApplications(ctx, &pb.ListApplicationsRequest{})
+		if err != nil {
+			return false, err
+		}
+		for _, a := range listResp.Applications {
+			if a.Pid == app.Pid {
+				return false, nil
+			}
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("crashed Calculator PID %d did not terminate and clean up before reopening: %v", app.Pid, err)
+	}
+
 	newApp := OpenApplicationObserved(t, ctx, client, "com.apple.calculator")
 	defer CleanupApplication(t, ctx, client, newApp)
 

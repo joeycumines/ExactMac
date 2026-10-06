@@ -1799,7 +1799,7 @@ final class CoreGraphicsInputRouteObserver: InputDeliveryObserving, @unchecked S
 
     func waitForAttempt(_ token: UInt64) async throws {
         try await wait(
-            timeoutNanoseconds: 2_000_000_000,
+            timeoutNanoseconds: 5_000_000_000,
             isSettled: { self.ledger.isAttemptObserved(token) },
             timeoutMessage: "timed out waiting for routed input token \(token)",
             preserveOriginalObserverFailure: false,
@@ -1808,7 +1808,7 @@ final class CoreGraphicsInputRouteObserver: InputDeliveryObserving, @unchecked S
 
     func waitForObligation(_ obligationID: UUID) async throws {
         try await wait(
-            timeoutNanoseconds: 2_000_000_000,
+            timeoutNanoseconds: 5_000_000_000,
             isSettled: {
                 self.ledger.isObligationSettled(obligationID)
             },

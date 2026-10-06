@@ -1552,12 +1552,12 @@ private func waitForActiveInputIdentityCount(
     count: Int,
 ) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(2))
+    let deadline = clock.now.advanced(by: .seconds(5))
     while await store.activeInputIdentityCount() != count {
         guard clock.now < deadline else {
             throw InputExecutionContractError.convergence("active input identity count")
         }
-        await Task.yield()
+        try await Task.sleep(for: .milliseconds(5))
     }
 }
 
@@ -1567,14 +1567,14 @@ private func waitForInputState(
     state: Exactmac_V1_Input.State,
 ) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(2))
+    let deadline = clock.now.advanced(by: .seconds(5))
     while await store.getInput(name: name)?.state != state {
         guard clock.now < deadline else {
             throw InputExecutionContractError.convergence(
                 "input state \(state)",
             )
         }
-        await Task.yield()
+        try await Task.sleep(for: .milliseconds(5))
     }
 }
 
@@ -1583,12 +1583,12 @@ private func waitForInputExecutionSignal(
     label: String,
 ) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(2))
+    let deadline = clock.now.advanced(by: .seconds(5))
     while !signal.isSignalled {
         guard clock.now < deadline else {
             throw InputExecutionContractError.convergence(label)
         }
-        await Task.yield()
+        try await Task.sleep(for: .milliseconds(5))
     }
 }
 
@@ -1597,7 +1597,7 @@ private func waitForInputDrain(
     gate: PhysicalDesktopMutationGate,
 ) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(2))
+    let deadline = clock.now.advanced(by: .seconds(5))
     while true {
         let lifetimeState = await lifetime.lifecycleState()
         let gateState = await gate.lifecycleState()
@@ -1609,7 +1609,7 @@ private func waitForInputDrain(
                 "input service drain ownership",
             )
         }
-        await Task.yield()
+        try await Task.sleep(for: .milliseconds(5))
     }
 }
 

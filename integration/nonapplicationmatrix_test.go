@@ -76,6 +76,12 @@ var safeNonApplicationAdmissionFixtures = map[string]map[string]any{
 	"update_macro":  {"macro": "macros/w5", "display_name": "w5"},
 	"delete_macro":  {"macro": "macros/w5"},
 	"execute_macro": {"macro": "macros/w5"},
+	"list_grants":   {},
+	"preauthorize": {
+		"reason":              "w5",
+		"capabilities":        []any{"observation.window"},
+		"requested_lifetime": map[string]any{"seconds": 60},
+	},
 }
 
 var safeNonApplicationFirstRPC = map[string]string{
@@ -105,6 +111,8 @@ var safeNonApplicationFirstRPC = map[string]string{
 	"update_macro":  pb.ExactMac_UpdateMacro_FullMethodName,
 	"delete_macro":  pb.ExactMac_DeleteMacro_FullMethodName,
 	"execute_macro": pb.ExactMac_ExecuteMacro_FullMethodName,
+	"list_grants":   pb.ExactMac_ListGrants_FullMethodName,
+	"preauthorize":  pb.ExactMac_PreauthorizeEnvelope_FullMethodName,
 }
 
 var applicationMatrixTools = map[string]struct{}{
@@ -178,9 +186,10 @@ func TestMCPNonApplicationAdmissionMatrix_ProductionTransports(t *testing.T) {
 	defer stopSentinel()
 	overrides := map[string]string{
 		"EXACTMAC_SERVER_TLS":        "false",
-		"EXACTMAC_SERVER_CERT_FILE":  "",
-		"EXACTMAC_REQUEST_TIMEOUT":   "2",
-		"MCP_SHELL_COMMANDS_ENABLED": "false",
+		"EXACTMAC_SERVER_CERT_FILE":         "",
+		"EXACTMAC_REQUEST_TIMEOUT":          "2",
+		"EXACTMAC_CONSENT_TIMEOUT_SECONDS":  "1",
+		"MCP_SHELL_COMMANDS_ENABLED":        "false",
 	}
 	_, baseURL, stopHTTP := startMCPTestServerWithOverrides(t, ctx, grpcAddress, overrides)
 	defer stopHTTP()

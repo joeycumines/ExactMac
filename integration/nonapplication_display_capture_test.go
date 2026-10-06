@@ -43,9 +43,10 @@ func TestMCPDisplayCaptureProductionTransports_StrictBackendTruth(t *testing.T) 
 	defer stopBackend()
 	overrides := map[string]string{
 		"EXACTMAC_SERVER_TLS":        "false",
-		"EXACTMAC_SERVER_CERT_FILE":  "",
-		"EXACTMAC_REQUEST_TIMEOUT":   "5",
-		"MCP_SHELL_COMMANDS_ENABLED": "false",
+		"EXACTMAC_SERVER_CERT_FILE":         "",
+		"EXACTMAC_REQUEST_TIMEOUT":          "5",
+		"EXACTMAC_CONSENT_TIMEOUT_SECONDS":  "1",
+		"MCP_SHELL_COMMANDS_ENABLED":        "false",
 	}
 	_, baseURL, stopHTTP := startMCPTestServerWithOverrides(t, ctx, grpcAddress, overrides)
 	defer stopHTTP()
@@ -211,7 +212,7 @@ func TestDisplayCaptureReleaseSwiftDirectAndProductionTransports(t *testing.T) {
 	overrides := map[string]string{
 		"EXACTMAC_SERVER_TLS":        "false",
 		"EXACTMAC_SERVER_CERT_FILE":  "",
-		"EXACTMAC_REQUEST_TIMEOUT":   "30",
+		"EXACTMAC_REQUEST_TIMEOUT":   "135",
 		"MCP_SHELL_COMMANDS_ENABLED": "false",
 	}
 	_, baseURL, httpCleanup := startMCPTestServerWithOverrides(t, ctx, serverAddr, overrides)

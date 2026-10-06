@@ -16,18 +16,18 @@ import (
 
 func requireFinderFrontmost(t *testing.T, ctx context.Context, client pb.ExactMacClient) {
 	t.Helper()
-	activation, err := client.ExecuteAppleScript(ctx, &pb.ExecuteAppleScriptRequest{
-		Script: `tell application "Finder" to activate`,
-	})
-	if err != nil {
-		t.Fatalf("Activate Finder RPC: %v", err)
-	}
-	if !activation.Success {
-		t.Fatalf("Activate Finder script failed: %s", activation.Error)
-	}
-
 	lastFrontmost := ""
-	err = PollUntilContext(ctx, 100*time.Millisecond, func() (bool, error) {
+	err := PollUntilContext(ctx, 200*time.Millisecond, func() (bool, error) {
+		activation, err := client.ExecuteAppleScript(ctx, &pb.ExecuteAppleScriptRequest{
+			Script: `tell application "Finder" to activate`,
+		})
+		if err != nil {
+			return false, err
+		}
+		if !activation.Success {
+			return false, fmt.Errorf("activate Finder failed: %s", activation.Error)
+		}
+
 		response, err := client.ExecuteAppleScript(ctx, &pb.ExecuteAppleScriptRequest{
 			Script: `tell application "System Events" to return name of first application process whose frontmost is true`,
 		})
@@ -183,6 +183,7 @@ func TestForegroundOpenDoesStealFocus(t *testing.T) {
 	// 4. Verify Calculator became frontmost
 	t.Log("Verifying Calculator became frontmost...")
 	calculatorBecameFrontmost := false
+	lastObserved := ""
 	err = PollUntilContext(ctx, 100*time.Millisecond, func() (bool, error) {
 		frontmostResp, err := client.ExecuteAppleScript(ctx, &pb.ExecuteAppleScriptRequest{
 			Script: `tell application "System Events" to return name of first application process whose frontmost is true`,
@@ -190,14 +191,15 @@ func TestForegroundOpenDoesStealFocus(t *testing.T) {
 		if err != nil {
 			return false, nil
 		}
-		if frontmostResp.GetOutput() == "Calculator" {
+		lastObserved = strings.TrimSpace(frontmostResp.GetOutput())
+		if lastObserved == "Calculator" {
 			calculatorBecameFrontmost = true
 			return true, nil
 		}
 		return false, nil
 	})
 	if err != nil {
-		t.Fatalf("Calculator did not become frontmost before the convergence deadline: %v", err)
+		t.Fatalf("Calculator did not become frontmost before the convergence deadline (last observed %q): %v", lastObserved, err)
 	}
 	if !calculatorBecameFrontmost {
 		t.Fatalf("Expected Calculator to become frontmost with background=false, but it did not")

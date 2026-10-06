@@ -241,7 +241,7 @@ func startRequestAdmissionBackend(t *testing.T) (string, *requestAdmissionBacken
 
 func requestAdmissionProcessOverrides(global, perClient string) map[string]string {
 	return map[string]string{
-		"EXACTMAC_REQUEST_TIMEOUT":               "30",
+		"EXACTMAC_REQUEST_TIMEOUT":               "135",
 		"EXACTMAC_SERVER_CERT_FILE":              "",
 		"EXACTMAC_SERVER_TLS":                    "false",
 		"MCP_MAX_CONCURRENT_REQUESTS":            global,

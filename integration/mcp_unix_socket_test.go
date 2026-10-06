@@ -305,7 +305,7 @@ func startMCPUnixSocketProcess(
 func mcpUnixProcessEnvironment(grpcAddr string, socketPath string) []string {
 	return testEnvironment(map[string]string{
 		"EXACTMAC_DEBUG":              "false",
-		"EXACTMAC_REQUEST_TIMEOUT":    "30",
+		"EXACTMAC_REQUEST_TIMEOUT":    "135",
 		"EXACTMAC_SERVER_ADDR":        grpcAddr,
 		"EXACTMAC_SERVER_CERT_FILE":   "",
 		"EXACTMAC_SERVER_SOCKET_PATH": "",

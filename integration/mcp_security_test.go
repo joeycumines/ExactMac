@@ -305,7 +305,7 @@ func TestMCPProductionListenerSecurity_InvalidConfigurationExitsBeforeBind(t *te
 
 			address := listener.Addr().String()
 			processEnvironment := map[string]string{
-				"EXACTMAC_REQUEST_TIMEOUT":   "30",
+				"EXACTMAC_REQUEST_TIMEOUT":   "135",
 				"EXACTMAC_SERVER_ADDR":       "127.0.0.1:1",
 				"MCP_API_KEY":                "",
 				"MCP_CORS_ORIGIN":            "",

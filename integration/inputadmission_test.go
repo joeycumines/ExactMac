@@ -105,6 +105,7 @@ func TestMCPInputAdmission_ProductionTransports(t *testing.T) {
 		"EXACTMAC_SERVER_TLS":                    "false",
 		"EXACTMAC_SERVER_CERT_FILE":              "",
 		"EXACTMAC_REQUEST_TIMEOUT":               "2",
+		"EXACTMAC_CONSENT_TIMEOUT_SECONDS":       "1",
 		"MCP_MAX_CONCURRENT_REQUESTS":            "1",
 		"MCP_MAX_CONCURRENT_REQUESTS_PER_CLIENT": "1",
 		"MCP_SHELL_COMMANDS_ENABLED":             "false",

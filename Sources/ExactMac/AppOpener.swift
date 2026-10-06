@@ -264,6 +264,9 @@ private class AppOpenerOperation {
                 at: finalAppURL,
                 configuration: configuration,
             )
+            if !self.background {
+                _ = runningApp.activate(options: [.activateIgnoringOtherApps])
+            }
             let pidAfterOpen = runningApp.processIdentifier
 
             logStepCompletion("opening/activating application async call completed")

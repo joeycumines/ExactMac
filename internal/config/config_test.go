@@ -113,6 +113,18 @@ func TestADeadlineShorterThanTheConsentWaitIsRefused(t *testing.T) {
 	}
 }
 
+func TestLoad_ConsentTimeoutSecondsOverride(t *testing.T) {
+	t.Setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "10")
+	t.Setenv("EXACTMAC_REQUEST_TIMEOUT", "15")
+	cfg, err := Load(TransportStdio)
+	if err != nil {
+		t.Fatalf("Load(TransportStdio) error = %v, want accepted request timeout >= custom consent timeout", err)
+	}
+	if cfg.RequestTimeout != 15 {
+		t.Errorf("RequestTimeout = %d, want 15", cfg.RequestTimeout)
+	}
+}
+
 func TestLoad_PhysicalRequestTimeoutMustFitTimeDuration(t *testing.T) {
 	const maximumDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
 	t.Setenv(
@@ -757,6 +769,43 @@ func TestLoad_ValidationWithOnlySocketPath(t *testing.T) {
 	// ServerAddr should have default value
 	if cfg.ServerAddr != "localhost:50051" {
 		t.Errorf("ServerAddr = %s, want localhost:50051 (default)", cfg.ServerAddr)
+	}
+}
+
+func TestLoad_ExplicitServerAddrSelectsTCP(t *testing.T) {
+	os.Unsetenv("EXACTMAC_SERVER_SOCKET_PATH")
+	os.Setenv("EXACTMAC_SERVER_ADDR", "127.0.0.1:54321")
+	defer os.Unsetenv("EXACTMAC_SERVER_ADDR")
+
+	cfg, err := Load(TransportStdio)
+	if err != nil {
+		t.Fatalf("Load(TransportStdio) error = %v", err)
+	}
+
+	if cfg.ServerAddr != "127.0.0.1:54321" {
+		t.Errorf("ServerAddr = %s, want 127.0.0.1:54321", cfg.ServerAddr)
+	}
+
+	if cfg.ServerSocketPath != "" {
+		t.Errorf("ServerSocketPath = %q, want empty when EXACTMAC_SERVER_ADDR is set explicitly", cfg.ServerSocketPath)
+	}
+}
+
+func TestLoad_ExplicitEmptyServerSocketPathSelectsTCP(t *testing.T) {
+	os.Setenv("EXACTMAC_SERVER_SOCKET_PATH", "")
+	os.Setenv("EXACTMAC_SERVER_ADDR", "127.0.0.1:54321")
+	defer func() {
+		os.Unsetenv("EXACTMAC_SERVER_SOCKET_PATH")
+		os.Unsetenv("EXACTMAC_SERVER_ADDR")
+	}()
+
+	cfg, err := Load(TransportStdio)
+	if err != nil {
+		t.Fatalf("Load(TransportStdio) error = %v", err)
+	}
+
+	if cfg.ServerSocketPath != "" {
+		t.Errorf("ServerSocketPath = %q, want empty when EXACTMAC_SERVER_SOCKET_PATH is set to empty string", cfg.ServerSocketPath)
 	}
 }
 

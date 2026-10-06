@@ -215,13 +215,19 @@ func (c *Config) validate() error {
 	// wait actually lives: an operator who genuinely wants a shorter ceiling lowers the
 	// consent bound (EXACTMAC_CONSENT_TIMEOUT_SECONDS) and this value with it. Lowering only
 	// this side would reintroduce exactly the mismatch being refused.
-	if c.RequestTimeout < ServerConsentTimeoutSeconds {
+	consentWait := ServerConsentTimeoutSeconds
+	if envVal := os.Getenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val >= 0 {
+			consentWait = val
+		}
+	}
+	if c.RequestTimeout < consentWait {
 		return fmt.Errorf(
 			"EXACTMAC_REQUEST_TIMEOUT is %d seconds, shorter than the server's %d-second consent "+
 				"wait, so every consent-requiring call would fail before the operator could answer; "+
 				"set EXACTMAC_CONSENT_TIMEOUT_SECONDS on the server to match, or raise this value",
 			c.RequestTimeout,
-			ServerConsentTimeoutSeconds,
+			consentWait,
 		)
 	}
 	const maximumDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
@@ -328,8 +334,11 @@ func validateCORSOrigin(origin string) error {
 // deliberate act with a documented consequence rather than the accidental result of having
 // no variables set.
 func defaultServerSocketPath() string {
-	if path := os.Getenv("EXACTMAC_SERVER_SOCKET_PATH"); path != "" {
-		return path
+	if val, ok := os.LookupEnv("EXACTMAC_SERVER_SOCKET_PATH"); ok {
+		return val
+	}
+	if _, ok := os.LookupEnv("EXACTMAC_SERVER_ADDR"); ok {
+		return ""
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
