@@ -180,7 +180,7 @@ PY
 export PYTHONPATH="$WORK"
 step "Handshake and list the tools"
 TOOLS_JSON="$(EXACTMAC_SOCKET="$SOCKET" timeout 60 python3 -u -c '
-import os, sys
+import json, os, sys
 sys.path.insert(0, os.environ["PYTHONPATH"])
 from call import Client
 c = Client(sys.argv[1], os.environ["EXACTMAC_SOCKET"])
