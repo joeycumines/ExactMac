@@ -24,3 +24,4 @@ coverage.lcov
 # fresh clones stay clean, synced from the tracked skill on demand.
 /.claude/skills/
 /.agents/skills/
+/docs/render/
