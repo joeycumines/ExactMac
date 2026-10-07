@@ -5059,10 +5059,17 @@ type ListGrantsRequest struct {
 	// Page token from a previous call. The token is bound to the other semantic query
 	// inputs, not page_size or skip; clients may change either when continuing.
 	// Its structure is opaque and must not be relied upon by clients.
+	// When combined with skip, skip is applied as an offset within the remaining result
+	// set identified by page_token. Note that because grants are live and revocable,
+	// changes to the underlying store between continuation calls may alter item positions.
 	PageToken string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// Number of grants to skip.
+	// Number of grants to skip. When continuing with page_token, skip applies to the
+	// subsequent page.
 	Skip int32 `protobuf:"varint,3,opt,name=skip,proto3" json:"skip,omitempty"`
 	// Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.
+	// Formatted as a strict comma-separated list of exact capability tokens (e.g. "clipboard.read,script.execute").
+	// Tokens are whitespace-trimmed, must not be empty, and must correspond to valid capability
+	// identifiers known to the server. Omit or leave empty for every capability.
 	Filter        string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5199,10 +5206,13 @@ type Grant struct {
 	Capability string `protobuf:"bytes,2,opt,name=capability,proto3" json:"capability,omitempty"`
 	// The scope, in the API's own words.
 	Scope string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
-	// Who holds it, by executable path.
+	// Who holds it, by executable path. Retained for exact identity binding and revocation
+	// decisions; clients and console presentations should minimize display to bundle
+	// identifier or executable basename where detailed filesystem paths are not required.
 	Holder string `protobuf:"bytes,4,opt,name=holder,proto3" json:"holder,omitempty"`
 	// The code identity the grant is bound to. A grant binds to a BINARY and never to a
 	// process id, so a restart does not lose it and a different binary cannot inherit it.
+	// Retained alongside holder to verify designated requirement matching.
 	HolderDesignatedRequirement string `protobuf:"bytes,5,opt,name=holder_designated_requirement,json=holderDesignatedRequirement,proto3" json:"holder_designated_requirement,omitempty"`
 	// Whether the binding names a signature at all. An unsigned holder is bound by path
 	// alone, which is a narrower guarantee and is reported rather than hidden.

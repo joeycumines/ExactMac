@@ -2197,12 +2197,19 @@ public nonisolated struct Exactmac_V1_ListGrantsRequest: Sendable {
   /// Page token from a previous call. The token is bound to the other semantic query
   /// inputs, not page_size or skip; clients may change either when continuing.
   /// Its structure is opaque and must not be relied upon by clients.
+  /// When combined with skip, skip is applied as an offset within the remaining result
+  /// set identified by page_token. Note that because grants are live and revocable,
+  /// changes to the underlying store between continuation calls may alter item positions.
   public var pageToken: String = String()
 
-  /// Number of grants to skip.
+  /// Number of grants to skip. When continuing with page_token, skip applies to the
+  /// subsequent page.
   public var skip: Int32 = 0
 
   /// Restrict the listing to grants covering these capability ids, comma-separated. Omit for every capability.
+  /// Formatted as a strict comma-separated list of exact capability tokens (e.g. "clipboard.read,script.execute").
+  /// Tokens are whitespace-trimmed, must not be empty, and must correspond to valid capability
+  /// identifiers known to the server. Omit or leave empty for every capability.
   public var filter: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -2251,11 +2258,14 @@ public nonisolated struct Exactmac_V1_Grant: Sendable {
   /// The scope, in the API's own words.
   public var scope: String = String()
 
-  /// Who holds it, by executable path.
+  /// Who holds it, by executable path. Retained for exact identity binding and revocation
+  /// decisions; clients and console presentations should minimize display to bundle
+  /// identifier or executable basename where detailed filesystem paths are not required.
   public var holder: String = String()
 
   /// The code identity the grant is bound to. A grant binds to a BINARY and never to a
   /// process id, so a restart does not lose it and a different binary cannot inherit it.
+  /// Retained alongside holder to verify designated requirement matching.
   public var holderDesignatedRequirement: String = String()
 
   /// Whether the binding names a signature at all. An unsigned holder is bound by path
