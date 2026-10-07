@@ -78,8 +78,8 @@ var safeNonApplicationAdmissionFixtures = map[string]map[string]any{
 	"execute_macro": {"macro": "macros/w5"},
 	"list_grants":   {},
 	"preauthorize": {
-		"reason":              "w5",
-		"capabilities":        []any{"observation.window"},
+		"reason":             "w5",
+		"capabilities":       []any{"observation.window"},
 		"requested_lifetime": map[string]any{"seconds": 60},
 	},
 }
@@ -185,11 +185,11 @@ func TestMCPNonApplicationAdmissionMatrix_ProductionTransports(t *testing.T) {
 	grpcAddress, recorder, stopSentinel := startNonApplicationMatrixSentinel(t)
 	defer stopSentinel()
 	overrides := map[string]string{
-		"EXACTMAC_SERVER_TLS":        "false",
-		"EXACTMAC_SERVER_CERT_FILE":         "",
-		"EXACTMAC_REQUEST_TIMEOUT":          "2",
-		"EXACTMAC_CONSENT_TIMEOUT_SECONDS":  "1",
-		"MCP_SHELL_COMMANDS_ENABLED":        "false",
+		"EXACTMAC_SERVER_TLS":              "false",
+		"EXACTMAC_SERVER_CERT_FILE":        "",
+		"EXACTMAC_REQUEST_TIMEOUT":         "2",
+		"EXACTMAC_CONSENT_TIMEOUT_SECONDS": "1",
+		"MCP_SHELL_COMMANDS_ENABLED":       "false",
 	}
 	_, baseURL, stopHTTP := startMCPTestServerWithOverrides(t, ctx, grpcAddress, overrides)
 	defer stopHTTP()

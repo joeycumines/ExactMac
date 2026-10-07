@@ -147,6 +147,33 @@ runtime, which looks like every RPC being unknown. `macos.bundle` copies every
 `gmake exactmac.verify` asserts the required one is present in the assembled
 app.
 
+## Console Targets and Assets
+
+The console application targets build, package, sign, and install the menu-bar app.
+
+### Make Targets
+
+| Target | Action |
+|---|---|
+| `gmake exactmac.console-build` | Builds the release binary at `Console/.build/release/ExactMacConsole`. |
+| `gmake exactmac.console-app` | Packages `ExactMacConsole.app`, copies SwiftPM resource bundles, writes `Info.plist`, and installs icons and glyphs into `Contents/Resources`. |
+| `gmake exactmac.console-sign` | Signs the bundle ad-hoc (or with `MACOS_SIGN_IDENTITY`) and runs `codesign --verify --deep --strict`. |
+| `gmake exactmac.console-install` | Runs the full build, package, sign, verify, and install sequence to `~/Applications/ExactMacConsole.app`, registers with `lsregister -f`, sets up `~/.exactmac/`, and archives legacy LaunchAgents. |
+| `gmake exactmac.console-stop` | Terminates running `ExactMacConsole` instances via `pkill -x ExactMacConsole`. |
+| `gmake exactmac.console-uninstall` | Stops the running app, removes `~/Applications/ExactMacConsole.app`, and deletes the socket. |
+
+### Icon and Asset Pipeline
+
+The console bundle packages two visual assets:
+
+- **Application Icon (`AppIcon.icns`)**: Generated from `Console/Resources/AppIcon-2048.png`. The background outside the shield emblem is transparent; the dark tile container and white rounded corners are removed. The `.icns` file is built from `Console/Resources/AppIcon.iconset/` and installed to `Contents/Resources/AppIcon.icns`. `Info.plist` declares `CFBundleIconFile = AppIcon.icns`.
+- **Menu Bar Status Item (`MenuBarGlyph.svg`)**: Vector stencil traced from the emblem geometry and sized for an 18x18pt status bar bounding box (16x16pt glyph with 1pt padding). Rendered via AppKit with `isTemplate = true` for native appearance matching macOS menu bar items.
+  - **Running / Pending**: Template emblem matching system menu bar items.
+  - **Stopped**: Drawn at 38% opacity (`fraction: 0.38`), matching inactive macOS status items.
+  - **Degraded / Reduced / Cannot Ask**: Template emblem with a 5pt amber badge dot (`#A04A00` light / `#FF9F0A` dark) and a 0.75pt transparent knockout separating the badge from the emblem boundary.
+
+Source assets live in `Console/Resources/` (`MenuBarGlyph.svg`, `MenuBarGlyph.png` at 18x18, and `MenuBarGlyph@2x.png` at 36x36) and are staged to `Contents/Resources/` by `exactmac.console-app`.
+
 ## Installed paths
 
 | What | Where | Mode |

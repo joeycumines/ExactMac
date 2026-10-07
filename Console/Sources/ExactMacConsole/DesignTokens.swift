@@ -47,6 +47,27 @@ enum Design {
         }
     }
 
+    /// Dynamic AppKit NSColor equivalents for menu bar rasterisation and native drawing.
+    enum NSInk {
+        static let controlBorder = adaptive(light: 0x8A8A8F, dark: 0x5C5C61)
+        static let textSecondary = adaptive(light: 0x5E5E63, dark: 0xA8A8AD)
+        static let caution = adaptive(light: 0xA04A00, dark: 0xFF9F0A)
+        static let success = adaptive(light: 0x1A753F, dark: 0x30C46C)
+
+        private static func adaptive(light: UInt32, dark: UInt32) -> NSColor {
+            NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let hex = isDark ? dark : light
+                return NSColor(
+                    srgbRed: CGFloat((hex >> 16) & 0xFF) / 255.0,
+                    green: CGFloat((hex >> 8) & 0xFF) / 255.0,
+                    blue: CGFloat(hex & 0xFF) / 255.0,
+                    alpha: 1.0,
+                )
+            }
+        }
+    }
+
     /// A literal sRGB colour. Named `rgb` rather than `Color` because a static member called
     /// `Color` shadows the type it returns, which is a confusing error to read.
     static func rgb(_ value: UInt32) -> Color {

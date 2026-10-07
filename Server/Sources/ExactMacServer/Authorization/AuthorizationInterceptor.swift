@@ -539,7 +539,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
         // commit or rollback is the one call whose scope must name a COUNT, because a
         // single approval covering a batch without a bound is the amortisation invariant
         // 9 forbids. Anything else derives with no count.
-        var operationLimit: Int? = nil
+        var operationLimit: Int?
         if let source = runtime.declaredOperationCount {
             let facts = RequestFacts(message: protobuf, policy: runtime.descriptorPolicy)
             // RequestFacts keys are camelCased PROTO names, so the field spelled

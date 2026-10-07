@@ -367,7 +367,7 @@ func serve(
 /// A PUBLIC HANDLE RATHER THAN THE WHOLE RUNTIME, because a public function may not name
 /// an internal type and the runtime's other fields have no business being public.
 @MainActor
-public struct HostedPostureHandle: Sendable {
+public struct HostedPostureHandle {
     private let source: PostureSource
 
     /// TEST-VISIBLE: the console suite drives the control's display and write path

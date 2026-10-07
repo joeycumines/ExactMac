@@ -186,6 +186,8 @@ define EXACTMAC_CONSOLE_INFO_PLIST
     <string>$(EXACTMAC_CONSOLE_APP_NAME)</string>
     <key>CFBundleIdentifier</key>
     <string>$(EXACTMAC_CONSOLE_BUNDLE_ID)</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -875,6 +877,10 @@ exactmac.console-app: ## Create a clean ExactMacConsole.app, including its Swift
 	if ! rm -rf "$(EXACTMAC_CONSOLE_STAGING_DIR)"; then printf '%s\n' 'ERROR: failed to clear console bundle staging directory.' >&2; exit 1; fi; \
 	if ! mkdir -p "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/MacOS" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources"; then printf '%s\n' 'ERROR: failed to create console bundle staging directories.' >&2; exit 1; fi; \
 	if ! install -m 0755 "$(EXACTMAC_CONSOLE_BIN)" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/MacOS/$(EXACTMAC_CONSOLE_APP_NAME)"; then printf '%s\n' 'ERROR: failed to install console executable into bundle.' >&2; exit 1; fi; \
+	if ! install -m 0644 "$(PROJECT_ROOT)/Console/Resources/AppIcon.icns" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/AppIcon.icns"; then printf '%s\n' 'ERROR: failed to install console AppIcon.icns.' >&2; exit 1; fi; \
+	if ! install -m 0644 "$(PROJECT_ROOT)/Console/Resources/MenuBarGlyph.svg" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/MenuBarGlyph.svg"; then printf '%s\n' 'ERROR: failed to install console MenuBarGlyph.svg.' >&2; exit 1; fi; \
+	if ! install -m 0644 "$(PROJECT_ROOT)/Console/Resources/MenuBarGlyph.png" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/MenuBarGlyph.png"; then printf '%s\n' 'ERROR: failed to install console MenuBarGlyph.png.' >&2; exit 1; fi; \
+	if ! install -m 0644 "$(PROJECT_ROOT)/Console/Resources/MenuBarGlyph@2x.png" "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Resources/MenuBarGlyph@2x.png"; then printf '%s\n' 'ERROR: failed to install console MenuBarGlyph@2x.png.' >&2; exit 1; fi; \
 	if ! printf '%s\n' "$$EXACTMAC_CONSOLE_INFO_PLIST_E" > "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/Info.plist"; then printf '%s\n' 'ERROR: failed to write console Info.plist.' >&2; exit 1; fi; \
 	if ! printf 'APPL????' > "$(EXACTMAC_CONSOLE_STAGING_DIR)/Contents/PkgInfo"; then printf '%s\n' 'ERROR: failed to write PkgInfo.' >&2; exit 1; fi; \
 	resource_count=0; \
