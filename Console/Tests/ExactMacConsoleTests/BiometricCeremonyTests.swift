@@ -24,7 +24,7 @@ struct BiometricCeremonyTests {
             (LAError.appCancel.rawValue, .cancelled),
             (LAError.userFallback.rawValue, .cancelled),
             (LAError.passcodeNotSet.rawValue, .passcodeNotSet),
-            (LAError.authenticationFailed.rawValue, .cancelled),
+            (LAError.authenticationFailed.rawValue, .unavailable(reason: "authentication failed")),
         ]
         for (code, want) in expected {
             let error = NSError(domain: LAError.errorDomain, code: code)

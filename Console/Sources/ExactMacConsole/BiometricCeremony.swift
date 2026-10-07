@@ -49,6 +49,16 @@ final class BiometricCeremony: @unchecked Sendable {
         return map(passcodeError ?? error)
     }
 
+    /// The specific mechanism available on this machine ("Touch ID" vs "device passcode").
+    nonisolated static var biometricType: String {
+        let probe = LAContext()
+        var error: NSError?
+        if probe.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            return "Touch ID"
+        }
+        return "device passcode"
+    }
+
     /// Performs the ceremony for exactly one decision and returns a proof bound to it.
     ///
     /// The reason is what macOS renders BESIDE THE SENSOR, so it is composed from the
@@ -56,9 +66,12 @@ final class BiometricCeremony: @unchecked Sendable {
     /// finger is on the reader, and that is the only place they read what they are
     /// agreeing to.
     func perform(
-        nonce _: String,
+        nonce: String,
         reason: String,
     ) async -> Outcome {
+        guard !nonce.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .unavailable(.unavailable(reason: "missing ceremony nonce"))
+        }
         guard isFrontmost else {
             // A ceremony nobody can see proves nothing, and a biometric performed against a
             // hidden window is indistinguishable from one the operator never intended. So
@@ -105,7 +118,7 @@ final class BiometricCeremony: @unchecked Sendable {
         case .some(.userCancel), .some(.appCancel), .some(.systemCancel), .some(.userFallback):
             .cancelled
         case .some(.passcodeNotSet): .passcodeNotSet
-        case .some(.authenticationFailed): .cancelled
+        case .some(.authenticationFailed): .unavailable(reason: "authentication failed")
         default: .unavailable(reason: error.localizedDescription)
         }
     }

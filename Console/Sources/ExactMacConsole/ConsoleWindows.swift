@@ -310,6 +310,7 @@ struct ActivityRow: View {
     }
 
     let row: Model
+    var isSuspect: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.one) {
@@ -321,6 +322,19 @@ struct ActivityRow: View {
                     Text(row.isAllowed ? "Allowed" : "Denied")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(verdictColour)
+                    if isSuspect {
+                        Text("Unverified · post-break")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Design.Ink.danger)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(Design.Ink.surfaceRaised),
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(Design.Ink.danger, lineWidth: 1),
+                            )
+                    }
                 }
                 Spacer(minLength: 0)
                 Text(row.time)
@@ -521,7 +535,15 @@ struct ActivityTimeline: View {
                 // would put the oldest entries permanently out of reach.
                 ScrollView {
                     VStack(spacing: Design.Space.chip) {
-                        ForEach(rows) { ActivityRow(row: $0) }
+                        ForEach(rows) { row in
+                            let isSuspect: Bool = {
+                                if case let .broken(at) = integrity, let seq = Int(row.id), seq > at {
+                                    return true
+                                }
+                                return false
+                            }()
+                            ActivityRow(row: row, isSuspect: isSuspect)
+                        }
                         if case let .broken(at) = integrity {
                             // The rule is GREY, not orange: this is the system saying it cannot
                             // tell you something, which is the other of the two provenances.

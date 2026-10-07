@@ -293,7 +293,6 @@ struct TargetChip: View {
 /// operator changing a setting that is not taking effect deserves to be told why.
 struct SettingsWindow: View {
     @Bindable var model: ConsoleModel
-    @State private var targets: [String] = ["1Password", "Keychain Access", "Xcode"]
 
     var body: some View {
         ConsoleWindow(
@@ -327,35 +326,6 @@ struct SettingsWindow: View {
 
                     SectionLabel(text: "BIOMETRIC REQUIREMENTS")
                     ForEach(Self.biometricRows(model: model)) { SettingRow(setting: $0) }
-
-                    SectionLabel(text: "HIGH-CONSEQUENCE TARGETS")
-                    VStack(alignment: .leading, spacing: Design.Space.one) {
-                        Text("Applications that always escalate")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Design.Ink.textPrimary)
-                        Text(
-                            "Requests against these require a biometric whatever their breadth, "
-                                + "and are never covered by an existing grant. Consequence is a "
-                                + "fact about your life, so you name it.",
-                        )
-                        .font(.system(size: 11))
-                        .foregroundStyle(Design.Ink.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: Design.Space.chip) {
-                            ForEach(targets, id: \.self) { TargetChip(title: $0) }
-                            TargetChip(title: "Add an application", isPlaceholder: true)
-                        }
-                    }
-                    .padding(.horizontal, Design.Space.three)
-                    .padding(.vertical, Design.Space.component)
-                    .background(
-                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                            .fill(Design.Ink.surface),
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                            .strokeBorder(Design.Ink.separator, lineWidth: 1),
-                    )
 
                     SectionLabel(text: "CONSOLE")
                     // THE ROW IS LIVE, and what it is live to is the model: it displays

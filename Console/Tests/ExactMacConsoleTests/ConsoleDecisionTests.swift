@@ -320,9 +320,11 @@ struct ConsoleDecisionTests {
             decision: decision,
         )
         let rows = CallerTree.rows(for: request, maximumDepth: 4)
-        #expect(rows.count == 5, "the requester plus four ancestors, and no more")
+        #expect(rows.count == 6, "the requester plus four ancestors, plus the +N more overflow row")
+        #expect(rows.last?.name == "+16 more ancestors")
+        #expect(rows.last?.role == "ancestry capped")
         // The truncation is REPORTED, not hidden: the server said it truncated, and the rows
-        // stop where it stopped.
+        // show the overflow indicator.
         #expect(request.isAncestryTruncated)
     }
 

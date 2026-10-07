@@ -297,8 +297,12 @@ final class ConsoleModel {
     /// WITH IT, which is what turns the write into a re-render; without that the control
     /// was a live switch wired to a frozen display.
     func setPosture(_ posture: Posture) {
-        postureHandle?.setStoredPreference(posture, environment: stateEnvironment)
-        displayedPosture = postureHandle?.current ?? posture
+        guard let postureHandle else {
+            logger.notice("Cannot set posture: server handle is not ready")
+            return
+        }
+        postureHandle.setStoredPreference(posture, environment: stateEnvironment)
+        displayedPosture = postureHandle.current
     }
 
     // MARK: The operator's biometric gate
@@ -415,8 +419,12 @@ final class ConsoleModel {
             logger.error("The biometric gate change was not applied: the audit could not record it")
             return
         }
-        biometricGateHandle?.setCeremonyRequired(requiring, environment: stateEnvironment)
-        displayedBiometricGate = biometricGateHandle?.isCeremonyRequired ?? requiring
+        guard let biometricGateHandle else {
+            logger.notice("Cannot set biometric gate: server handle is not ready")
+            return
+        }
+        biometricGateHandle.setCeremonyRequired(requiring, environment: stateEnvironment)
+        displayedBiometricGate = biometricGateHandle.isCeremonyRequired
     }
 
     /// Reports that the server this process hosts could not start, and says why.
@@ -1158,7 +1166,8 @@ struct PendingRequest: Equatable {
             .sorted()
         requiresBiometric = decision.biometric.reason != nil
         biometricReason = decision.biometric.reason
-        consentTimeoutSeconds = 0
+        let envTimeout = ProcessInfo.processInfo.environment["EXACTMAC_CONSENT_TIMEOUT"].flatMap(Int.init)
+        consentTimeoutSeconds = (envTimeout != nil && envTimeout! > 0) ? envTimeout! : ServerConfig.defaultConsentTimeoutSeconds
         isRevokeAll = false
         offered = decision.offeredDecisions.map { option in
             Offered(
@@ -1281,7 +1290,7 @@ struct PendingRequest: Equatable {
             return biometricReason
         }
         return requiresBiometric
-            ? "Touch ID will confirm this decision."
+            ? "\(BiometricCeremony.biometricType) will confirm this decision."
             : "Nothing else is asked of you. This one needs no fingerprint."
     }
 

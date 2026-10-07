@@ -107,6 +107,8 @@ struct EnvelopeReview: View {
     var onApprove: () -> Void = {}
     var onDeny: () -> Void = {}
 
+    @State private var capabilitiesGeometry: ScrollRail.Measurement?
+
     var body: some View {
         VStack(spacing: 0) {
             // The band. A pre-authorization is not a request, and the band is the first
@@ -149,26 +151,37 @@ struct EnvelopeReview: View {
             .padding(.horizontal, Design.Space.frame)
             .padding(.bottom, 14)
 
-            VStack(alignment: .leading, spacing: Design.Space.chip) {
-                ForEach(capabilities) { capability in
-                    HStack(alignment: .center, spacing: Design.Space.chip) {
-                        StatusPill(kind: .risk(capability.risk.label, capability.risk.dot))
-                        VStack(alignment: .leading, spacing: Design.Space.hair) {
-                            Text(capability.consequence)
-                                .font(.system(size: 12))
-                                .foregroundStyle(Design.Ink.textPrimary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(capability.breadth)
-                                .font(.system(size: 10))
-                                .foregroundStyle(Design.Ink.textTertiary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Design.Space.chip) {
+                    ForEach(capabilities) { capability in
+                        HStack(alignment: .center, spacing: Design.Space.chip) {
+                            StatusPill(kind: .risk(capability.risk.label, capability.risk.dot))
+                            VStack(alignment: .leading, spacing: Design.Space.hair) {
+                                Text(capability.consequence)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Design.Ink.textPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(capability.breadth)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Design.Ink.textTertiary)
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer(minLength: 0)
                     }
                 }
+                .padding(Design.Space.three)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Design.Space.three)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxHeight: 240)
             .background(Design.Ink.surfaceSunken)
+            .overlay(alignment: .trailing) {
+                ScrollRail(geometry: capabilitiesGeometry)
+            }
+            .onScrollGeometryChange(for: ScrollRail.Measurement.self) { geometry in
+                ScrollRail.Measurement(geometry: geometry)
+            } action: { _, measurement in
+                capabilitiesGeometry = measurement
+            }
 
             VStack(alignment: .leading, spacing: Design.Space.component) {
                 HStack(alignment: .center, spacing: Design.Space.chip) {

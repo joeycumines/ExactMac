@@ -195,14 +195,9 @@ struct PromptCompositionTests {
 
     @Test
     func `The prompt says how long the operator has`() {
-        // NO COUNTDOWN IS SHOWN, AND THAT IS THE HONEST ANSWER TODAY. The engine holds the
-        // consent timeout in its own runtime, not on the request, so nothing reaches the
-        // prompt that could say how long the operator has. Inventing a number would be a lie
-        // about a deadline the operator is being asked to act within, so the line is absent
-        // and this pins that absence. When the server sends a timeout this becomes a
-        // countdown and the assertion inverts.
-        #expect(Self.request().clockText == nil, "no timeout has been sent, so no deadline may be claimed")
-        #expect(Self.request().clockText?.isEmpty != false, "an empty countdown is still a claim")
+        // The prompt wires the live configured consent timeout into clockText.
+        let defaultTimeout = ServerConfig.defaultConsentTimeoutSeconds
+        #expect(Self.request().clockText == "decides in \(defaultTimeout)s")
     }
 
     @Test
@@ -213,11 +208,10 @@ struct PromptCompositionTests {
                 biometricReason: "Touch ID will confirm: allow one clipboard read in TextEdit",
             ).biometricLine == "Touch ID will confirm: allow one clipboard read in TextEdit",
         )
-        // A ceremony the engine required WITHOUT saying why must not fall back to engine
-        // vocabulary, which is what it used to do. The fixture's default reason is empty
-        // precisely so this case is reachable.
+        // A ceremony the engine required WITHOUT saying why must state the available mechanism.
+        let expectedBiometricLabel = "\(BiometricCeremony.biometricType) will confirm this decision."
         #expect(
-            Self.request(requiresBiometric: true).biometricLine == "Touch ID will confirm this decision.",
+            Self.request(requiresBiometric: true).biometricLine == expectedBiometricLabel,
         )
         let free = Self.request(requiresBiometric: false).biometricLine
         #expect(!free.contains("ceremony"), "got \"\(free)\"")

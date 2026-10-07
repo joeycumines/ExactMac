@@ -58,6 +58,17 @@ struct CallerTree: View {
                 isRequester: false,
             ))
         }
+        if request.ancestors.count > maximumDepth {
+            let remaining = request.ancestors.count - maximumDepth
+            rows.append(Row(
+                id: -1,
+                name: "+\(remaining) more ancestors",
+                role: "ancestry capped",
+                depth: maximumDepth + 1,
+                signature: .unresolved,
+                isRequester: false,
+            ))
+        }
         return rows
     }
 
@@ -436,7 +447,7 @@ struct ApprovalPrompt: View {
                             .fill(Design.Ink.surface)
                         SystemField(caption: .target, value: target)
                     }
-                    .frame(height: 35)
+                    .frame(minHeight: 35)
                 }
                 // THE REASON, HERE AND NOT IN THE HEADER. It is caller-written and the design
                 // marks it unverified with an orange rule and a NOT VERIFIED caption, so the

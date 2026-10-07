@@ -552,7 +552,7 @@ struct OptionRow: View {
         var title: String {
             switch self {
             case .once: "Allow once"
-            case .target: "Allow for TextEdit"
+            case .target: "Allow for target"
             case .session: "Allow for this session"
             case .envelope: "Pre-authorize a batch"
             case .global: "Always allow"
