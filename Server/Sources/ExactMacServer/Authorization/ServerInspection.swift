@@ -343,7 +343,7 @@ public final class ServerInspectionService: @unchecked Sendable {
         let store = try GrantStore.openStore(
             path: path,
             clock: clock,
-            maximumEnvelopeSeconds: 86400,
+            maximumEnvelopeSeconds: ServerConfig.defaultMaximumEnvelopeSeconds,
         )
         return (store, clock)
     }

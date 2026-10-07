@@ -19,7 +19,7 @@ enum AuthorizationPolicy {
     /// The maximum span an envelope may be granted, and the ceiling the prompt states on
     /// its face. An agent may pre-authorize a long session; it may not pre-authorize
     /// forever.
-    static let maximumEnvelopeSeconds = 8 * 60 * 60
+    static let maximumEnvelopeSeconds = ServerConfig.defaultMaximumEnvelopeSeconds
 
     static func evaluate(
         request: AuthorizationRequest,

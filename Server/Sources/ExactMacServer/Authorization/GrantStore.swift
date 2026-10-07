@@ -231,7 +231,7 @@ final class GrantStore: Sendable {
         path: String,
         clock: any MonotonicClock,
         bootWallClockSeconds: Int = SystemBoot.wallClockSeconds,
-        maximumEnvelopeSeconds: Int = 8 * 60 * 60,
+        maximumEnvelopeSeconds: Int = ServerConfig.defaultMaximumEnvelopeSeconds,
     ) {
         self.path = path
         self.clock = clock
@@ -249,7 +249,7 @@ final class GrantStore: Sendable {
     static func openStore(
         path: String,
         clock: any MonotonicClock,
-        maximumEnvelopeSeconds: Int = 8 * 60 * 60,
+        maximumEnvelopeSeconds: Int = ServerConfig.defaultMaximumEnvelopeSeconds,
     ) throws -> GrantStore {
         let store = GrantStore(
             path: path,
@@ -674,7 +674,7 @@ final class GrantStore: Sendable {
     ///   than letting the allow stand, which is the fail-closed direction.
     @discardableResult
     func consume(_ grantIdentifier: String, operations: Int) throws -> Bool {
-        precondition(operations >= 1, "a batch of zero or fewer operations is not a spend")
+        guard operations >= 1 else { return false }
         let now = clock.now()
         let consumed = state.withLock { contents -> Bool in
             guard let index = contents.grants.firstIndex(where: { $0.id == grantIdentifier }) else {
@@ -720,7 +720,7 @@ final class GrantStore: Sendable {
     /// inner grant's id in the decision rather than the envelope's.
     @discardableResult
     func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) throws -> Bool {
-        precondition(operations >= 1, "a batch of zero or fewer operations is not a spend")
+        guard operations >= 1 else { return false }
         let now = clock.now()
         let consumed = state.withLock { contents -> Bool in
             guard let envelopeIndex = contents.envelopes.firstIndex(where: { $0.id == envelopeIdentifier })

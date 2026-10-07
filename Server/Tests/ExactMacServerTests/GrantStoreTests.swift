@@ -387,6 +387,30 @@ final class GrantStoreTests: XCTestCase {
         XCTAssertTrue(store.liveGrants().isEmpty, "an exhausted grant is removed, not left at zero")
     }
 
+    /// Finding #16: Calling consume or consumeEnvelope with zero or negative operations
+    /// returns false rather than trapping with a precondition.
+    func testConsumeWithZeroOrNegativeOperationsReturnsFalse() throws {
+        let clock = MovableClock()
+        let (store, path) = try makeStore(clock: clock)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let granted = try store.issue(
+            capability: .transactionManage,
+            scope: AuthorizationScope(application: .any, operationLimit: 5),
+            duration: .monotonicSeconds(600),
+            holder: Self.identity(),
+            remainingOperations: 5,
+        )
+
+        XCTAssertFalse(try store.consume(granted.id, operations: 0))
+        XCTAssertFalse(try store.consume(granted.id, operations: -1))
+        XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 5)
+
+        try store.issueEnvelope(envelope: Self.envelope(id: "e-nonpositive"), now: clock.now())
+        XCTAssertFalse(try store.consumeEnvelope("e-nonpositive", operations: 0))
+        XCTAssertFalse(try store.consumeEnvelope("e-nonpositive", operations: -2))
+    }
+
     /// THE PERSIST RACE, under load: a persist that snapshots, encodes and writes as
     /// separate steps can land STALE content after a newer persist has already written —
     /// a revoked grant back in the file the next boot reads. The write is serialized now,
