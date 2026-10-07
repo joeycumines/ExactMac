@@ -237,6 +237,23 @@ func TestATCPAddressIsDialledWithoutNaming(t *testing.T) {
 	}
 }
 
+func TestPeerIdentityDialerRejectsSymlinkDirectory(t *testing.T) {
+	directory := shortDirectory(t)
+	symlinkPath := filepath.Join(directory, "symlink_dir")
+	targetDir := filepath.Join(directory, "real_dir")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("create target directory: %v", err)
+	}
+	if err := os.Symlink(targetDir, symlinkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	_, err := newPeerIdentityDialer(filepath.Join(symlinkPath, "s.sock"))
+	if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("expected symlink directory rejection, got: %v", err)
+	}
+}
+
 func TestAClientSocketNameIsRefusedWhenItCannotFit(t *testing.T) {
 	directory := "/tmp/" + strings.Repeat("d", 120)
 	if err := os.MkdirAll(directory, 0o700); err != nil {

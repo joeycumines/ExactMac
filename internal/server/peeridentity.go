@@ -58,8 +58,14 @@ func newPeerIdentityDialer(serverSocketPath string) (*peerIdentityDialer, error)
 	if err != nil {
 		return nil, fmt.Errorf("stat the directory holding the server socket: %w", err)
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("the server socket's directory must not be a symlink: %q", directory)
+	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("the server socket's directory is not a directory: %q", directory)
+	}
+	if err := checkDirectoryOwnership(info, directory); err != nil {
+		return nil, err
 	}
 	return &peerIdentityDialer{
 		fallback:   &net.Dialer{},
@@ -222,32 +228,4 @@ func (c *namedConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(c.forget)
 	return err
-}
-
-// bindUnixSocketName gives a not-yet-connected socket a pathname of its own.
-//
-// THE BIND, NOT A CLAIM. Once this returns, the kernel records the name against this exact
-// socket and refuses to record it against another while this one lives, which is what makes
-// the name usable as the server's correlation key.
-func bindUnixSocketName(fd int, name string) error {
-	address, err := unixSocketAddress(name)
-	if err != nil {
-		return err
-	}
-	if err := syscall.Bind(fd, address); err != nil {
-		return fmt.Errorf("bind the client socket to %q: %w", name, err)
-	}
-	// 0600, because the caller's own socket is as much a boundary as the server's: a node
-	// anybody can connect to is a name this process cannot be confident it still owns.
-	if err := syscall.Chmod(name, 0o600); err != nil {
-		return fmt.Errorf("restrict the client socket %q: %w", name, err)
-	}
-	return nil
-}
-
-func unixSocketAddress(name string) (*syscall.SockaddrUnix, error) {
-	if len(name) >= 104 {
-		return nil, fmt.Errorf("the client socket name is too long: %q is %d bytes", name, len(name))
-	}
-	return &syscall.SockaddrUnix{Name: name}, nil
 }

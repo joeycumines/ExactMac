@@ -23,7 +23,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -330,12 +329,8 @@ func validateUnixSocketEndpoint(path string) error {
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("unix socket path is not a socket: %q", path)
 	}
-	if info.Mode().Perm() != 0600 {
-		return fmt.Errorf("unix socket path must have mode 0600: %q has %04o", path, info.Mode().Perm())
-	}
-	status, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || status.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("unix socket path is not owned by the current user: %q", path)
+	if err := checkUnixSocketOwnershipAndPermissions(info, path); err != nil {
+		return err
 	}
 	return nil
 }

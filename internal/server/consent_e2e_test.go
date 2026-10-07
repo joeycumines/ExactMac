@@ -141,8 +141,8 @@ func TestPreauthorizeIsRefusedWithoutADeclaration(t *testing.T) {
 		`{"reason":"because","requested_lifetime":{"seconds":60}}`,
 		`{"capabilities":["clipboard.read"],"requested_lifetime":{"seconds":0}}`,
 		`{"capabilities":["clipboard.read"],"reason":"because"}`,
-		`{"capabilities":["clipboard.read"],"requested_lifetime":{"seconds":60}}`, // missing reason
-		`{"capabilities":["clipboard.read"],"reason":"","requested_lifetime":{"seconds":60}}`, // empty reason
+		`{"capabilities":["clipboard.read"],"requested_lifetime":{"seconds":60}}`,                // missing reason
+		`{"capabilities":["clipboard.read"],"reason":"","requested_lifetime":{"seconds":60}}`,    // empty reason
 		`{"capabilities":["clipboard.read"],"reason":"   ","requested_lifetime":{"seconds":60}}`, // whitespace reason
 	} {
 		result, err := server.handlePreauthorize(&ToolCall{
@@ -239,7 +239,7 @@ func TestListGrantsRejectsOversizedTokensAndFilters(t *testing.T) {
 
 	hugeToken := strings.Repeat("x", 4097)
 	resultToken, err := server.handleListGrants(&ToolCall{
-		Name: "list_grants",
+		Name:      "list_grants",
 		Arguments: json.RawMessage(`{"page_token":"` + hugeToken + `"}`),
 	})
 	if err != nil {
@@ -251,7 +251,7 @@ func TestListGrantsRejectsOversizedTokensAndFilters(t *testing.T) {
 
 	hugeFilter := strings.Repeat("f", 4097)
 	resultFilter, err := server.handleListGrants(&ToolCall{
-		Name: "list_grants",
+		Name:      "list_grants",
 		Arguments: json.RawMessage(`{"filter":"` + hugeFilter + `"}`),
 	})
 	if err != nil {
