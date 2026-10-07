@@ -394,11 +394,6 @@ final class DecisionAudit: @unchecked Sendable {
     /// console renders Activity from this and must not lose a day of history to a crash
     /// during one append.
     func verify() -> AuditVerification {
-        // AN UNREADABLE LOG IS NOT AN INTACT ONE. `try?` with a defaulted empty read-back made
-        // a log this process cannot parse return `isIntact: true, entryCount: 0`, so truncating
-        // or corrupting the file produced a POSITIVE integrity signal. The verdict names it
-        // rather than reporting a clean empty log, because an operator shown "intact" over a
-        // file nobody can read has been told the opposite of the truth.
         guard let readBack = try? AuditEntry.readAll(from: path) else {
             return AuditVerification(
                 entryCount: 0,
@@ -407,6 +402,12 @@ final class DecisionAudit: @unchecked Sendable {
                 defect: .unreadable,
             )
         }
+        return verify(readBack: readBack)
+    }
+
+    /// Verifies the log over an already-read ReadBack snapshot, eliminating TOCTOU between
+    /// verification and rendering.
+    func verify(readBack: AuditEntry.ReadBack) -> AuditVerification {
         // THE GENESIS IS THE LOG'S OWN, NOT THIS PROCESS'S, and that distinction is the
         // whole reason a restart does not report a broken chain.
         //

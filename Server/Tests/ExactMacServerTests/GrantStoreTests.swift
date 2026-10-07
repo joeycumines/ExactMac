@@ -976,4 +976,52 @@ final class GrantStoreTests: XCTestCase {
             holder: identity().code.binding,
         )
     }
+
+    // MARK: - Filter validation tests
+
+    func testListGrantsFilterGrammarValidation() throws {
+        let clock = MovableClock()
+        let (store, _) = try makeStore(clock: clock)
+        let now = clock.now()
+
+        let (emptyResp, emptyErr) = AuthorizationMethods.listGrants(
+            store: store,
+            filter: "",
+            now: now,
+            pageSize: 10,
+            skip: 0
+        )
+        XCTAssertNil(emptyErr)
+        XCTAssertEqual(emptyResp.grants.count, 0)
+
+        let (validResp, validErr) = AuthorizationMethods.listGrants(
+            store: store,
+            filter: "clipboard.read, observation.window",
+            now: now,
+            pageSize: 10,
+            skip: 0
+        )
+        XCTAssertNil(validErr)
+        XCTAssertEqual(validResp.grants.count, 0)
+
+        let (_, emptyTokenErr) = AuthorizationMethods.listGrants(
+            store: store,
+            filter: "clipboard.read,,observation.window",
+            now: now,
+            pageSize: 10,
+            skip: 0
+        )
+        XCTAssertNotNil(emptyTokenErr)
+        XCTAssertEqual(emptyTokenErr?.code, .invalidArgument)
+
+        let (_, unknownTokenErr) = AuthorizationMethods.listGrants(
+            store: store,
+            filter: "clipboard.read,not_a_real_capability",
+            now: now,
+            pageSize: 10,
+            skip: 0
+        )
+        XCTAssertNotNil(unknownTokenErr)
+        XCTAssertEqual(unknownTokenErr?.code, .invalidArgument)
+    }
 }

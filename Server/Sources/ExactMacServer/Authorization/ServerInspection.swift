@@ -169,7 +169,12 @@ public final class ServerInspectionService: @unchecked Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
     ) throws -> DisplayActivityReport {
         let (audit, path) = try resolveAuditAndPath(environment: environment)
-        let verification = audit.verify()
+        let readBackResult = try? AuditEntry.readAll(from: path)
+        let verification = if let readBackResult {
+            audit.verify(readBack: readBackResult)
+        } else {
+            audit.verify()
+        }
 
         let integrity: DisplayIntegrityState = if verification.isIntact {
             .verified(entryCount: verification.entryCount)
@@ -196,7 +201,7 @@ public final class ServerInspectionService: @unchecked Sendable {
             .unreadable(reason: "Audit log integrity check failed")
         }
 
-        let readBack = (try? AuditEntry.readAll(from: path))?.whole ?? []
+        let readBack = readBackResult?.whole ?? []
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH:mm:ss"

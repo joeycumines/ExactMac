@@ -38,9 +38,25 @@ enum AuthorizationMethods {
                 message: "grants could not be read; the store is unavailable",
             ))
         }
-        let wanted = Set(
-            filter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) },
-        )
+        var wanted = Set<String>()
+        if !filter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            for rawToken in filter.split(separator: ",", omittingEmptySubsequences: false) {
+                let token = rawToken.trimmingCharacters(in: .whitespaces)
+                guard !token.isEmpty else {
+                    return (.init(), RPCError(
+                        code: .invalidArgument,
+                        message: "filter contains empty capability identifier",
+                    ))
+                }
+                guard Capability(rawValue: token) != nil else {
+                    return (.init(), RPCError(
+                        code: .invalidArgument,
+                        message: "filter contains unknown capability identifier '\(token)'",
+                    ))
+                }
+                wanted.insert(token)
+            }
+        }
         let matching = store.grantsForDisplay()
             .sorted { $0.id < $1.id }
             .filter { entry in
