@@ -215,11 +215,12 @@ func (c *Config) validate() error {
 	// wait actually lives: an operator who genuinely wants a shorter ceiling lowers the
 	// consent bound (EXACTMAC_CONSENT_TIMEOUT_SECONDS) and this value with it. Lowering only
 	// this side would reintroduce exactly the mismatch being refused.
-	consentWait := ServerConsentTimeoutSeconds
-	if envVal := os.Getenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS"); envVal != "" {
-		if val, err := strconv.Atoi(envVal); err == nil && val >= 0 {
-			consentWait = val
-		}
+	consentWait, err := getEnvAsInt("EXACTMAC_CONSENT_TIMEOUT_SECONDS", ServerConsentTimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	if consentWait <= 0 {
+		return fmt.Errorf("EXACTMAC_CONSENT_TIMEOUT_SECONDS must be positive (got %d)", consentWait)
 	}
 	if c.RequestTimeout < consentWait {
 		return fmt.Errorf(

@@ -422,6 +422,29 @@ func TestFormatGRPCError_DeadlineExceededNamesTheConsentCause(t *testing.T) {
 	}
 }
 
+func TestFormatGRPCError_DeadlineExceededWithCustomRequestTimeout(t *testing.T) {
+	old := requestTimeoutSeconds
+	defer func() { requestTimeoutSeconds = old }()
+
+	cfg := &config.Config{
+		ServerAddr:                     "127.0.0.1:50051",
+		RequestTimeout:                 180,
+		MaxConcurrentRequests:          10,
+		MaxConcurrentRequestsPerClient: 5,
+	}
+	_, errServer := NewMCPServer(cfg)
+	if errServer != nil {
+		t.Logf("NewMCPServer error: %v", errServer)
+	}
+
+	err := status.Error(codes.DeadlineExceeded, "context deadline exceeded")
+	result := formatGRPCError(err, "get_display")
+
+	if !strings.Contains(result, "180 seconds") {
+		t.Errorf("deadline error should quote custom timeout 180: %s", result)
+	}
+}
+
 func TestFormatGRPCError_OutputFormat(t *testing.T) {
 	err := status.Error(codes.NotFound, "window not found")
 	result := formatGRPCError(err, "get_window")

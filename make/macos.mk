@@ -222,9 +222,9 @@ macos.bundle: macos.require-tools macos.build ## Create a clean .app from the Sw
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.plist
 	@$(MACOS_INSTALL) -m 0755 '$(MACOS_BINARY)' '$(MACOS_STAGING_DIR)/Contents/MacOS/$(MACOS_APP_NAME)'
 	@printf 'APPL????' >'$(MACOS_STAGING_DIR)/Contents/PkgInfo'
-	@set -e; for resource_bundle in '$(MACOS_BUILD_DIR)'/*.bundle; do \
+	@for resource_bundle in '$(MACOS_BUILD_DIR)'/*.bundle; do \
 		[ -d "$$resource_bundle" ] || continue; \
-		$(MACOS_DITTO) "$$resource_bundle" '$(MACOS_STAGING_DIR)/Contents/Resources/'$$(basename "$$resource_bundle"); \
+		$(MACOS_DITTO) "$$resource_bundle" '$(MACOS_STAGING_DIR)/Contents/Resources/'$$(basename "$$resource_bundle") || exit 1; \
 	done
 	@$(MACOS_INSTALL) -m 0644 '$(MACOS_ICON_REQUIRED)' '$(MACOS_STAGING_DIR)/Contents/Resources/$(notdir $(MACOS_ICON))'
 	@test -d '$(MACOS_STAGING_DIR)/Contents/Resources/$(notdir $(MACOS_REQUIRED_RESOURCE_BUNDLE))' || { printf 'ERROR: the required resource bundle was not assembled.\n' >&2; exit 1; }

@@ -125,6 +125,32 @@ func TestLoad_ConsentTimeoutSecondsOverride(t *testing.T) {
 	}
 }
 
+func TestLoad_ConsentTimeoutSecondsInvalidOrZero(t *testing.T) {
+	t.Run("invalid_integer", func(t *testing.T) {
+		t.Setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "not-a-number")
+		_, err := Load(TransportStdio)
+		if err == nil || !strings.Contains(err.Error(), "EXACTMAC_CONSENT_TIMEOUT_SECONDS") {
+			t.Fatalf("Load(TransportStdio) error = %v, want invalid integer rejection", err)
+		}
+	})
+
+	t.Run("zero_value", func(t *testing.T) {
+		t.Setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "0")
+		_, err := Load(TransportStdio)
+		if err == nil || !strings.Contains(err.Error(), "must be positive") {
+			t.Fatalf("Load(TransportStdio) error = %v, want positive value requirement", err)
+		}
+	})
+
+	t.Run("negative_value", func(t *testing.T) {
+		t.Setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "-5")
+		_, err := Load(TransportStdio)
+		if err == nil || !strings.Contains(err.Error(), "must be positive") {
+			t.Fatalf("Load(TransportStdio) error = %v, want positive value requirement", err)
+		}
+	})
+}
+
 func TestLoad_PhysicalRequestTimeoutMustFitTimeDuration(t *testing.T) {
 	const maximumDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
 	t.Setenv(

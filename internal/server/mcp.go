@@ -277,6 +277,10 @@ func NewMCPServer(cfg *config.Config) (*MCPServer, error) {
 		return nil, fmt.Errorf("failed to initialize audit logger: %w", err)
 	}
 
+	if cfg.RequestTimeout > 0 {
+		requestTimeoutSeconds = cfg.RequestTimeout
+	}
+
 	s := &MCPServer{
 		cfg:            cfg,
 		ctx:            ctx,
