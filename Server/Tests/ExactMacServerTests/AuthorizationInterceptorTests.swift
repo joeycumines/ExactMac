@@ -1162,7 +1162,7 @@ extension AuthorizationInterceptorTests {
     }
 
     func testRequestIdentifierIncludesRandomSuffix() {
-        let now = MonotonicInstant(nanoseconds: 123456789)
+        let now = MonotonicInstant(nanoseconds: 123_456_789)
         let id1 = AuthorizationInterceptor.requestIdentifier(method: "/exactmac.v1.ExactMac/Click", at: now)
         let id2 = AuthorizationInterceptor.requestIdentifier(method: "/exactmac.v1.ExactMac/Click", at: now)
 

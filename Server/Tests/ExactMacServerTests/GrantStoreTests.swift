@@ -989,7 +989,7 @@ final class GrantStoreTests: XCTestCase {
             filter: "",
             now: now,
             pageSize: 10,
-            skip: 0
+            skip: 0,
         )
         XCTAssertNil(emptyErr)
         XCTAssertEqual(emptyResp.grants.count, 0)
@@ -999,7 +999,7 @@ final class GrantStoreTests: XCTestCase {
             filter: "clipboard.read, observation.window",
             now: now,
             pageSize: 10,
-            skip: 0
+            skip: 0,
         )
         XCTAssertNil(validErr)
         XCTAssertEqual(validResp.grants.count, 0)
@@ -1009,7 +1009,7 @@ final class GrantStoreTests: XCTestCase {
             filter: "clipboard.read,,observation.window",
             now: now,
             pageSize: 10,
-            skip: 0
+            skip: 0,
         )
         XCTAssertNotNil(emptyTokenErr)
         XCTAssertEqual(emptyTokenErr?.code, .invalidArgument)
@@ -1019,7 +1019,7 @@ final class GrantStoreTests: XCTestCase {
             filter: "clipboard.read,not_a_real_capability",
             now: now,
             pageSize: 10,
-            skip: 0
+            skip: 0,
         )
         XCTAssertNotNil(unknownTokenErr)
         XCTAssertEqual(unknownTokenErr?.code, .invalidArgument)

@@ -1078,11 +1078,10 @@ struct AuthorizationInterceptor: ServerInterceptor {
 
     static func requestIdentifier(method: String, at now: MonotonicInstant) -> String {
         var randomBytes = [UInt8](repeating: 0, count: 8)
-        let randomSuffix: String
-        if SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess {
-            randomSuffix = randomBytes.map { String(format: "%02x", $0) }.joined()
+        let randomSuffix: String = if SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess {
+            randomBytes.map { String(format: "%02x", $0) }.joined()
         } else {
-            randomSuffix = String(format: "%016llx", UInt64.random(in: 0 ... UInt64.max))
+            String(format: "%016llx", UInt64.random(in: 0 ... UInt64.max))
         }
         return "\(method)#\(now.nanoseconds)#\(randomSuffix)"
     }
