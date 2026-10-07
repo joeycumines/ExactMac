@@ -595,10 +595,12 @@ func (s *MCPServer) registerTools() {
 					// was given without looking at it.
 					"page_token": map[string]any{
 						"type":        "string",
+						"maxLength":   4096,
 						"description": "Token from a previous response. Opaque: pass it back unexamined.",
 					},
 					"filter": map[string]any{
 						"type":        "string",
+						"maxLength":   4096,
 						"description": "Comma-separated capability ids. Omit for every capability.",
 					},
 				},
@@ -642,7 +644,7 @@ func (s *MCPServer) registerTools() {
 						"required": []string{"seconds"},
 					},
 				},
-				"required": []string{"capabilities", "requested_lifetime"},
+				"required": []string{"capabilities", "requested_lifetime", "reason"},
 			},
 			Handler: s.handlePreauthorize,
 		},

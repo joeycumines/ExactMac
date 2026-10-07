@@ -141,6 +141,9 @@ func TestPreauthorizeIsRefusedWithoutADeclaration(t *testing.T) {
 		`{"reason":"because","requested_lifetime":{"seconds":60}}`,
 		`{"capabilities":["clipboard.read"],"requested_lifetime":{"seconds":0}}`,
 		`{"capabilities":["clipboard.read"],"reason":"because"}`,
+		`{"capabilities":["clipboard.read"],"requested_lifetime":{"seconds":60}}`, // missing reason
+		`{"capabilities":["clipboard.read"],"reason":"","requested_lifetime":{"seconds":60}}`, // empty reason
+		`{"capabilities":["clipboard.read"],"reason":"   ","requested_lifetime":{"seconds":60}}`, // whitespace reason
 	} {
 		result, err := server.handlePreauthorize(&ToolCall{
 			Name: "preauthorize", Arguments: json.RawMessage(arguments),
@@ -149,7 +152,7 @@ func TestPreauthorizeIsRefusedWithoutADeclaration(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !resultIsError(result) {
-			t.Errorf("%s was accepted; an envelope must declare what it covers", arguments)
+			t.Errorf("%s was accepted; an envelope must declare what it covers and why", arguments)
 		}
 	}
 }
@@ -208,5 +211,53 @@ func TestTheReasonTravelsWithAPreauthorization(t *testing.T) {
 	}
 	if agentReasonFromCall(call) != "reading the clipboard for the summary you asked for" {
 		t.Errorf("the metadata path lost the reason: %q", agentReasonFromCall(call))
+	}
+}
+
+func TestPreauthorizeClampsOversizedReasonAndProtectsLifetime(t *testing.T) {
+	server, got := newConsentServer(60)
+
+	longReason := strings.Repeat("a", MaxAgentReasonLength+100)
+	call := &ToolCall{
+		Name: "preauthorize",
+		Arguments: json.RawMessage(`{
+			"capabilities": ["clipboard.read"],
+			"reason": "` + longReason + `",
+			"requested_lifetime": {"seconds": 9999999999999999}
+		}`),
+	}
+	if _, err := server.handlePreauthorize(call); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.reason) != MaxAgentReasonLength {
+		t.Errorf("reason length = %d, want clamped to %d", len(got.reason), MaxAgentReasonLength)
+	}
+}
+
+func TestListGrantsRejectsOversizedTokensAndFilters(t *testing.T) {
+	server := newTestServer()
+
+	hugeToken := strings.Repeat("x", 4097)
+	resultToken, err := server.handleListGrants(&ToolCall{
+		Name: "list_grants",
+		Arguments: json.RawMessage(`{"page_token":"` + hugeToken + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resultIsError(resultToken) {
+		t.Errorf("expected error for oversized page_token, got: %v", resultToken)
+	}
+
+	hugeFilter := strings.Repeat("f", 4097)
+	resultFilter, err := server.handleListGrants(&ToolCall{
+		Name: "list_grants",
+		Arguments: json.RawMessage(`{"filter":"` + hugeFilter + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resultIsError(resultFilter) {
+		t.Errorf("expected error for oversized filter, got: %v", resultFilter)
 	}
 }

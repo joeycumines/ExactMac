@@ -7,11 +7,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	pb "github.com/joeycumines/ExactMac/gen/go/exactmac/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+// maxFilterLength bounds the filter parameter length.
+const maxFilterLength = 4096
+
+// maxPageTokenLength bounds the page_token parameter length.
+const maxPageTokenLength = 4096
+
+// maxRequestedLifetimeSeconds is the maximum duration in seconds that can be safely
+// converted to time.Duration without integer overflow (fits within int64 nanoseconds).
+const maxRequestedLifetimeSeconds = int64((1<<63 - 1) / int64(time.Second))
 
 // handleListGrants lists the permissions the caller currently holds.
 //
@@ -19,6 +30,12 @@ import (
 // asking again costs the operator a prompt they have already answered. This is the tool that
 // makes the difference between one prompt for a task and one per step.
 func durationpbNew(seconds int64) *durationpb.Duration {
+	if seconds <= 0 {
+		return durationpb.New(0)
+	}
+	if seconds > maxRequestedLifetimeSeconds {
+		seconds = maxRequestedLifetimeSeconds
+	}
 	return durationpb.New(time.Duration(seconds) * time.Second)
 }
 
@@ -37,6 +54,12 @@ func (s *MCPServer) handleListGrants(call *ToolCall) (*ToolResult, error) {
 		if err := json.Unmarshal(call.Arguments, &params); err != nil {
 			return errorResultf("Invalid parameters: %v", err), nil
 		}
+	}
+	if len(params.PageToken) > maxPageTokenLength {
+		return errorResult("page_token exceeds maximum allowed length of 4096 bytes"), nil
+	}
+	if len(params.Filter) > maxFilterLength {
+		return errorResult("filter exceeds maximum allowed length of 4096 bytes"), nil
 	}
 	// The filter is passed through VERBATIM so the server owns its grammar. Splitting it here
 	// would be a second dialect for the same string, and the two would disagree on the first
@@ -104,6 +127,16 @@ func (s *MCPServer) handlePreauthorize(call *ToolCall) (*ToolResult, error) {
 	if err := json.Unmarshal(call.Arguments, &params); err != nil {
 		return errorResultf("Invalid parameters: %v", err), nil
 	}
+	trimmedReason := strings.TrimSpace(params.Reason)
+	if trimmedReason == "" {
+		return errorResult(
+			"reason is required: a pre-authorization is a standing permission and the " +
+				"operator must know why it is being requested",
+		), nil
+	}
+	if runes := []rune(trimmedReason); len(runes) > MaxAgentReasonLength {
+		trimmedReason = string(runes[:MaxAgentReasonLength])
+	}
 	if len(params.Capabilities) == 0 {
 		return errorResult(
 			"capabilities is required: a pre-authorization must declare what it covers, " +
@@ -118,7 +151,7 @@ func (s *MCPServer) handlePreauthorize(call *ToolCall) (*ToolResult, error) {
 	}
 
 	envelope, err := s.client.PreauthorizeEnvelope(ctx, &pb.PreauthorizeEnvelopeRequest{
-		Reason:            params.Reason,
+		Reason:            trimmedReason,
 		Capabilities:      params.Capabilities,
 		Scopes:            params.Scopes,
 		RequestedLifetime: durationpbNew(params.RequestedLifetime.Seconds),
