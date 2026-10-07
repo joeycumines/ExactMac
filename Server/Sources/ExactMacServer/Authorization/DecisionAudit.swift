@@ -520,9 +520,10 @@ extension AuditEntry {
 
     static func writeAll(_ data: Data, to descriptor: Int32) throws {
         try data.withUnsafeBytes { raw in
+            guard let baseAddress = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                let written = Darwin.write(descriptor, baseAddress.advanced(by: offset), raw.count - offset)
                 if written > 0 {
                     offset += written
                     continue

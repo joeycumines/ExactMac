@@ -496,7 +496,7 @@ final class PeerIdentifyingListenerFactory: HTTP2ServerTransport.ListenerFactory
             // Only now, once the node exists and is this process's, does the claim become the
             // fact the shutdown path is allowed to act on.
             claim.withLock { $0 = held }
-            logger.info("gRPC listener bound at \(self.socketPath, privacy: .public)")
+            logger.info("gRPC listener bound at \(self.socketPath, privacy: .private)")
             return channel
         } catch {
             // A bind that failed leaves the claim to drop, and dropping it removes only a

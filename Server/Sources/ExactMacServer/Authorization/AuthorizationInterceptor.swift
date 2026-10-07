@@ -870,8 +870,9 @@ struct AuthorizationInterceptor: ServerInterceptor {
             // an invariant claimed two load-bearing controls that were dead code.
             if let proof = answer.ceremonyProof {
                 let now = runtime.clock.now()
+                runtime.ceremonyLedger.pruneExpired(at: now)
                 guard proof.authorizes(request, nonce: decision.ceremonyNonce ?? "", now: now),
-                      runtime.ceremonyLedger.spend(proof.nonce)
+                      runtime.ceremonyLedger.spend(proof.nonce, expiresAt: proof.expiresAt)
                 else {
                     logger.error(
                         "A ceremony proof for \(request.id.rawValue, privacy: .private) did not authorise this decision.",
@@ -1075,8 +1076,15 @@ struct AuthorizationInterceptor: ServerInterceptor {
         return .mcpProxy
     }
 
-    private static func requestIdentifier(method: String, at now: MonotonicInstant) -> String {
-        "\(method)#\(now.nanoseconds)"
+    static func requestIdentifier(method: String, at now: MonotonicInstant) -> String {
+        var randomBytes = [UInt8](repeating: 0, count: 8)
+        let randomSuffix: String
+        if SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess {
+            randomSuffix = randomBytes.map { String(format: "%02x", $0) }.joined()
+        } else {
+            randomSuffix = String(format: "%016llx", UInt64.random(in: 0 ... UInt64.max))
+        }
+        return "\(method)#\(now.nanoseconds)#\(randomSuffix)"
     }
 
     private func collect<Input: Sendable>(

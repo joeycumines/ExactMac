@@ -80,22 +80,66 @@ public struct BiometricProof: Sendable, Equatable, Hashable {
 /// A proof that authorizes twice is not a proof, so the check-and-spend has to be atomic:
 /// two requests racing the same nonce must not both win it.
 final class BiometricNonceLedger: Sendable {
-    private let state = Synchronization.Mutex<Set<String>>([])
+    private struct Entry {
+        let expiresAt: MonotonicInstant?
+    }
+
+    private struct State {
+        var entries: [String: Entry] = [:]
+        var order: [String] = []
+    }
+
+    private let capacity: Int
+    private let state = Synchronization.Mutex<State>(State())
+
+    init(capacity: Int = 1024) {
+        self.capacity = max(1, capacity)
+    }
 
     /// - Returns: True when the nonce had not been spent and is now spent.
     @discardableResult
-    func spend(_ nonce: String) -> Bool {
-        state.withLock { $0.insert(nonce).inserted }
+    func spend(_ nonce: String, expiresAt: MonotonicInstant? = nil) -> Bool {
+        state.withLock { s in
+            if s.entries[nonce] != nil {
+                return false
+            }
+            // Enforce capacity bound: prune oldest entry if at capacity
+            while s.order.count >= capacity {
+                let oldest = s.order.removeFirst()
+                s.entries.removeValue(forKey: oldest)
+            }
+            s.entries[nonce] = Entry(expiresAt: expiresAt)
+            s.order.append(nonce)
+            return true
+        }
     }
 
     func hasSpent(_ nonce: String) -> Bool {
-        state.withLock { $0.contains(nonce) }
+        state.withLock { $0.entries[nonce] != nil }
     }
 
     /// Expired proofs leave the ledger, so a nonce cannot be reused by a later decision that
     /// happens to be issued the same string.
     func forget(_ nonce: String) {
-        state.withLock { _ = $0.remove(nonce) }
+        state.withLock { s in
+            s.entries.removeValue(forKey: nonce)
+            s.order.removeAll { $0 == nonce }
+        }
+    }
+
+    /// Prunes nonces that have expired by `now`.
+    func pruneExpired(at now: MonotonicInstant) {
+        state.withLock { s in
+            var remainingOrder: [String] = []
+            for nonce in s.order {
+                if let entry = s.entries[nonce], let expiry = entry.expiresAt, expiry <= now {
+                    s.entries.removeValue(forKey: nonce)
+                } else {
+                    remainingOrder.append(nonce)
+                }
+            }
+            s.order = remainingOrder
+        }
     }
 }
 

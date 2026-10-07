@@ -95,7 +95,8 @@ public final class PostureSource: Sendable {
         var offset = 0
         while offset < data.count {
             let written = data.withUnsafeBytes { raw -> Int in
-                Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), data.count - offset)
+                guard let baseAddress = raw.baseAddress else { return 0 }
+                return Darwin.write(descriptor, baseAddress.advanced(by: offset), data.count - offset)
             }
             if written > 0 {
                 offset += written

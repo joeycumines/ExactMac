@@ -1160,6 +1160,23 @@ extension AuthorizationInterceptorTests {
         XCTAssertEqual(AuthorizationInterceptor.legacyAgentReasonMetadataKey, "exactmac-agent-reason")
         XCTAssertEqual(AuthorizationInterceptor.mcpProxyMetadataKey, "exactmac-origin")
     }
+
+    func testRequestIdentifierIncludesRandomSuffix() {
+        let now = MonotonicInstant(nanoseconds: 123456789)
+        let id1 = AuthorizationInterceptor.requestIdentifier(method: "/exactmac.v1.ExactMac/Click", at: now)
+        let id2 = AuthorizationInterceptor.requestIdentifier(method: "/exactmac.v1.ExactMac/Click", at: now)
+
+        XCTAssertNotEqual(id1, id2, "Request IDs generated at the same timestamp must have random suffixes to prevent collisions")
+
+        let parts1 = id1.split(separator: "#")
+        let parts2 = id2.split(separator: "#")
+
+        XCTAssertEqual(parts1.count, 3)
+        XCTAssertEqual(parts2.count, 3)
+        XCTAssertEqual(parts1[0], "/exactmac.v1.ExactMac/Click")
+        XCTAssertEqual(parts1[1], "123456789")
+        XCTAssertEqual(parts1[2].count, 16, "Random hex suffix should be 16 hex chars (8 bytes)")
+    }
 }
 
 /// The ceremony proof a test's operator interface hands back.

@@ -254,6 +254,36 @@ final class BiometricAuthenticationTests: XCTestCase {
         XCTAssertTrue(ledger.spend("nonce-b"))
     }
 
+    func testBiometricNonceLedgerCapacityBoundingAndPruning() {
+        let ledger = BiometricNonceLedger(capacity: 3)
+        let t1 = MonotonicInstant(nanoseconds: 2000)
+        let t2 = MonotonicInstant(nanoseconds: 3000)
+
+        ledger.spend("n1", expiresAt: t1)
+        ledger.spend("n2", expiresAt: t2)
+        ledger.spend("n3", expiresAt: t2)
+
+        XCTAssertTrue(ledger.hasSpent("n1"))
+        XCTAssertTrue(ledger.hasSpent("n2"))
+        XCTAssertTrue(ledger.hasSpent("n3"))
+
+        // Exceed capacity: oldest unpruned entry (n1) is evicted
+        ledger.spend("n4", expiresAt: t2)
+        XCTAssertFalse(ledger.hasSpent("n1"), "n1 should have been evicted due to capacity bound")
+        XCTAssertTrue(ledger.hasSpent("n4"))
+
+        // Prune expired at t1: expired entries are cleaned up
+        ledger.pruneExpired(at: t1)
+        XCTAssertTrue(ledger.hasSpent("n2"))
+        XCTAssertTrue(ledger.hasSpent("n3"))
+        XCTAssertTrue(ledger.hasSpent("n4"))
+
+        ledger.pruneExpired(at: t2)
+        XCTAssertFalse(ledger.hasSpent("n2"), "n2 should be pruned at t2")
+        XCTAssertFalse(ledger.hasSpent("n3"), "n3 should be pruned at t2")
+        XCTAssertFalse(ledger.hasSpent("n4"), "n4 should be pruned at t2")
+    }
+
     /// Concurrency: the ledger is the thing standing between a replayed ceremony and a second
     /// authorization, so it is tested under the race it exists to settle.
     func testOnlyOneOfManyConcurrentSpendsWins() async {
