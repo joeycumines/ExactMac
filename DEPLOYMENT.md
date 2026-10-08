@@ -167,6 +167,7 @@ The console application targets build, package, sign, and install the menu-bar a
 The console bundle packages two visual assets:
 
 - **Application Icon (`AppIcon.icns`)**: Generated from `Console/Resources/AppIcon-2048.png`. The background outside the shield emblem is transparent; the dark tile container and white rounded corners are removed. The `.icns` file is built from `Console/Resources/AppIcon.iconset/` and installed to `Contents/Resources/AppIcon.icns`. `Info.plist` declares `CFBundleIconFile = AppIcon.icns`.
+  - **Optical scaling per size class**: list-style consumers (System Settings panes, Finder list views) composite transparent artwork inset on a system plate, so the small representations (`icon_16x16` through `icon_32x32@2x`, ≤ 32 pt) are exported full-bleed — the emblem cropped to its alpha bounds and scaled to the full canvas — which keeps the emblem at visual parity with peer icons in those lists. Representations ≥ 128 px retain the emblem's natural padding for the Dock, Get Info, and Launchpad, where full-bleed would read oversized against squircle artwork.
 - **Menu Bar Status Item (`MenuBarGlyph.svg`)**: Vector stencil traced from the emblem geometry and sized for an 18x18pt status bar bounding box (16x16pt glyph with 1pt padding). Rendered via AppKit with `isTemplate = true` for native appearance matching macOS menu bar items.
   - **Running / Pending**: Template emblem matching system menu bar items.
   - **Stopped**: Drawn at 38% opacity (`fraction: 0.38`), matching inactive macOS status items.
@@ -365,6 +366,8 @@ pkill -f "exactmac mcp"
 **A TCC grant disappears after rebuilding.** An ad-hoc signature changes on
 every rebuild, and the grant is keyed to the signature. This is expected; a
 Developer ID signature does not have the problem. See [Signing](#signing).
+
+**The app icon looks stale or padded after a reinstall.** macOS icon services caches per-bundle thumbnails outside the bundle, so replacing `Contents/Resources/AppIcon.icns` can leave System Settings, the Dock, and Finder showing the previous artwork until the cache invalidates. The bundle on disk is authoritative: `gmake exactmac.console-register` re-registers it, and a logout or restart clears any residual thumbnail. The small representations (≤ 32 pt) are intentionally full-bleed; see [Icon and Asset Pipeline](#icon-and-asset-pipeline).
 
 **The privacy prompt does not appear.** The product never prompts
 programmatically — macOS does, and only once per grant. If the prompt has
