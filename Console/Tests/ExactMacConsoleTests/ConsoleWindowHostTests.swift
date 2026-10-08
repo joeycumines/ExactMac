@@ -25,7 +25,11 @@ struct ConsoleWindowHostTests {
     final class FakeApplication: ConsoleApplication {
         private(set) var transitions: [String] = []
         private(set) var activations = 0
+        private(set) var attentionRequests = 0
         private var regular = false
+        /// Settable so a test can pin whether the console is already frontmost, which is
+        /// what decides whether a new request asks for attention at all.
+        var isActive = false
 
         var isRegular: Bool {
             regular
@@ -43,6 +47,10 @@ struct ConsoleWindowHostTests {
 
         func activate() {
             activations += 1
+        }
+
+        func requestUserAttention() {
+            attentionRequests += 1
         }
     }
 
@@ -231,6 +239,115 @@ struct ConsoleWindowHostTests {
 
         #expect(application.isRegular, "the prompt must be a real window, not a popover line")
         #expect(model.windows.window(forTesting: .approval) != nil)
+    }
+
+    @Test
+    func `the approval window persists in the foreground as a floating window`() throws {
+        let application = FakeApplication()
+        let host = ConsoleWindowHost(application: application)
+        let model = ConsoleModel(windows: host, ceremony: nil)
+        model.deliverPending(ConsoleDecisionTests.fixtureRequest())
+
+        let window = try #require(host.window(forTesting: .approval))
+        // FLOATING, not normal: a normal window sinks behind whatever the operator
+        // switches to next, and a consent request that expires unseen is a denial the
+        // operator never knew about. Floating keeps it above other apps' windows without
+        // becoming key, so the keyboard stays where the operator left it.
+        #expect(window.level == .floating)
+        #expect(
+            window.collectionBehavior.contains(.canJoinAllSpaces),
+            "the request must follow the operator across Spaces rather than waiting on the one it opened on",
+        )
+        #expect(
+            window.collectionBehavior.contains(.fullScreenAuxiliary),
+            "a full-screen app must not be able to hide the request",
+        )
+        #expect(
+            application.transitions.isEmpty,
+            "persisting in the foreground is a window-level property, not an activation: nothing about arriving may take focus",
+        )
+    }
+
+    @Test
+    func `a new request asks for attention only when the console is not frontmost`() {
+        // NOT FRONTMOST: the operator is elsewhere, so the request must ask to be seen.
+        let application = FakeApplication()
+        application.isActive = false
+        let model = ConsoleModel(windows: ConsoleWindowHost(application: application), ceremony: nil)
+        model.deliverPending(ConsoleDecisionTests.fixtureRequest())
+        #expect(
+            application.attentionRequests == 1,
+            "a request arriving while the operator is elsewhere must ask for attention exactly once",
+        )
+
+        // FRONTMOST: the operator is already looking, and asking for attention from an
+        // app that already has it is noise, not attention.
+        let activeApplication = FakeApplication()
+        activeApplication.isActive = true
+        let activeModel = ConsoleModel(
+            windows: ConsoleWindowHost(application: activeApplication),
+            ceremony: nil,
+        )
+        activeModel.deliverPending(ConsoleDecisionTests.fixtureRequest())
+        #expect(
+            activeApplication.attentionRequests == 0,
+            "no attention request when the console is already the frontmost app",
+        )
+    }
+
+    @Test
+    func `advancing to a queued request reuses the window and does not ask for attention again`() async throws {
+        let application = FakeApplication()
+        let windows = ConsoleWindowHost(application: application)
+        let model = ConsoleModel(presentation: .application, windows: windows, ceremony: nil)
+        let (req1, id1, dec1) = ServerFixture.request(requestID: "t3-queue-1")
+        let (req2, id2, dec2) = ServerFixture.request(requestID: "t3-queue-2")
+
+        let task1 = Task { @MainActor in
+            await model.answer(request: req1, identity: id1, decision: dec1)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil { break }
+            await Task.yield()
+        }
+        let task2 = Task { @MainActor in
+            await model.answer(request: req2, identity: id2, decision: dec2)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty { break }
+            await Task.yield()
+        }
+        let first = try #require(windows.window(forTesting: .approval))
+        let attentionAfterArrivals = application.attentionRequests
+        // EXACTLY ONE attention request across both arrivals: the first arrival surfaced
+        // a window that did not exist and asked to be seen; the second QUEUED behind an
+        // already-visible floating prompt and did not re-request attention — the window
+        // is already on screen, so asking again is noise rather than attention.
+        #expect(
+            attentionAfterArrivals == 1,
+            "a queued request behind a visible prompt must not re-request attention: \(attentionAfterArrivals)",
+        )
+
+        // Answering the first request advances to the second: the window is REUSED and
+        // its content replaced, never closed-and-reopened, so there is no moment the
+        // operator sees an empty screen, no policy flip mid-transition, and no second
+        // request for attention on a continuation the operator is already watching.
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await task1.value
+        let second = try #require(windows.window(forTesting: .approval))
+        #expect(first === second, "the advance must reuse the same window")
+        #expect(model.pendingPrompt?.requestID == "t3-queue-2")
+        #expect(
+            application.transitions.isEmpty,
+            "advancing the queue is a continuation, not a focus event: \(application.transitions)",
+        )
+        #expect(
+            application.attentionRequests == attentionAfterArrivals,
+            "a continuation does not ask for attention again",
+        )
+
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await task2.value
     }
 }
 

@@ -12,9 +12,15 @@ import SwiftUI
 @MainActor
 protocol ConsoleApplication: AnyObject {
     var isRegular: Bool { get }
+    /// Whether the console is the frontmost (active) application. The honest signal
+    /// for "is the operator already looking at us", which decides whether a new request
+    /// needs to ask for attention at all.
+    var isActive: Bool { get }
     func becomeRegular()
     func becomeAccessory()
     func activate()
+    /// Asks the system to draw the operator's attention to the console.
+    func requestUserAttention()
 }
 
 /// The live application.
@@ -42,6 +48,14 @@ final class LiveConsoleApplication: ConsoleApplication {
 
     func activate() {
         application.activate(ignoringOtherApps: true)
+    }
+
+    var isActive: Bool {
+        application.isActive
+    }
+
+    func requestUserAttention() {
+        application.requestUserAttention(.informationalRequest)
     }
 }
 
@@ -120,6 +134,17 @@ final class ConsoleWindowHost {
         updateIfPresent: Bool = false,
         @ViewBuilder content: () -> some View,
     ) {
+        // EVERY NEW REQUEST asks for the operator's attention when the console is not
+        // already frontmost — including one that QUEUES behind an active prompt, because
+        // the operator may have looked away between arrivals and the queue is invisible
+        // until this request becomes the active one. The two paths that are NOT new
+        // requests do not ask: `activates` is the operator's own click (they are already
+        // here), and `updateIfPresent` alone is a content refresh of the request the
+        // operator is already looking at (re-opening from the popover, expanding options,
+        // or the queue advance onto a window that never closed).
+        if surface == .approval, !activates, !updateIfPresent {
+            requestAttentionIfNeeded()
+        }
         if activates {
             becomeActiveApplication()
         }
@@ -178,6 +203,16 @@ final class ConsoleWindowHost {
         }
         window.isReleasedWhenClosed = false
         window.delegate = windowDelegate
+        if surface == .approval {
+            // THE APPROVAL WINDOW PERSISTS IN THE FOREGROUND. A consent request expires,
+            // and one that sinks behind the operator's other windows becomes a denial they
+            // never saw. Floating keeps it above normal windows without becoming key, so
+            // the keyboard stays where the operator left it; the collection behavior keeps
+            // it visible across Spaces and beside a full-screen app, which is what
+            // "cannot be required to go looking for it" actually demands.
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        }
         window.center()
         windows[surface] = window
         bringToFront(surface, activates: activates)
@@ -206,6 +241,12 @@ final class ConsoleWindowHost {
     ) {
         guard let window = windows[surface] else { return }
         window.contentView = NSHostingView(rootView: content())
+        // Replacing the content ALSO brings the window forward: a surface showing
+        // something new must not sit behind the app the operator was using, or the new
+        // content is invisible and the request it carries goes unanswered. This is the
+        // half that keeps a queued request visible when the active one is answered and
+        // the window is reused rather than reopened.
+        bringToFront(surface, activates: false)
     }
 
     /// The height a surface's content asks for, which is what the window is sized from.
@@ -258,6 +299,14 @@ final class ConsoleWindowHost {
     func activateForCeremony() {
         becomeActiveApplication()
         application.activate()
+    }
+
+    /// Asks for the operator's attention, but only when the console is not already the
+    /// frontmost app. A no-op when it is: the operator is already looking, and asking for
+    /// attention from an app that already has it is noise, not attention.
+    private func requestAttentionIfNeeded() {
+        guard !application.isActive else { return }
+        application.requestUserAttention()
     }
 
     private func windowClosed(_ closingWindow: NSWindow) {
