@@ -1,3 +1,4 @@
+import ExactMacServer
 import Foundation
 
 /// The ceremony the server decided is required, behind a protocol.
@@ -32,6 +33,14 @@ extension BiometricCeremony: CeremonyPerforming {}
 /// place a vague sentence does damage.
 enum CeremonyReason {
     /// What the option permits, in the words the operator is agreeing to.
+    ///
+    /// THE DURATIONS ARE THE OFFER'S OWN, never remembered strings. This sentence used to
+    /// say "until you revoke it" for a grant that runs fifteen minutes and "until ExactMac
+    /// quits" for one that runs eight hours — a lie the operator's fingerprint was
+    /// endorsing, because the sensor prompt is what they are agreeing TO. Each duration is
+    /// read from the offered option the server actually attached to this request; an option
+    /// the offer does not carry falls back to the server's envelope ceiling, which is the
+    /// widest any of these can run.
     static func compose(
         request: PendingRequest,
         option: OptionRow.Kind,
@@ -40,14 +49,27 @@ enum CeremonyReason {
         let permits = switch option {
         case .deny: "deny this request"
         case .once: "allow this one request for \(request.scopeDescription)"
-        case .target: "allow \(request.scopeDescription) until you revoke it"
-        case .session: "allow every app this agent touches until ExactMac quits"
-        case .envelope: "pre-authorize a declared batch for up to 8 hours"
-        case .global: "allow every app, every time, until you revoke it"
+        case .target: "allow \(request.scopeDescription) for \(duration(of: .target, in: request))"
+        case .session: "allow every app this agent touches for \(duration(of: .session, in: request))"
+        case .envelope: "pre-authorize these capabilities for up to \(duration(of: .envelope, in: request))"
+        case .global: "allow every app, every time, for \(duration(of: .global, in: request))"
         }
         let asked = "ExactMac asks to \(permits)"
         let caller = "\(request.executablePath) called \(request.rpcName)"
         guard let failure else { return "\(caller). \(asked)." }
         return "\(caller). \(asked). It did not happen: \(failure.explanation)."
+    }
+
+    /// The offered option's own duration in the operator's words, falling back to the
+    /// server's envelope ceiling — the widest any grant can run — when the offer does not
+    /// carry the option.
+    private static func duration(of kind: OptionRow.Kind, in request: PendingRequest) -> String {
+        if let offered = request.offered.first(where: { $0.kind == kind }),
+           let seconds = offered.durationSeconds,
+           seconds > 0
+        {
+            return PendingRequest.humanDuration(seconds)
+        }
+        return PendingRequest.humanDuration(ServerConfig.defaultMaximumEnvelopeSeconds)
     }
 }

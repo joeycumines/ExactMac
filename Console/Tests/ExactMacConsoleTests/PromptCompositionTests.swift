@@ -194,10 +194,17 @@ struct PromptCompositionTests {
     }
 
     @Test
-    func `The prompt says how long the operator has`() {
-        // The prompt wires the live configured consent timeout into clockText.
-        let defaultTimeout = ServerConfig.defaultConsentTimeoutSeconds
-        #expect(Self.request().clockText == "decides in \(defaultTimeout)s")
+    func `The prompt says how long the operator has, in minutes and seconds`() {
+        // The prompt wires the live configured consent timeout into clockText, in M:SS
+        // rather than raw seconds: "decides in 90s" is a number the operator has to
+        // convert, "decides in 1:30" is one they can read. Asserted against the
+        // request's OWN timeout rather than a constant, so the format and the value
+        // cannot drift apart — and no literal here, because the process environment
+        // may legitimately carry a different value while this suite runs.
+        let request = Self.request()
+        #expect(
+            request.clockText == "decides in \(PendingRequest.clockLabel(request.consentTimeoutSeconds))",
+        )
     }
 
     @Test
@@ -475,5 +482,50 @@ struct PromptCompositionTests {
 
         let denialField = NoteField(text: .constant(""), isDenied: true)
         #expect(denialField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DENIAL")
+    }
+}
+
+/// The console and the server must read the SAME timeout variable.
+///
+/// The console used to read `EXACTMAC_CONSENT_TIMEOUT` while the server read
+/// `EXACTMAC_CONSENT_TIMEOUT_SECONDS`, so setting the variable changed the server's
+/// deadline while the console kept counting the default — and the countdown a request
+/// showed was a lie about when it would actually expire.
+///
+/// `.serialized` because these tests mutate the process environment.
+@Suite("Console timeout configuration", .serialized)
+struct ConsoleTimeoutEnvTests {
+    @Test
+    func `the console reads the same timeout variable the server reads`() {
+        setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "120", 1)
+        defer { unsetenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS") }
+        let (req, identity, decision) = ServerFixture.request()
+        let pending = PendingRequest(request: req, identity: identity, decision: decision)
+        #expect(pending.consentTimeoutSeconds == 120)
+        #expect(pending.clockText == "decides in 2:00")
+    }
+
+    @Test
+    func `an unset variable falls back to the server's default`() {
+        unsetenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS")
+        let (req, identity, decision) = ServerFixture.request()
+        let pending = PendingRequest(request: req, identity: identity, decision: decision)
+        #expect(pending.consentTimeoutSeconds == ServerConfig.defaultConsentTimeoutSeconds)
+        // THE DEFAULT READS AS 1:30, which is also the acceptance's M:SS literal: the
+        // environment is controlled here, so the literal is safe in this suite and not
+        // in the ones that run beside it.
+        #expect(pending.clockText == "decides in 1:30")
+    }
+}
+
+/// The M:SS formatter, which every operator-facing timeout passes through.
+@Suite("Timeout labels")
+struct TimeoutLabelTests {
+    @Test
+    func `seconds render as minutes and seconds`() {
+        #expect(PendingRequest.clockLabel(90) == "1:30")
+        #expect(PendingRequest.clockLabel(45) == "0:45")
+        #expect(PendingRequest.clockLabel(600) == "10:00")
+        #expect(PendingRequest.clockLabel(59) == "0:59")
     }
 }

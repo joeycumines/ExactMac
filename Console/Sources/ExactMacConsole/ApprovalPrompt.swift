@@ -1,3 +1,4 @@
+import ExactMacServer
 import SwiftUI
 
 /// One process in the caller's ancestry.
@@ -206,6 +207,10 @@ struct ApprovalPrompt: View {
     let risk: String
     let riskDot: Color
     let clock: String?
+    /// The request's actual consent timeout in seconds. The expired line states this
+    /// value rather than a remembered constant: a prompt that says "45 seconds" while
+    /// the server waits 90 is a prompt that lies about its own deadline.
+    let consentTimeoutSeconds: Int
     let reason: String?
     let implication: String?
     let tree: [CallerTree.Row]
@@ -232,6 +237,7 @@ struct ApprovalPrompt: View {
         risk: String,
         riskDot: Color,
         clock: String? = nil,
+        consentTimeoutSeconds: Int = ServerConfig.defaultConsentTimeoutSeconds,
         reason: String? = nil,
         implication: String? = nil,
         tree: [CallerTree.Row],
@@ -256,6 +262,7 @@ struct ApprovalPrompt: View {
         self.risk = risk
         self.riskDot = riskDot
         self.clock = clock
+        self.consentTimeoutSeconds = consentTimeoutSeconds
         self.reason = reason
         self.implication = implication
         self.tree = tree
@@ -536,16 +543,25 @@ struct ApprovalPrompt: View {
         let sub: String
         switch state {
         case .denied:
+            // THE NOTE LINE IS GONE because it said the note "went back to the agent",
+            // and it does not: the note travels with the decision into the decision
+            // audit log (AuthorizationInterceptor records it as `operatorNote`), which
+            // the operator can read in Activity. Stating a destination the operator
+            // cannot check is exactly the copy defect this pass removes.
             headline = "Denied"
-            sub = "Your note went back to the agent: use the scoped option, not this one."
+            sub = "The request was denied. Nothing was granted."
         case .expired:
             headline = "Expired unanswered"
-            sub = "After 45 seconds with no decision the request was denied. "
-                + "Nothing was granted."
+            // THE REQUEST'S OWN TIMEOUT, in the same M:SS the countdown showed, so the
+            // deadline the operator watched and the one this line recalls are visibly the
+            // same number. It used to say "45 seconds" whatever the server was actually
+            // waiting, which made the settled line lie about its own deadline.
+            sub = "After \(PendingRequest.clockLabel(consentTimeoutSeconds)) with no decision "
+                + "the request was denied. Nothing was granted."
         default:
             headline = "No way to ask"
             sub = "Nothing could put this question in front of you, so it was denied. "
-                + "This is the safe direction."
+                + "Nothing was granted."
         }
         return VStack(alignment: .leading, spacing: Design.Space.tight) {
             Text(headline)

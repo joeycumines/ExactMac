@@ -589,6 +589,9 @@ final class ConsoleModel {
                 risk: request.riskClass.label,
                 riskDot: request.riskClass.dot,
                 clock: request.clockText,
+                // The request's ACTUAL timeout, so the expired line states the deadline
+                // this request really ran rather than a remembered constant.
+                consentTimeoutSeconds: request.consentTimeoutSeconds,
                 reason: request.agentReason,
                 implication: request.implicationText,
                 tree: CallerTree.rows(for: request),
@@ -1128,8 +1131,7 @@ final class ConsoleModel {
             failClosed = (
                 "Denied until ExactMac can ask you",
                 "Every request that needs consent is being denied, because nothing can put "
-                    + "the question in front of you. Nothing ran and no grant was created. "
-                    + "This is the safe direction.",
+                    + "the question in front of you. Nothing ran and no grant was created.",
             )
         case .degraded:
             failClosed = (
@@ -1292,7 +1294,11 @@ struct PendingRequest: Equatable {
             .sorted()
         requiresBiometric = decision.biometric.reason != nil
         biometricReason = decision.biometric.reason
-        let envTimeout = ProcessInfo.processInfo.environment["EXACTMAC_CONSENT_TIMEOUT"].flatMap(Int.init)
+        // THE SERVER'S ENV VAR NAME, verbatim. The console used to read a differently
+        // named variable than the server, so setting one changed the server's timeout
+        // while the console kept counting the default — and the countdown a request
+        // showed was a lie about when it would actually expire.
+        let envTimeout = ProcessInfo.processInfo.environment["EXACTMAC_CONSENT_TIMEOUT_SECONDS"].flatMap(Int.init)
         consentTimeoutSeconds = (envTimeout != nil && envTimeout! > 0) ? envTimeout! : ServerConfig.defaultConsentTimeoutSeconds
         isRevokeAll = false
         offered = decision.offeredDecisions.map { option in
@@ -1402,9 +1408,21 @@ struct PendingRequest: Equatable {
     /// draws a countdown and the prompt was passing nil, so nothing on screen said the
     /// request would expire — and a request that expires silently is one the operator can
     /// walk away from without knowing it.
+    ///
+    /// FORMATTED AS M:SS rather than raw seconds, because "decides in 90s" is a number an
+    /// operator has to convert and "decides in 1:30" is one they can read.
     var clockText: String? {
         guard consentTimeoutSeconds > 0 else { return nil }
-        return "decides in \(consentTimeoutSeconds)s"
+        return "decides in \(Self.clockLabel(consentTimeoutSeconds))"
+    }
+
+    /// A duration in M:SS, for every operator-facing place a timeout is stated. One
+    /// formatter so the countdown, the expired line and the envelope duration cannot
+    /// disagree about what the same number of seconds looks like.
+    static func clockLabel(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return "\(minutes):" + String(format: "%02d", remainder)
     }
 
     /// The biometric sentence, and what it says when no ceremony is required.
@@ -1504,7 +1522,11 @@ struct PendingRequest: Equatable {
 
     /// Seconds in the operator's words: the largest true unit, so 7200 reads "2 hours" and
     /// 900 reads "15 minutes", not "7200 seconds".
-    private static func humanDuration(_ seconds: Int) -> String {
+    ///
+    /// INTERNAL rather than private because the sentence beside the sensor must state the
+    /// same durations the prompt does, and both are derived from the offer rather than
+    /// from remembered constants.
+    static func humanDuration(_ seconds: Int) -> String {
         if seconds >= 3600, seconds % 3600 == 0 {
             let hours = seconds / 3600
             return hours == 1 ? "1 hour" : "\(hours) hours"

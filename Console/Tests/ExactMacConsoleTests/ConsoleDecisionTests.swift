@@ -270,6 +270,19 @@ struct ConsoleDecisionTests {
         #expect(reason.contains("/usr/local/bin/exactmac"))
         #expect(reason.contains("exactmac.v1.ExactMac/GetClipboard"))
         #expect(reason.contains("every app, every time"), "a standing grant must say so plainly: \(reason)")
+        // THE DURATION IS THE OFFER'S OWN. The fixture's session option carries a real
+        // duration, so the session sentence must state it — never "until ExactMac
+        // quits", which was the lie this copy used to carry.
+        let sessionReason = CeremonyReason.compose(request: request, option: .session)
+        let offeredSeconds = request.offered.first { $0.kind == .session }?.durationSeconds ?? 0
+        #expect(
+            sessionReason.contains(PendingRequest.humanDuration(offeredSeconds)),
+            "the session sentence must state the offer's actual duration: \(sessionReason)",
+        )
+        #expect(
+            !sessionReason.contains("until ExactMac quits"),
+            "the sensor sentence must not claim a duration the grant does not have: \(sessionReason)",
+        )
     }
 
     @Test

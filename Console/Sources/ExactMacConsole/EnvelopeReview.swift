@@ -142,7 +142,7 @@ struct EnvelopeReview: View {
 
             VStack(alignment: .leading, spacing: Design.Space.three) {
                 VStack(alignment: .leading, spacing: Design.Space.one) {
-                    Text("Pre-authorize a batch of capabilities")
+                    Text("Pre-authorize these capabilities")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Design.Ink.textPrimary)
                     Text("\(capabilities.count) capabilities  ·  requested by \(requester)")

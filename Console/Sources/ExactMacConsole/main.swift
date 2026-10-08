@@ -126,7 +126,7 @@ if ProcessInfo.processInfo.environment["GRPC_UNIX_SOCKET"]?.isEmpty != false {
 
 if consentHandler == nil {
     launchLogger.warning(
-        "Starting without an operator interface, so every consent-requiring capability is denied. This is the safe direction.",
+        "Starting without an operator interface, so every consent-requiring capability is denied.",
     )
 }
 

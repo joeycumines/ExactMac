@@ -183,9 +183,9 @@ struct PostureControl: View {
                     + "you approve, the only options are this once or never — nothing is "
                     + "offered that would outlive the request."
             case .balanced:
-                "If a saved grant covers the request it is answered without a prompt; "
-                    + "otherwise you are asked, and what you are offered scales with breadth "
-                    + "— a narrow one-shot approval for a narrow request, broader standing "
+                "If a saved grant covers the request it is answered without a prompt. "
+                    + "Otherwise you are asked. What you are offered scales with breadth: "
+                    + "a narrow one-shot approval for a narrow request, broader standing "
                     + "approvals for broader ones, and the broadest need your fingerprint."
             case .lockedDown:
                 "Nothing asks you anything, because every request that would prompt is "

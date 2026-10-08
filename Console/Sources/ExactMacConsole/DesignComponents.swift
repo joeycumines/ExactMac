@@ -555,10 +555,12 @@ struct OptionRow: View {
         var title: String {
             switch self {
             case .once: "Allow once"
-            case .target: "Allow for target"
+            case .target: "Allow for this application"
             case .session: "Allow for this session"
-            case .envelope: "Pre-authorize a batch"
-            case .global: "Always allow"
+            case .envelope: "Pre-authorize these capabilities"
+            // "Always allow" was a lie: the grant lasts at most the server's envelope
+            // ceiling (8 hours) and then expires. The title states the ceiling.
+            case .global: "Allow every app for 8 hours"
             case .deny: "Deny"
             }
         }
@@ -566,10 +568,13 @@ struct OptionRow: View {
         var scope: String {
             switch self {
             case .once: "this exact request  ·  expires when it completes"
-            case .target: "one application  ·  until you revoke it"
-            case .session: "every app this agent touches  ·  until ExactMac quits"
-            case .envelope: "a declared capability set  ·  you choose, up to 8 hours"
-            case .global: "every app, every time  ·  until you revoke it"
+            // THE SERVER'S ACTUAL DURATIONS, not the old copy's "until you revoke it"
+            // and "until ExactMac quits": the target grant runs 15 minutes and the
+            // session grant runs for the envelope ceiling, both measured in the server.
+            case .target: "one application  ·  for 15 minutes"
+            case .session: "every app this agent touches  ·  for 8 hours"
+            case .envelope: "a declared capability set  ·  up to 8 hours"
+            case .global: "every application  ·  for 8 hours"
             case .deny: "—  ·  no grant is created"
             }
         }
