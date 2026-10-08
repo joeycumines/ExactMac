@@ -126,7 +126,9 @@ struct CallerTree: View {
 /// arithmetic and were removed — so it is established by looking at docs/render/.
 struct PayloadBlock: View {
     let text: String
-    var onCopy: () -> Void = {}
+    /// NO DEFAULT: Copy is this block's only act, and a default no-op made it a
+    /// button that could absorb the click and copy nothing.
+    var onCopy: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.leading) {
@@ -241,9 +243,12 @@ struct ApprovalPrompt: View {
         showOptionsLabel: String? = nil,
         selectedOption: OptionRow.Kind? = nil,
         operatorNote: String = "",
-        onDecision: @escaping (OptionRow.Kind, String) -> Void = { _, _ in },
-        onCopyPayload: @escaping () -> Void = {},
-        onShowOptions: @escaping () -> Void = {},
+        // NO DEFAULTS on the three handlers: a prompt constructed without a decision
+        // handler is a consent surface whose buttons absorb clicks and decide nothing.
+        // Every construction site states what happens when the operator chooses.
+        onDecision: @escaping (OptionRow.Kind, String) -> Void,
+        onCopyPayload: @escaping () -> Void,
+        onShowOptions: @escaping () -> Void,
     ) {
         self.state = state
         self.title = title
@@ -265,52 +270,6 @@ struct ApprovalPrompt: View {
         self.onDecision = onDecision
         self.onCopyPayload = onCopyPayload
         self.onShowOptions = onShowOptions
-    }
-
-    init(
-        state: State,
-        title: String,
-        capabilityLine: String,
-        risk: String,
-        riskDot: Color,
-        clock: String? = nil,
-        reason: String? = nil,
-        implication: String? = nil,
-        tree: [CallerTree.Row],
-        target: String? = nil,
-        payload: String,
-        biometricLine: String,
-        biometricDot: Color,
-        moreChoicesLabel: String? = nil,
-        showOptionsLabel: String? = nil,
-        selectedOption: OptionRow.Kind? = nil,
-        operatorNote: String = "",
-        onDecision: @escaping (OptionRow.Kind) -> Void,
-        onCopyPayload: @escaping () -> Void = {},
-        onShowOptions: @escaping () -> Void = {},
-    ) {
-        self.init(
-            state: state,
-            title: title,
-            capabilityLine: capabilityLine,
-            risk: risk,
-            riskDot: riskDot,
-            clock: clock,
-            reason: reason,
-            implication: implication,
-            tree: tree,
-            target: target,
-            payload: payload,
-            biometricLine: biometricLine,
-            biometricDot: biometricDot,
-            moreChoicesLabel: moreChoicesLabel,
-            showOptionsLabel: showOptionsLabel,
-            selectedOption: selectedOption,
-            operatorNote: operatorNote,
-            onDecision: { kind, _ in onDecision(kind) },
-            onCopyPayload: onCopyPayload,
-            onShowOptions: onShowOptions,
-        )
     }
 
     var body: some View {

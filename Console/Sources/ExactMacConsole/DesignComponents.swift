@@ -3,10 +3,10 @@ import SwiftUI
 // MARK: - The dot and the word
 
 //
-// Six component families in the design — RiskChip, ServiceStatus, CountdownChip,
-// IntegrityBadge, TargetChip and MenuBarItem — are BYTE-IDENTICAL chrome across their
-// variants and differ only in a 5–8pt dot and a label. The audit found no coloured pill,
-// chip or bordered badge anywhere in the library.
+// The design's chrome families — RiskChip, ServiceStatus, CountdownChip, IntegrityBadge,
+// and MenuBarItem — are BYTE-IDENTICAL chrome across their variants and differ only in a
+// 5–8pt dot and a label. The audit found no coloured pill, chip or bordered badge anywhere
+// in the library.
 //
 // So they are one view here too. A coloured dot and a coloured border would put semantic
 // colour on chrome, which is the one thing the design's rule forbids; a coloured LABEL is
@@ -449,7 +449,10 @@ struct ConsoleButton: View {
 
     let title: String
     let kind: Kind
-    var action: () -> Void = {}
+    /// NO DEFAULT: a button whose action defaults to a no-op is a control that absorbs
+    /// clicks and does nothing — the exact dead-button shape this redesign exists to end.
+    /// Every construction site must pass a real action.
+    var action: () -> Void
 
     private var fill: Color {
         switch kind {
@@ -578,7 +581,9 @@ struct OptionRow: View {
 
     let kind: Kind
     let isDefault: Bool
-    var onSelect: () -> Void = {}
+    /// NO DEFAULT: an option row whose selection defaults to a no-op is a control that
+    /// absorbs clicks and decides nothing. Every construction site passes the decision.
+    var onSelect: () -> Void
 
     var body: some View {
         Button(action: onSelect) {

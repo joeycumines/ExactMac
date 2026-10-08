@@ -137,7 +137,10 @@ struct GrantRow: View {
     }
 
     let grant: Model
-    var onRevoke: (String) -> Void = { _ in }
+    /// NO DEFAULT: Revoke is this row's only act, and a row whose revoke handler
+    /// defaulted to a no-op was a button that absorbed the click while the grant
+    /// stayed live. Every construction site passes the real revocation.
+    var onRevoke: (String) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: Design.Space.three) {
@@ -190,8 +193,12 @@ struct GrantsManager: View {
     let grants: [GrantRow.Model]
     var subtitle: String?
     var errorMessage: String?
-    var onRevoke: (String) -> Void = { _ in }
-    var onRevokeAll: () -> Void = {}
+    /// NO DEFAULT: revocation is this window's entire purpose, and a default no-op
+    /// here was a Revoke button that could absorb clicks while the grant stayed live.
+    /// Both production construction sites pass the real server calls, including the
+    /// error branch, whose view renders no buttons but must never hold a dead handler.
+    var onRevoke: (String) -> Void
+    var onRevokeAll: () -> Void
 
     var body: some View {
         if let errorMessage {
@@ -654,31 +661,3 @@ struct ErrorState: View {
     }
 }
 
-/// Pure geometry: three bars, no text. A loading state that says "loading" is a loading
-/// state that can be misread as content.
-struct LoadingSkeleton: View {
-    let barWidths: [CGFloat]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Design.Space.component) {
-            ForEach(Array(barWidths.enumerated()), id: \.offset) { _, width in
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Design.Ink.separator)
-                    .frame(width: width, height: 10)
-            }
-        }
-        .padding(.top, Design.Space.frame)
-        .padding(.trailing, Design.Space.three)
-        .padding(.bottom, Design.Space.frame)
-        .padding(.leading, Design.Space.three)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                .fill(Design.Ink.surfaceRaised),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                .strokeBorder(Design.Ink.separator, lineWidth: 1),
-        )
-    }
-}

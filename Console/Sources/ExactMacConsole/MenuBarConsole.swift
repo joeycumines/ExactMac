@@ -331,7 +331,10 @@ struct MenuBarPopover: View {
 private struct PendingNotice: View {
     var count: Int = 1
     let text: String
-    var onOpen: () -> Void = {}
+    /// NO DEFAULT: the pending notice is the request's only entry point, and a default
+    /// no-op here is how a request became unanswerable while the console said one was
+    /// waiting. The caller wires it to opening the approval window.
+    var onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
@@ -469,7 +472,9 @@ private struct MenuRow: View {
     let title: String
     let detail: String?
     var isDestructive = false
-    var action: () -> Void = {}
+    /// NO DEFAULT: every row in this menu navigates or acts, and a row whose action
+    /// defaulted to a no-op was a row that looked like navigation and did nothing.
+    var action: () -> Void
 
     var body: some View {
         Button(action: action) {

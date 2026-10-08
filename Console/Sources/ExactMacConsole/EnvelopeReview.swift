@@ -104,10 +104,14 @@ struct EnvelopeReview: View {
     let duration: String
     let maximumDuration: String
     let biometricLine: String
-    var onApprove: () -> Void = {}
-    var onDeny: () -> Void = {}
+    /// Every decision carries the operator's note. NO DEFAULT: a decision surface whose
+    /// approve is a default no-op is a button that grants nothing and tells no one — the
+    /// exact dead-button shape this redesign exists to end.
+    var onApprove: (String) -> Void
+    var onDeny: (String) -> Void
 
     @State private var capabilitiesGeometry: ScrollRail.Measurement?
+    @State private var operatorNote: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -221,16 +225,20 @@ struct EnvelopeReview: View {
 
                 HStack {
                     Spacer(minLength: 0)
-                    ConsoleButton(title: "Approve for \(duration)", kind: .primary, action: onApprove)
-                        .frame(width: 158)
+                    ConsoleButton(title: "Approve for \(duration)", kind: .primary) {
+                        onApprove(operatorNote)
+                    }
+                    .frame(width: 158)
                 }
 
-                EnvelopeNoteField()
+                EnvelopeNoteField(text: $operatorNote)
 
                 Rectangle().fill(Design.Ink.separator).frame(height: 1)
                 HStack {
-                    ConsoleButton(title: "Deny", kind: .deny, action: onDeny)
-                        .frame(width: 96)
+                    ConsoleButton(title: "Deny", kind: .deny) {
+                        onDeny(operatorNote)
+                    }
+                    .frame(width: 96)
                     Spacer(minLength: 0)
                 }
 
@@ -257,8 +265,11 @@ struct EnvelopeReview: View {
     }
 }
 
-private struct EnvelopeNoteField: View {
-    @State private var text = ""
+/// THE NOTE IS A BINDING, NOT INTERNAL STATE. The envelope review is a decision surface:
+/// the note must reach the approve/deny closures, and an internal `@State` that nobody
+/// reads is a text field that absorbs keystrokes and discards them.
+struct EnvelopeNoteField: View {
+    @Binding var text: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
@@ -286,73 +297,3 @@ private struct EnvelopeNoteField: View {
     }
 }
 
-/// The prompt with its options revealed.
-///
-/// THE PRIMARY BUTTON IS GONE and that is the point: in the collapsed state there is one
-/// default affordance, and offering it beside six rows would be a second, weaker default.
-/// The options ARE the decision. The header and the disclosure above are byte-for-byte the
-/// same as the collapsed prompt — expanding does not perturb a pixel above the footer.
-struct ExpandedApprovalPrompt<Content: View>: View {
-    let header: AnyView
-    let disclosure: AnyView
-    let biometricLine: String
-    let biometricDot: Color
-    @Binding var selected: OptionRow.Kind
-    @ViewBuilder let options: () -> Content
-
-    init(
-        header: AnyView,
-        disclosure: AnyView,
-        biometricLine: String,
-        biometricDot: Color,
-        selected: Binding<OptionRow.Kind>,
-        @ViewBuilder options: @escaping () -> Content,
-    ) {
-        self.header = header
-        self.disclosure = disclosure
-        self.biometricLine = biometricLine
-        self.biometricDot = biometricDot
-        self._selected = selected
-        self.options = options
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            disclosure
-            VStack(alignment: .leading, spacing: Design.Space.three) {
-                HStack(alignment: .center, spacing: Design.Space.chip) {
-                    StatusDot(biometricDot, diameter: 8)
-                    Text(biometricLine)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Design.Ink.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(Design.Space.three)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                        .fill(Design.Ink.surfaceSunken),
-                )
-
-                VStack(spacing: Design.Space.leading) {
-                    options()
-                }
-
-                EnvelopeNoteField()
-            }
-            .padding(.top, Design.Space.three)
-            .padding(.horizontal, Design.Space.frame)
-            .padding(.bottom, Design.Space.frame)
-        }
-        .frame(width: Design.Layout.promptWidth)
-        .background(
-            RoundedRectangle(cornerRadius: Design.Radius.large, style: .continuous)
-                .fill(Design.Ink.surface),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Design.Radius.large, style: .continuous)
-                .strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
-        )
-    }
-}

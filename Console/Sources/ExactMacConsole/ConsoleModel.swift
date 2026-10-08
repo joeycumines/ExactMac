@@ -85,6 +85,11 @@ final class ConsoleModel {
     /// said "options expanded" for a request that is no longer pending is a decision offered
     /// on the wrong question.
     private var optionsExpandedFor: String?
+    /// The request whose envelope review is showing, or nil when the prompt shows the
+    /// ordinary decision surface. Separate from `optionsExpandedFor` because a review is
+    /// not an expansion: it replaces the footer entirely with a different sheet, and the
+    /// two states are mutually exclusive.
+    private var envelopeReviewFor: String?
     private let ceremony: (any CeremonyPerforming)?
 
     // The activity rows, the integrity badge and the subtitle are GONE rather than left at
@@ -539,6 +544,7 @@ final class ConsoleModel {
         // A new request COLLAPSES the options, and the expansion was for the previous one.
         // Leaving it set would offer the new request the previous one's breadth at a glance.
         optionsExpandedFor = nil
+        envelopeReviewFor = nil
         pendingPrompt = request
         pendingNotice = request.popoverNoticeBody
         apply(.pending)
@@ -565,36 +571,87 @@ final class ConsoleModel {
     /// they are not the same action: this one is the automatic surfacing when a request
     /// arrives, and `openApproval` is the operator bringing it forward from the popover. They
     /// must render identically, so they render the same view.
+    ///
+    /// THREE STATES: the prompt, the expanded options, and the envelope review. The review
+    /// is the design's own surface for the pre-authorization decision, and selecting the
+    /// envelope option routes HERE rather than answering immediately: an operator who chose
+    /// the broadest standing option without seeing its full disclosure has not been shown
+    /// what they agreed to.
+    @ViewBuilder
     private func approvalWindow(for request: PendingRequest) -> some View {
-        ApprovalPrompt(
-            state: optionsExpandedFor == request.requestID ? .expanded : .pending,
-            title: request.promptTitle,
-            capabilityLine: request.promptScopeLine,
-            risk: request.riskClass.label,
-            riskDot: request.riskClass.dot,
-            clock: request.clockText,
-            reason: request.agentReason,
-            implication: request.implicationText,
-            tree: CallerTree.rows(for: request),
-            // THE TARGET FIELD IS OMITTED, and that is a decision rather than an omission.
-            // The wire carries ONE scope string and the prompt had two places for it — the
-            // scope line and this field — so "every application · until you revoke it"
-            // appeared twice in four lines. The design's target field holds a resolved PATH
-            // (/Users/…/notes.txt) which the server does not send; it held the scope instead.
-            // Showing the scope once, on the line the design puts the breadth, beats showing
-            // it twice. E7's design pass is where a real target gets designed.
-            target: nil,
-            payload: request.argumentSummary,
-            biometricLine: request.biometricLine,
-            biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
-            moreChoicesLabel: request.moreChoicesText,
-            showOptionsLabel: "Show options",
-            selectedOption: request.offeredKinds.first,
-            onDecision: { kind, note in
-                Task { await self.answer(kind, for: request, note: note) }
+        if envelopeReviewFor == request.requestID {
+            envelopeReview(for: request)
+        } else {
+            ApprovalPrompt(
+                state: optionsExpandedFor == request.requestID ? .expanded : .pending,
+                title: request.promptTitle,
+                capabilityLine: request.promptScopeLine,
+                risk: request.riskClass.label,
+                riskDot: request.riskClass.dot,
+                clock: request.clockText,
+                reason: request.agentReason,
+                implication: request.implicationText,
+                tree: CallerTree.rows(for: request),
+                // THE TARGET FIELD IS OMITTED, and that is a decision rather than an omission.
+                // The wire carries ONE scope string and the prompt had two places for it — the
+                // scope line and this field — so "every application · until you revoke it"
+                // appeared twice in four lines. The design's target field holds a resolved PATH
+                // (/Users/…/notes.txt) which the server does not send; it held the scope instead.
+                // Showing the scope once, on the line the design puts the breadth, beats showing
+                // it twice. E7's design pass is where a real target gets designed.
+                target: nil,
+                payload: request.argumentSummary,
+                biometricLine: request.biometricLine,
+                biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
+                moreChoicesLabel: request.moreChoicesText,
+                showOptionsLabel: "Show options",
+                selectedOption: request.offeredKinds.first,
+                onDecision: { kind, note in
+                    if kind == .envelope {
+                        // THE ENVELOPE IS A DIFFERENT DECISION AND GETS ITS OWN SURFACE.
+                        // Answering it directly would grant a standing permission the
+                        // operator never saw itemized; the review is the disclosure the
+                        // design draws for exactly this option.
+                        self.presentEnvelopeReview(for: request)
+                    } else {
+                        Task { await self.answer(kind, for: request, note: note) }
+                    }
+                },
+                onCopyPayload: { self.copyToPasteboard(request.argumentSummary) },
+                onShowOptions: { self.expandOptions(for: request) },
+            )
+        }
+    }
+
+    /// Shows the pre-authorization review for a request, replacing the prompt's decision
+    /// surface with the design's own envelope sheet.
+    private func presentEnvelopeReview(for request: PendingRequest) {
+        envelopeReviewFor = request.requestID
+        refreshApprovalWindow(for: request)
+    }
+
+    /// The envelope review surface for one request. Built from the request's own offered
+    /// option, never from invented values: the capabilities listed are what THIS request
+    /// would actually permit, the duration is the option's real ceiling, and the biometric
+    /// line states the cost of THIS option.
+    private func envelopeReview(for request: PendingRequest) -> some View {
+        EnvelopeReview(
+            requester: request.envelopeRequester,
+            reason: request.agentReason ?? "",
+            capabilities: request.envelopeCapabilities,
+            duration: request.envelopeDurationLabel,
+            maximumDuration: request.envelopeDurationLabel,
+            biometricLine: request.requiresBiometric(for: .envelope)
+                ? "\(BiometricCeremony.biometricType) will confirm this pre-authorization"
+                : "Nothing else is asked of you. This one needs no fingerprint.",
+            onApprove: { note in
+                self.envelopeReviewFor = nil
+                Task { await self.answer(.envelope, for: request, note: note) }
             },
-            onCopyPayload: { self.copyToPasteboard(request.argumentSummary) },
-            onShowOptions: { self.expandOptions(for: request) },
+            onDeny: { note in
+                self.envelopeReviewFor = nil
+                Task { await self.answer(.deny, for: request, note: note) }
+            },
         )
     }
 
@@ -787,6 +844,15 @@ final class ConsoleModel {
             view = GrantsManager(
                 grants: [],
                 errorMessage: "ExactMac cannot tell what is permitted, so it is denying every request that needs consent. Nothing is being granted on a guess.",
+                // The error view renders no revoke buttons, but the closures are the
+                // real ones anyway: a Grants window that can show a button must never
+                // hold a handler that does nothing.
+                onRevoke: { [weak self] id in
+                    self?.revokeGrant(id: id)
+                },
+                onRevokeAll: { [weak self] in
+                    self?.revokeAllGrants()
+                },
             )
         }
 
@@ -836,6 +902,62 @@ final class ConsoleModel {
             try ServerInspectionService.revokeAllGrants()
         } catch {
             logger.error("Failed to revoke all grants: \(String(describing: error), privacy: .public)")
+        }
+        refreshGrants()
+    }
+
+    /// The one destructive act in Settings: every standing permission is revoked and the
+    /// posture is returned to the server's default. IT COSTS A CEREMONY for the same reason
+    /// the Grants window's revoke-all does — it is the first control someone else with your
+    /// session would reach for, and the fingerprint is what proves the operator is the one
+    /// doing it.
+    ///
+    /// THE POSTURE RESET FOLLOWS THE REVOCATION, never before: restoring strict while the
+    /// grants were still live would change what happens to the NEXT request before the
+    /// standing ones were gone, and the reset promises both. The posture write clears the
+    /// stored preference to the engine's default rather than setting a stored strict — the
+    /// operator is choosing to hold nothing, not to store a new choice.
+    ///
+    /// The button-facing entry. IT SPAWNS AND RETURNS, exactly as `revokeAllGrants` and
+    /// `setBiometricGate` do, because the row's `onAction` is a synchronous closure and a
+    /// sync call site cannot await. The async body is `performResetEverything`, which is
+    /// what a test drives so it can await the whole flow.
+    func resetEverything() {
+        Task { @MainActor in
+            await performResetEverything()
+        }
+    }
+
+    /// The reset body, awaited so a test can drive ceremony, revocation, and posture
+    /// restore to completion rather than spawning past them.
+    func performResetEverything() async {
+        guard let ceremony else {
+            logger.error("Cannot reset everything: no biometric ceremony is installed")
+            return
+        }
+        windows.activateForCeremony()
+        let outcome = await ceremony.perform(
+            nonce: UUID().uuidString,
+            reason: "ExactMac asks to reset everything: revoke every grant and restore the default posture",
+        )
+        guard case .performed = outcome else {
+            logger.notice("The reset ceremony was cancelled or declined")
+            return
+        }
+        do {
+            try ServerInspectionService.revokeAllGrants()
+        } catch {
+            // REPORTED AND STOPPED: a reset that revoked nothing must not restore the
+            // posture, because the operator was promised both or neither. The grant state
+            // is what the next request is judged under, and changing the judgement while
+            // the grants survive is a half-reset the operator cannot see.
+            logger.error("Reset failed to revoke grants: \(String(describing: error), privacy: .public)")
+            pendingNotice = "The reset did not complete: grants could not be revoked. Nothing else was changed."
+            return
+        }
+        postureHandle?.setStoredPreference(.strict, environment: stateEnvironment)
+        if let postureHandle {
+            displayedPosture = postureHandle.current
         }
         refreshGrants()
     }
@@ -1085,6 +1207,10 @@ struct PendingRequest: Equatable {
         /// The server's own description of what this option would permit, e.g. "this exact
         /// request", "one application", "every app this agent touches".
         let scope: String
+        /// How long THIS option's grant lasts, in seconds, or nil for a one-shot. Carried
+        /// from the server's `GrantDuration` rather than re-derived, so the envelope review
+        /// states the option's real ceiling instead of a number the console invented.
+        let durationSeconds: Int?
         /// Whether agreeing to THIS option costs a fingerprint, carried per option because
         /// the server attaches the requirement to the option and not to the request. THE
         /// FOCUSED OPTION'S REQUIREMENT IS `requiresBiometric` above; this is the one the
@@ -1173,6 +1299,7 @@ struct PendingRequest: Equatable {
             Offered(
                 kind: OptionRow.Kind(serverValue: option.kind.rawValue),
                 scope: ScopeDescription.describe(option.scope),
+                durationSeconds: option.duration.seconds,
                 requiresBiometric: option.biometric.isRequired,
             )
         }
@@ -1329,5 +1456,63 @@ struct PendingRequest: Equatable {
         } else {
             return "\(caller) wants to \(action)"
         }
+    }
+
+    // MARK: The envelope review's disclosure, derived from the server's own offer
+
+    /// Who is asking for the pre-authorization: the caller's executable name, which is the
+    /// identity the operator is judging. Never invented.
+    var envelopeRequester: String {
+        !executablePath.isEmpty
+            ? URL(fileURLWithPath: executablePath).lastPathComponent
+            : (bundleIdentifier ?? "An application")
+    }
+
+    /// What the envelope would permit, one row per capability. The requested capability
+    /// leads, then everything it transitively implies — the same set the prompt's
+    /// implication line names, so the review and the prompt cannot disagree about breadth.
+    var envelopeCapabilities: [EnvelopeReview.Capability] {
+        var rows: [EnvelopeReview.Capability] = []
+        if let consequence = CapabilityRisk.consequence(of: capability) {
+            rows.append(.init(
+                id: capability,
+                consequence: consequence,
+                breadth: scopeDescription,
+                risk: riskClass,
+            ))
+        }
+        for implied in impliedCapabilities {
+            guard let consequence = CapabilityRisk.consequence(of: implied) else { continue }
+            rows.append(.init(
+                id: implied,
+                consequence: consequence,
+                breadth: scopeDescription,
+                risk: riskClass,
+            ))
+        }
+        return rows
+    }
+
+    /// How long the envelope lasts, in the operator's words, from the offered option's own
+    /// duration — never a hardcoded number.
+    var envelopeDurationLabel: String {
+        guard let seconds = offered.first(where: { $0.kind == .envelope })?.durationSeconds,
+              seconds > 0
+        else { return "this session" }
+        return Self.humanDuration(seconds)
+    }
+
+    /// Seconds in the operator's words: the largest true unit, so 7200 reads "2 hours" and
+    /// 900 reads "15 minutes", not "7200 seconds".
+    private static func humanDuration(_ seconds: Int) -> String {
+        if seconds >= 3600, seconds % 3600 == 0 {
+            let hours = seconds / 3600
+            return hours == 1 ? "1 hour" : "\(hours) hours"
+        }
+        if seconds >= 60, seconds % 60 == 0 {
+            let minutes = seconds / 60
+            return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        }
+        return seconds == 1 ? "1 second" : "\(seconds) seconds"
     }
 }

@@ -42,6 +42,11 @@ struct SettingRow: View {
     /// design has no disabled state, and a live-looking switch that absorbs clicks
     /// silently is the exact defect E22 exists to end.
     var onToggle: (() -> Void)?
+    /// The row's button action, when the setting is a destructive one-click act rather
+    /// than a toggle. NIL means the row cannot be changed; a button that rendered
+    /// without one absorbed clicks and did nothing, which is the defect this wiring
+    /// exists to end.
+    var onAction: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.one) {
@@ -51,8 +56,11 @@ struct SettingRow: View {
                     .foregroundStyle(setting.isDestructive ? Design.Ink.danger : Design.Ink.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                if let actionTitle = setting.actionTitle {
-                    ConsoleButton(title: actionTitle, kind: .deny)
+                if let actionTitle = setting.actionTitle, let onAction {
+                    // A row that declares an action button but has no action is not drawn:
+                    // rendering it would be a button that absorbs clicks and does nothing,
+                    // which is the defect the explicit wiring exists to end.
+                    ConsoleButton(title: actionTitle, kind: .deny, action: onAction)
                         .frame(width: 138)
                 } else {
                     Track(isOn: setting.isOn, isLocked: setting.isLocked, onToggle: onToggle)
@@ -254,34 +262,6 @@ struct PostureControl: View {
     }
 }
 
-/// One of the operator's own high-consequence applications.
-///
-/// Consequence is a fact about the operator's life, not a property of a taxonomy the
-/// product could ship, so the list is theirs and the product escalates exactly where they
-/// say. The placeholder is a different CHIP from a listed one — outlined and quiet, because
-/// it is an invitation rather than a fact.
-struct TargetChip: View {
-    let title: String
-    var isPlaceholder = false
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 11, weight: isPlaceholder ? .regular : .semibold))
-            .foregroundStyle(isPlaceholder ? Design.Ink.textTertiary : Design.Ink.textPrimary)
-            .padding(.horizontal, Design.Space.three)
-            .frame(height: 24)
-            .background(
-                Capsule().fill(isPlaceholder ? Design.Ink.surface : Design.Ink.surfaceRaised),
-            )
-            .overlay(
-                Capsule().strokeBorder(
-                    isPlaceholder ? Design.Ink.separator : Design.Ink.controlBorder,
-                    lineWidth: 1,
-                ),
-            )
-    }
-}
-
 /// Settings, 720pt, and the one window whose job is to let the operator change the
 /// defaults everything else is measured against.
 ///
@@ -348,13 +328,12 @@ struct SettingsWindow: View {
                     SettingRow(setting: SettingRow.Model(
                         id: "reset",
                         title: "Reset everything",
-                        detail: "Revoke every grant, empty the high-consequence list and restore "
-                            + "the default posture. The decision log is append-only and is not "
-                            + "erased.",
+                        detail: "Revoke every grant and restore the default posture. "
+                            + "The decision log is append-only and is not erased.",
                         isOn: false,
                         isDestructive: true,
                         actionTitle: "Reset ExactMac",
-                    ))
+                    ), onAction: { model.resetEverything() })
                 }
             }
         }

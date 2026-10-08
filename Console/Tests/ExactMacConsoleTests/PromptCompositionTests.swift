@@ -305,6 +305,10 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         #expect(
             nilReasonPrompt.showsMissingReasonBanner,
@@ -322,6 +326,10 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         #expect(
             emptyReasonPrompt.showsMissingReasonBanner,
@@ -339,6 +347,10 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         #expect(
             whitespaceReasonPrompt.showsMissingReasonBanner,
@@ -356,6 +368,10 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         #expect(
             !suppliedReasonPrompt.showsMissingReasonBanner,

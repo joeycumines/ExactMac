@@ -175,6 +175,11 @@ struct RenderTests {
             moreChoicesLabel: "4 more choices — scope, session, batch, always",
             showOptionsLabel: "Show",
             selectedOption: .once,
+            // Render fixture: the surface is drawn but never clicked, and these
+            // explicit closures say so at the construction site.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
@@ -225,6 +230,10 @@ struct RenderTests {
                 moreChoicesLabel: "4 more choices — scope, session, batch, always",
                 showOptionsLabel: "Show options",
                 selectedOption: .once,
+                // Render fixture: drawn, never clicked.
+                onDecision: { _, _ in },
+                onCopyPayload: {},
+                onShowOptions: {},
             )
             let hosting = NSHostingView(rootView: view)
             hosting.layoutSubtreeIfNeeded()
@@ -288,6 +297,10 @@ struct RenderTests {
             moreChoicesLabel: request.moreChoicesText,
             showOptionsLabel: "Show options",
             selectedOption: request.offeredKinds.first,
+            // Render fixture: drawn, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         // SIZED FROM THE CONTENT, so the artefact shows the card whole or shows the window
         // ceiling honestly. A render drawn at a remembered 710pt showed a composition that
@@ -334,6 +347,10 @@ struct RenderTests {
             moreChoicesLabel: noReasonPending.moreChoicesText,
             showOptionsLabel: "Show options",
             selectedOption: .once,
+            // Render fixture: drawn, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         let noReasonHeight = RenderHarness.fittedHeight(of: noReasonPrompt, width: Design.Layout.promptWidth)
         for mode in RenderHarness.AppearanceMode.allCases {
@@ -362,6 +379,10 @@ struct RenderTests {
             showOptionsLabel: "Show options",
             selectedOption: .once,
             operatorNote: "Use the scoped option next time; this touches my keychain project.",
+            // Render fixture: drawn, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         let withNoteHeight = RenderHarness.fittedHeight(of: withNotePrompt, width: Design.Layout.promptWidth)
         for mode in RenderHarness.AppearanceMode.allCases {
@@ -394,6 +415,10 @@ struct RenderTests {
             moreChoicesLabel: nil,
             showOptionsLabel: nil,
             selectedOption: .once,
+            // Render fixture: drawn, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
         )
         try RenderHarness.png(
             prompt,
@@ -526,7 +551,12 @@ struct WindowRenderTests {
         ]
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
-                GrantsManager(grants: grants),
+                GrantsManager(
+                    grants: grants,
+                    // Render fixture: drawn, never clicked.
+                    onRevoke: { _ in },
+                    onRevokeAll: {},
+                ),
                 size: CGSize(width: 720, height: 642),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "grants\(mode.suffix)",
@@ -536,7 +566,7 @@ struct WindowRenderTests {
 
     @Test
     func `the empty grants manager renders at 720pt in both schemes`() throws {
-        let view = GrantsManager(grants: [])
+        let view = GrantsManager(grants: [], onRevoke: { _ in }, onRevokeAll: {})
         let height = RenderHarness.fittedHeight(of: view, width: 720)
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
@@ -553,6 +583,9 @@ struct WindowRenderTests {
         let view = GrantsManager(
             grants: [],
             errorMessage: "ExactMac cannot tell what is permitted, so it is denying every request that needs consent. Nothing is being granted on a guess.",
+            // Render fixture: drawn, never clicked.
+            onRevoke: { _ in },
+            onRevokeAll: {},
         )
         let height = RenderHarness.fittedHeight(of: view, width: 720)
         for mode in RenderHarness.AppearanceMode.allCases {
@@ -745,6 +778,8 @@ struct RemainingRenderTests {
             duration: "2 hours",
             maximumDuration: "8 hours",
             biometricLine: "Touch ID will confirm: pre-authorize 3 capabilities for 2 hours",
+            onApprove: { _ in },
+            onDeny: { _ in },
         )
         for mode in RenderHarness.AppearanceMode.allCases {
             try RenderHarness.png(
