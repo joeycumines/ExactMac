@@ -565,26 +565,17 @@ struct OptionRow: View {
             }
         }
 
-        var scope: String {
-            switch self {
-            case .once: "this exact request  ·  expires when it completes"
-            // THE SERVER'S ACTUAL DURATIONS, not the old copy's "until you revoke it"
-            // and "until ExactMac quits": the target grant runs 15 minutes and the
-            // session grant runs for the envelope ceiling, both measured in the server.
-            case .target: "one application  ·  for 15 minutes"
-            case .session: "every app this agent touches  ·  for 8 hours"
-            case .envelope: "a declared capability set  ·  up to 8 hours"
-            case .global: "every application  ·  for 8 hours"
-            case .deny: "—  ·  no grant is created"
-            }
-        }
-
         var isDestructive: Bool {
             self == .global || self == .deny
         }
     }
 
     let kind: Kind
+    /// What the operator is granting, composed from the SERVER'S scope string and the
+    /// option's carried duration — not a static vocabulary that reads "for 8 hours"
+    /// whatever the engine actually configured. Nil duration is the once grant, which
+    /// expires on completion; Deny gets its own line because its scope describes nothing.
+    let scopeLine: String
     let isDefault: Bool
     /// NO DEFAULT: an option row whose selection defaults to a no-op is a control that
     /// absorbs clicks and decides nothing. Every construction site passes the decision.
@@ -597,7 +588,7 @@ struct OptionRow: View {
                     Text(kind.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(kind.isDestructive ? Design.Ink.danger : Design.Ink.textPrimary)
-                    Text(kind.scope)
+                    Text(scopeLine)
                         .font(.system(size: 11))
                         .foregroundStyle(Design.Ink.textSecondary)
                 }

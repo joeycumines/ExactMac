@@ -97,6 +97,11 @@ enum ServerFixture {
         biometricReason: String? = nil,
         riskClass: RiskClass = .elevated,
         offered: [OfferedDecision.Kind] = [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+        // WHICH OPTION HOLDS FOCUS. The engine marks exactly one option as both default
+        // and primary — the once offer normally, the target offer under a high-risk
+        // request — so one parameter drives both flags, and a caller can point the focus
+        // elsewhere to test that the console reads the mark rather than the array order.
+        defaultKind: OfferedDecision.Kind = .allowOnce,
         // WHICH OPTIONS COST A CEREMONY, per option — the engine attaches the requirement
         // to the option, not to the request, so the fixture does too. Nil means "the
         // request-level requirement applies to every option", which is the shape most
@@ -121,11 +126,24 @@ enum ServerFixture {
                 : .notRequired,
             offeredDecisions: offered.map { kind in
                 // THE PER-OPTION FLAGS ARE SET THE WAY THE ENGINE SETS THEM, rather than
-                // defaulted: `isPrimary` marks the one the design puts beside the confirm
-                // button and `isDestructive` keeps the global grant out of the default
-                // position. A fixture that got these wrong would render a prompt whose
-                // emphasis does not match the decision, and the test would pass anyway.
+                // defaulted: `isDefault` and `isPrimary` mark the SAME option — the one the
+                // engine puts in focus, which moves to the narrower target option under a
+                // high-risk request — and `isDestructive` marks the standing grant, the
+                // unattended batch, and the refusal. The fixture used to mark the session
+                // option default while marking the once option primary, a combination the
+                // engine never produces, and a fixture that got these wrong rendered a
+                // prompt whose emphasis did not match the decision while the test passed.
                 let isDestructive = kind == .allowGlobalPersistent
+                    || kind == .preAuthorizeEnvelope || kind == .deny
+                // THE ENGINE'S ACTUAL DURATIONS: once and deny are one-shot, the target
+                // grant runs 15 minutes, and the standing grants run for the 8-hour
+                // envelope ceiling. A fixture that invented its own number would render
+                // scope lines the product never shows.
+                let duration: GrantDuration = switch kind {
+                case .deny, .allowOnce: .once
+                case .allowTargetApplication: .monotonicSeconds(15 * 60)
+                default: .monotonicSeconds(8 * 3600)
+                }
                 return OfferedDecision(
                     kind: kind,
                     scope: AuthorizationScope(
@@ -140,7 +158,7 @@ enum ServerFixture {
                         // first", which is the bug the composition exists to prevent.
                         operationLimit: kind == .allowSession ? 8 : nil,
                     ),
-                    duration: kind == .deny ? .once : .monotonicSeconds(3600),
+                    duration: duration,
                     blastRadius: BlastRadius(
                         capability: 0.4,
                         breadth: 0.4,
@@ -162,8 +180,8 @@ enum ServerFixture {
                             ? .required(reason: biometricReason ?? "") : .notRequired
                     }(),
                     isDestructive: isDestructive,
-                    isDefault: kind == .allowSession,
-                    isPrimary: kind == .allowOnce,
+                    isDefault: kind == defaultKind,
+                    isPrimary: kind == defaultKind,
                 )
             },
             expiresAt: nil,

@@ -544,6 +544,29 @@ struct ServerVocabularyTests {
         #expect(request.offeredKinds.first == .session, "not the refusal, which is what it was")
     }
 
+    @Test
+    func `the server's default mark survives the mapping into the prompt`() {
+        // The collapsed primary and the expanded "default" badge both read the mark, so a
+        // mapping that drops it makes the console fall back to array order.
+        let (req, identity, _) = ServerFixture.request(requestID: "r-mark")
+        let request = PendingRequest(
+            request: req,
+            identity: identity,
+            decision: ServerFixture.decision(
+                offered: [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+                defaultKind: .allowTargetApplication,
+            ),
+        )
+        #expect(
+            request.offered.map(\.isDefault) == [false, true, false, false],
+            "exactly the server-marked option carries the default flag",
+        )
+        #expect(
+            request.offered.first(where: \.isDefault)?.kind == .target,
+            "the mark must name the same option the engine focused",
+        )
+    }
+
     // MARK: - Concurrency and Queueing (E32)
 
     @Test

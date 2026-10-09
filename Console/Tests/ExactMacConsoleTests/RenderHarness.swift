@@ -18,6 +18,15 @@ import Testing
 /// the operator's actual `~/.exactmac/posture.json` on every run — a state-corrupting
 /// test that never fails, because persist failures are swallowed. Every model the suite
 /// builds goes through this helper, so every persist lands here or nowhere.
+/// The options a standard consent request arrives with, for render fixtures that draw the
+/// prompt without building a full `PendingRequest`. Built through the server's fixture so
+/// the scopes, durations and the default mark are the engine's, not hand-written.
+@MainActor
+func renderOfferedOptions() -> [PendingRequest.Offered] {
+    let (req, identity, decision) = ServerFixture.request(requestID: "render-offer")
+    return PendingRequest(request: req, identity: identity, decision: decision).offered
+}
+
 @MainActor
 func makeTestConsoleModel() -> ConsoleModel {
     let directory = NSTemporaryDirectory() + "exactmac-console-tests-\(UUID().uuidString)"
@@ -174,7 +183,7 @@ struct RenderTests {
             biometricDot: Design.Ink.success,
             moreChoicesLabel: "4 more choices — scope, session, batch, always",
             showOptionsLabel: "Show",
-            selectedOption: .once,
+            offeredOptions: renderOfferedOptions(),
             // Render fixture: the surface is drawn but never clicked, and these
             // explicit closures say so at the construction site.
             onDecision: { _, _ in },
@@ -229,7 +238,7 @@ struct RenderTests {
                 biometricDot: Design.Ink.success,
                 moreChoicesLabel: "4 more choices — scope, session, batch, always",
                 showOptionsLabel: "Show options",
-                selectedOption: .once,
+                offeredOptions: renderOfferedOptions(),
                 // Render fixture: drawn, never clicked.
                 onDecision: { _, _ in },
                 onCopyPayload: {},
@@ -296,7 +305,7 @@ struct RenderTests {
             biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
             moreChoicesLabel: request.moreChoicesText,
             showOptionsLabel: "Show options",
-            selectedOption: request.offeredKinds.first,
+            offeredOptions: request.offered,
             // Render fixture: drawn, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -346,7 +355,7 @@ struct RenderTests {
             biometricDot: Design.Ink.success,
             moreChoicesLabel: noReasonPending.moreChoicesText,
             showOptionsLabel: "Show options",
-            selectedOption: .once,
+            offeredOptions: noReasonPending.offered,
             // Render fixture: drawn, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -377,7 +386,7 @@ struct RenderTests {
             biometricDot: Design.Ink.success,
             moreChoicesLabel: noReasonPending.moreChoicesText,
             showOptionsLabel: "Show options",
-            selectedOption: .once,
+            offeredOptions: noReasonPending.offered,
             operatorNote: "Use the scoped option next time; this touches my keychain project.",
             // Render fixture: drawn, never clicked.
             onDecision: { _, _ in },
@@ -414,7 +423,7 @@ struct RenderTests {
             biometricDot: Design.Ink.success,
             moreChoicesLabel: nil,
             showOptionsLabel: nil,
-            selectedOption: .once,
+            offeredOptions: renderOfferedOptions(),
             // Render fixture: drawn, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},

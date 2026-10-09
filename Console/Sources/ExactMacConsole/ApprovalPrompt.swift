@@ -220,7 +220,10 @@ struct ApprovalPrompt: View {
     let biometricDot: Color
     let moreChoicesLabel: String?
     let showOptionsLabel: String?
-    let selectedOption: OptionRow.Kind?
+    /// The options the SERVER actually offered. The prompt renders only these — not all
+    /// six Kind cases — because showing an option the server withdrew (e.g. session under
+    /// strict posture) is a choice that leads nowhere.
+    let offeredOptions: [PendingRequest.Offered]
     var onDecision: (OptionRow.Kind, String) -> Void
     var onCopyPayload: () -> Void
     /// Expands the collapsed affordances into the full option set. The model owns the
@@ -247,7 +250,7 @@ struct ApprovalPrompt: View {
         biometricDot: Color,
         moreChoicesLabel: String? = nil,
         showOptionsLabel: String? = nil,
-        selectedOption: OptionRow.Kind? = nil,
+        offeredOptions: [PendingRequest.Offered],
         operatorNote: String = "",
         // NO DEFAULTS on the three handlers: a prompt constructed without a decision
         // handler is a consent surface whose buttons absorb clicks and decide nothing.
@@ -272,11 +275,21 @@ struct ApprovalPrompt: View {
         self.biometricDot = biometricDot
         self.moreChoicesLabel = moreChoicesLabel
         self.showOptionsLabel = showOptionsLabel
-        self.selectedOption = selectedOption
+        self.offeredOptions = offeredOptions
         self._operatorNote = SwiftUI.State(initialValue: operatorNote)
         self.onDecision = onDecision
         self.onCopyPayload = onCopyPayload
         self.onShowOptions = onShowOptions
+    }
+
+    /// The kind of the option the SERVER marked as default focus, falling back to the
+    /// first offered when none is marked. The engine always marks exactly one and it is
+    /// never Deny; the fallback exists only so a malformed offer cannot leave the prompt
+    /// without a primary. This is what the collapsed primary button and the expanded
+    /// "default" badge read — NOT the first array element, which is what the console used
+    /// to read.
+    var focusedKind: OptionRow.Kind {
+        offeredOptions.first(where: \.isDefault)?.kind ?? offeredOptions.first?.kind ?? .deny
     }
 
     var body: some View {
@@ -452,8 +465,8 @@ struct ApprovalPrompt: View {
     /// The tallest the agent's reason may grow before it scrolls in its own box.
     ///
     /// DERIVED BY MEASUREMENT, and the derivation is recorded because a bare constant is a
-    /// number a later edit invalidates silently. The tall state is the prompt with all six
-    /// options out and a reason long enough to reach the cap, and with a cap of 160 it
+    /// number a later edit invalidates silently. The tall state is the prompt with every
+    /// offered option out and a reason long enough to reach the cap, and with a cap of 160 it
     /// measured 1061pt against the window ceiling of 1008 — 53pt over, which would push the
     /// last option and the note field past the bottom of the window again. 96pt puts that
     /// state at 997pt. `the prompt's tallest state fits inside the window ceiling` is a test,
@@ -486,33 +499,39 @@ struct ApprovalPrompt: View {
 
             if state == .expanded {
                 // The primary button is GONE. There is no default affordance, because the
-                // options are the decision and one highlighted button beside six rows would
+                // options are the decision and one highlighted button beside the rows would
                 // be a second, weaker default.
+                //
+                // THE SERVER'S OFFER, NOT ALL SIX KINDS. Rendering `OptionRow.Kind.allCases`
+                // showed options the server had withdrawn — session and envelope under the
+                // strict posture, the target option for a global request — and a click on
+                // one of those was a decision the server would refuse. The list is the
+                // offer, in the server's own order.
                 VStack(spacing: Design.Space.leading) {
-                    ForEach(OptionRow.Kind.allCases, id: \.self) { kind in
+                    ForEach(offeredOptions, id: \.kind) { option in
                         OptionRow(
-                            kind: kind,
-                            isDefault: kind == selectedOption,
-                        ) { onDecision(kind, operatorNote) }
+                            kind: option.kind,
+                            scopeLine: option.scopeLine,
+                            isDefault: option.isDefault,
+                        ) { onDecision(option.kind, operatorNote) }
                     }
                 }
             } else if isSettled {
                 settledOutcome
             } else {
-                // THE COLLAPSED PRIMARY ACTION IS THE NARROWEST OFFER, NOT A LABEL. It used
-                // to be a `ConsoleButton` with no action at all, which is why the alert could
-                // be opened, read, and never answered: every request in the running product
-                // timed out and was denied while the screen said "Allow once".
+                // THE COLLAPSED PRIMARY ACTION IS THE SERVER'S DEFAULT OPTION, NOT A LABEL.
+                // It used to be a `ConsoleButton` with no action at all, which is why the
+                // alert could be opened, read, and never answered: every request in the
+                // running product timed out and was denied while the screen said "Allow
+                // once". The label is the option's own title, so the button says what it
+                // does even when the server's focus is not the once offer.
                 CollapsedActions(
-                    primary: selectedOption ?? .once,
+                    primary: focusedKind,
                     onDecision: { kind in onDecision(kind, operatorNote) },
                 )
             }
 
-            NoteField(
-                text: $operatorNote,
-                isDenied: selectedOption == .deny,
-            )
+            NoteField(text: $operatorNote)
 
             if !isSettled, state != .expanded {
                 Rectangle()
@@ -647,17 +666,16 @@ private struct DenyRow: View {
 
 struct NoteField: View {
     @Binding var text: String
-    var isDenied: Bool = false
 
-    var caption: String {
-        isDenied
-            ? "NOTE TO THE AGENT — SENT BACK WITH YOUR DENIAL"
-            : "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
-    }
+    /// ONE CAPTION, because the note travels with whichever decision the operator makes —
+    /// approval or denial — and the field cannot know which one is about to be chosen. It
+    /// used to switch on a "selected option" that was never selectable, so the denial
+    /// variant was dead copy.
+    static let caption = "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
-            Text(caption)
+            Text(Self.caption)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Design.Ink.textSecondary)
             TextField(

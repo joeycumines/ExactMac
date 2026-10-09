@@ -234,14 +234,133 @@ struct PromptCompositionTests {
         #expect(
             Self.request(
                 offered: [.allowOnce, .allowTargetApplication, .allowSession, .deny],
-            ).moreChoicesText == "3 more choices — this exact request, or in TextEdit and "
+            ).moreChoicesText == "3 more choices — any application, or in TextEdit and "
                 + "any application for up to 8 operations",
-            "the count is the number of real alternatives and the names are their titles",
+            "the count is the number of real alternatives and the names are their scopes",
         )
         #expect(
             Self.request(offered: [.deny]).moreChoicesText == nil,
             "a request that arrived offering only Deny has nothing to disclose",
         )
+    }
+
+    @Test
+    func `The prompt renders only the options the server offered`() {
+        // The rendered rows must be the server's offer, not all six Kind cases: a session
+        // option the engine withdrew — as it does under the strict posture — cannot appear
+        // as a selectable row.
+        let pending = Self.request(offered: [.allowOnce, .allowTargetApplication, .deny])
+        let prompt = ApprovalPrompt(
+            state: .expanded,
+            title: pending.promptTitle,
+            capabilityLine: pending.promptScopeLine,
+            risk: pending.riskClass.label,
+            riskDot: pending.riskClass.dot,
+            reason: pending.agentReason,
+            tree: CallerTree.rows(for: pending),
+            payload: pending.argumentSummary,
+            biometricLine: pending.biometricLine,
+            biometricDot: pending.riskClass.dot,
+            offeredOptions: pending.offered,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
+        )
+        #expect(
+            pending.offered.map(\.kind) == [.once, .target, .deny],
+            "the mapping must carry exactly the server's offer — the withdrawn session option is gone",
+        )
+        #expect(
+            prompt.offeredOptions.map(\.kind) == pending.offered.map(\.kind),
+            "the expanded list is the offer itself, so a withdrawn option has no row to click",
+        )
+    }
+
+    @Test
+    func `The collapsed primary is the server-marked default, not the first option`() {
+        // The engine moves the default focus to the narrower target option under a
+        // high-risk request; the console must read that mark rather than the array order.
+        // Build the offer with the session option FIRST so array order and the mark
+        // genuinely disagree.
+        let (req, identity, baseDecision) = ServerFixture.request(requestID: "r-default")
+        let offerWithTargetFocus = baseDecision.offeredDecisions.map { option in
+            var marked = option
+            marked.isDefault = option.kind == .allowTargetApplication
+            marked.isPrimary = option.kind == .allowTargetApplication
+            return marked
+        }
+        // Session FIRST, so array order and the server's mark genuinely disagree: the
+        // mark says target, the array's first element says session.
+        let sessionFirst = [
+            offerWithTargetFocus.first(where: { $0.kind == .allowSession }),
+            offerWithTargetFocus.first(where: { $0.kind == .allowOnce }),
+            offerWithTargetFocus.first(where: { $0.kind == .allowTargetApplication }),
+            offerWithTargetFocus.first(where: { $0.kind == .deny }),
+        ].compactMap { $0 }
+        let pending = PendingRequest(
+            request: req,
+            identity: identity,
+            decision: AuthorizationDecision(
+                outcome: baseDecision.outcome,
+                basis: baseDecision.basis,
+                effectiveCapabilities: baseDecision.effectiveCapabilities,
+                blastRadius: baseDecision.blastRadius,
+                riskClass: baseDecision.riskClass,
+                biometric: baseDecision.biometric,
+                offeredDecisions: sessionFirst,
+                expiresAt: baseDecision.expiresAt,
+            ),
+        )
+        let prompt = ApprovalPrompt(
+            state: .pending,
+            title: pending.promptTitle,
+            capabilityLine: pending.promptScopeLine,
+            risk: pending.riskClass.label,
+            riskDot: pending.riskClass.dot,
+            reason: pending.agentReason,
+            tree: CallerTree.rows(for: pending),
+            payload: pending.argumentSummary,
+            biometricLine: pending.biometricLine,
+            biometricDot: pending.riskClass.dot,
+            offeredOptions: pending.offered,
+            // Composition assertion only: the surface is inspected, never clicked.
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
+        )
+        #expect(
+            prompt.focusedKind == .target,
+            "the collapsed primary must follow the server's isDefault mark, not array order",
+        )
+    }
+
+    @Test
+    func `Each option's scope line states the server's scope and carried duration`() {
+        let pending = Self.request(
+            offered: [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+        )
+        let lines = Dictionary(
+            uniqueKeysWithValues: pending.offered.map { ($0.kind, $0.scopeLine) },
+        )
+        // The once grant has no duration and says when it ends.
+        #expect(
+            lines[.once] == "any application  ·  expires when it completes",
+            "got \"\(lines[.once] ?? "nil")\"",
+        )
+        // The target grant names the application and its carried 15-minute life — the
+        // value the engine configures, not a remembered constant.
+        #expect(
+            lines[.target] == "in TextEdit  ·  for 15 minutes",
+            "got \"\(lines[.target] ?? "nil")\"",
+        )
+        // The session grant carries the operation count and its carried 8-hour duration.
+        #expect(
+            lines[.session] == "any application for up to 8 operations  ·  for 8 hours",
+            "got \"\(lines[.session] ?? "nil")\"",
+        )
+        // Deny creates nothing.
+        #expect(lines[.deny] == "no grant is created", "got \"\(lines[.deny] ?? "nil")\"")
     }
 
     @Test
@@ -312,6 +431,7 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            offeredOptions: baseRequest.offered,
             // Composition assertion only: the surface is inspected, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -333,6 +453,7 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            offeredOptions: baseRequest.offered,
             // Composition assertion only: the surface is inspected, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -354,6 +475,7 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            offeredOptions: baseRequest.offered,
             // Composition assertion only: the surface is inspected, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -375,6 +497,7 @@ struct PromptCompositionTests {
             payload: baseRequest.argumentSummary,
             biometricLine: baseRequest.biometricLine,
             biometricDot: baseRequest.riskClass.dot,
+            offeredOptions: baseRequest.offered,
             // Composition assertion only: the surface is inspected, never clicked.
             onDecision: { _, _ in },
             onCopyPayload: {},
@@ -476,12 +599,11 @@ struct PromptCompositionTests {
     }
 
     @Test
-    func `NoteField caption distinguishes decisions from denials`() {
-        let decisionField = NoteField(text: .constant(""), isDenied: false)
-        #expect(decisionField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION")
-
-        let denialField = NoteField(text: .constant(""), isDenied: true)
-        #expect(denialField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DENIAL")
+    func `The note caption states the note travels with the decision`() {
+        // One caption: the note is sent with whichever decision the operator makes, and
+        // the field cannot know which one is coming. The old denial variant was driven by
+        // a "selected option" that was never selectable.
+        #expect(NoteField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION")
     }
 }
 

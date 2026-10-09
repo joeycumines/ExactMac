@@ -608,7 +608,7 @@ final class ConsoleModel {
                 biometricDot: request.requiresBiometric ? request.riskClass.dot : Design.Ink.success,
                 moreChoicesLabel: request.moreChoicesText,
                 showOptionsLabel: "Show options",
-                selectedOption: request.offeredKinds.first,
+                offeredOptions: request.offered,
                 onDecision: { kind, note in
                     if kind == .envelope {
                         // THE ENVELOPE IS A DIFFERENT DECISION AND GETS ITS OWN SURFACE.
@@ -1220,6 +1220,26 @@ struct PendingRequest: Equatable {
         /// the console ran no ceremony for it (its gate read the focused option's bar) and
         /// the server always refused an answer that skipped the selected option's own.
         let requiresBiometric: Bool
+        /// Whether the server marked this option as the default focus. Exactly one offered
+        /// option carries this flag; the console uses it for the collapsed primary button
+        /// and the expanded "default" badge. Previously the console picked the first array
+        /// element, which diverged from the engine when high-risk requests shifted the
+        /// default to a narrower scope.
+        let isDefault: Bool
+
+        /// The row the operator reads under the option's title: the server's scope string
+        /// plus the option's real duration. Composed from the carried values rather than a
+        /// static vocabulary, so a grant configured for 20 minutes cannot read "for 8
+        /// hours". Deny creates no grant and says so; a once grant expires when the
+        /// request completes.
+        var scopeLine: String {
+            if kind == .deny {
+                return "no grant is created"
+            }
+            let durationText = durationSeconds.map { "for \(PendingRequest.humanDuration($0))" }
+                ?? "expires when it completes"
+            return "\(scope)  ·  \(durationText)"
+        }
     }
 
     /// The options, as kinds, for the call sites that only need to choose one.
@@ -1307,6 +1327,7 @@ struct PendingRequest: Equatable {
                 scope: ScopeDescription.describe(option.scope),
                 durationSeconds: option.duration.seconds,
                 requiresBiometric: option.biometric.isRequired,
+                isDefault: option.isDefault,
             )
         }
     }
@@ -1451,9 +1472,14 @@ struct PendingRequest: Equatable {
         // THE SCOPES THE SERVER SENT, NOT `OptionRow.Kind.title`. The static title reads
         // "Allow for TextEdit" for the target-scoped option, which is a LIE whenever the
         // target is not TextEdit — and in the render it was not: the scope line said "every
-        // application" directly above a disclosure promising "Allow for TextEdit".
-        return "\(alternatives.count) more choices — this exact request, or "
-            + Self.proseList(alternatives.dropFirst().map(\.scope))
+        // application" directly above a disclosure promising "Allow for TextEdit". The
+        // primary phrase is the SERVER-MARKED default's scope — not the first array
+        // element's — because the default moves to the narrower target option under a
+        // high-risk request.
+        let primaryOption = alternatives.first(where: \.isDefault) ?? alternatives[0]
+        let others = alternatives.filter { $0.kind != primaryOption.kind }
+        return "\(alternatives.count) more choices — \(primaryOption.scope), or "
+            + Self.proseList(others.map(\.scope))
     }
 
     /// The body text shown on the popover's pending notice card, matching Figma node 0:1326.
