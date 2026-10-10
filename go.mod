@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/longrunning v1.2.0
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/image v0.46.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/tools v0.50.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260921155816-b14227669459
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459
