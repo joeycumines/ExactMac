@@ -239,10 +239,9 @@ struct GrantsAndActivityTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let clock = MovableClock(10_000_000_000)
-        let storePath = tempDir.appendingPathComponent("grants.json").path
         let auditPath = tempDir.appendingPathComponent("audit.log").path
 
-        let store = try GrantStore.openStore(path: storePath, clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let audit = try DecisionAudit(path: auditPath, clock: clock)
 
         let caller = Self.sampleCaller()
@@ -336,10 +335,9 @@ struct GrantsAndActivityTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let clock = MovableClock(10_000_000_000)
-        let storePath = tempDir.appendingPathComponent("grants.json").path
         let auditPath = tempDir.appendingPathComponent("audit.log").path
 
-        let store = try GrantStore.openStore(path: storePath, clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
 
         // Write corrupt garbage into audit log
         try "corrupted undecodable line without proper JSON format\n".write(
@@ -382,10 +380,9 @@ struct GrantsAndActivityTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let clock = MovableClock(10_000_000_000)
-        let storePath = tempDir.appendingPathComponent("grants.json").path
         let auditPath = tempDir.appendingPathComponent("audit.log").path
 
-        let store = try GrantStore.openStore(path: storePath, clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let audit = try DecisionAudit(path: auditPath, clock: clock)
 
         let caller = Self.sampleCaller()
@@ -427,10 +424,9 @@ struct GrantsAndActivityTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let clock = MovableClock(10_000_000_000)
-        let storePath = tempDir.appendingPathComponent("grants.json").path
         let auditPath = tempDir.appendingPathComponent("audit.log").path
 
-        let store = try GrantStore.openStore(path: storePath, clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let audit = try DecisionAudit(path: auditPath, clock: clock)
 
         let caller = Self.sampleCaller()

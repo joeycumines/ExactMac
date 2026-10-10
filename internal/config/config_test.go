@@ -748,7 +748,7 @@ func TestLoad_ServerSocketPathConfigDefault(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home directory available: %v", err)
 	}
-	want := filepath.Join(home, "Library", "Caches", "exactmac.sock")
+	want := filepath.Join(home, "Library", "Application Support", "ExactMac", "exactmac.sock")
 	if cfg.ServerSocketPath != want {
 		t.Errorf("ServerSocketPath = %q, want %q (the console's own default socket path)",
 			cfg.ServerSocketPath, want)

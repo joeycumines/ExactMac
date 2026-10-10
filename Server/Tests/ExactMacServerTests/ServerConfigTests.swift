@@ -84,10 +84,6 @@ final class AuthorizationConfigurationTests: XCTestCase {
 
     func testTheDefaultsDenyRatherThanPermit() {
         let config = ServerConfig.fromEnvironment()
-        XCTAssertNil(
-            config.consoleSocketPath,
-            "a server with no console socket must not go looking for one",
-        )
         XCTAssertEqual(
             config.defaultPosture, .strict,
             "the default posture is the strictest of the three, not the recommended one",
@@ -111,12 +107,10 @@ final class AuthorizationConfigurationTests: XCTestCase {
     }
 
     func testRealValuesAreHonoured() {
-        setenv("EXACTMAC_CONSOLE_SOCKET", "/tmp/console.sock", 1)
         setenv("EXACTMAC_CONSENT_TIMEOUT_SECONDS", "45", 1)
         setenv("EXACTMAC_MAX_ENVELOPE_SECONDS", "3600", 1)
         setenv("EXACTMAC_POSTURE", "Balanced", 1)
         let config = ServerConfig.fromEnvironment()
-        XCTAssertEqual(config.consoleSocketPath, "/tmp/console.sock")
         XCTAssertEqual(config.consentTimeoutSeconds, 45)
         XCTAssertEqual(config.maximumEnvelopeSeconds, 3600)
         XCTAssertEqual(config.defaultPosture, .balanced, "the posture name is matched case-insensitively")

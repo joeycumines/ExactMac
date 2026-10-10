@@ -40,8 +40,7 @@ final class OperatorActionAuditTests: XCTestCase {
             path: stateDirectory + "/audit.log",
             clock: clock,
         )
-        let store = try GrantStore.openStore(
-            path: stateDirectory + "/grants.json",
+        let store = GrantStore(
             clock: clock,
             maximumEnvelopeSeconds: 86400,
         )

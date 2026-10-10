@@ -36,8 +36,8 @@ enum Design {
         /// A FILL. Coloured ink is `accentText`; using this for text fails AA in dark.
         static let accent = adaptive(light: 0x0A6CFF, dark: 0x3D8BFF)
         static let accentText = adaptive(light: 0x0A5CD5, dark: 0x66A8FF)
-        /// The label colour that sits ON an accent fill. Dark in dark mode.
-        static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x1C1C1E)
+        /// The label colour that sits ON an accent fill. High-contrast white in both light and dark mode.
+        static let onAccent = adaptive(light: 0xFFFFFF, dark: 0xFFFFFF)
         static let danger = adaptive(light: 0xD70015, dark: 0xFF5E52)
         static let caution = adaptive(light: 0xA04A00, dark: 0xFF9F0A)
         static let success = adaptive(light: 0x1A753F, dark: 0x30C46C)

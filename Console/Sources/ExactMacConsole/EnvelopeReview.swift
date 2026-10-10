@@ -110,7 +110,6 @@ struct EnvelopeReview: View {
     var onApprove: (String) -> Void
     var onDeny: (String) -> Void
 
-    @State private var capabilitiesGeometry: ScrollRail.Measurement?
     @State private var operatorNote: String = ""
 
     var body: some View {
@@ -178,14 +177,6 @@ struct EnvelopeReview: View {
             }
             .frame(maxHeight: 240)
             .background(Design.Ink.surfaceSunken)
-            .overlay(alignment: .trailing) {
-                ScrollRail(geometry: capabilitiesGeometry)
-            }
-            .onScrollGeometryChange(for: ScrollRail.Measurement.self) { geometry in
-                ScrollRail.Measurement(geometry: geometry)
-            } action: { _, measurement in
-                capabilitiesGeometry = measurement
-            }
 
             VStack(alignment: .leading, spacing: Design.Space.component) {
                 HStack(alignment: .center, spacing: Design.Space.chip) {
@@ -296,4 +287,3 @@ struct EnvelopeNoteField: View {
         )
     }
 }
-

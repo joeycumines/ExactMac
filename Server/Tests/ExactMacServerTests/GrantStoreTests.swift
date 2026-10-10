@@ -4,11 +4,14 @@ import Foundation
 import Synchronization
 import XCTest
 
-/// C5's acceptance suite.
+/// Acceptance suite for the in-memory GrantStore enforcing Standing Invariant 12.
 ///
-/// The binding test is the one that matters, and it is here rather than in a property test
-/// because it is the control that answers the confused-deputy and same-uid-malware cases:
-/// a grant must belong to a BINARY and not to a number the kernel hands out.
+/// STANDING INVARIANT 12: The console persists no decision state, so there is nothing on
+/// disk for a same-uid process to forge. All grants and pre-authorization envelopes are held
+/// exclusively in process memory protected by `Synchronization.Mutex<GrantStoreContents>`.
+///
+/// The binding test is the primary control answering confused-deputy and same-uid malware
+/// cases: a grant belongs to a BINARY and not to a number the kernel hands out.
 final class GrantStoreTests: XCTestCase {
     // MARK: - Fixtures
 
@@ -70,58 +73,24 @@ final class GrantStoreTests: XCTestCase {
     )
 
     private func makeStore(
-        named name: String = UUID().uuidString,
         clock: any MonotonicClock,
-        boot: Int = 1_000_000,
-    ) throws -> (GrantStore, String) {
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-\(name).json").path
-        try? FileManager.default.removeItem(atPath: path)
-        let store = try GrantStore.openStore(path: path, clock: clock, maximumEnvelopeSeconds: 3600)
-        _ = boot
-        return (store, path)
+    ) -> GrantStore {
+        GrantStore(clock: clock, maximumEnvelopeSeconds: 3600)
     }
 
-    // MARK: - Persistence
+    // MARK: - Invariant 12 & In-Memory Integrity
 
-    /// A STORE THAT HAS BECOME UNREADABLE REPORTS UNREADABLE, AND THE POLICY REFUSES ON IT.
-    ///
-    /// `snapshot().integrity` was the constant `.intact` for the whole life of this type, and
-    /// `GrantStore` is the only production `GrantSupply` — so `AuthorizationPolicy`'s
-    /// `grantStoreUnreadable` denial, whose comment says "a grant store that could not be read
-    /// is not an empty one", could never fire. The store's own documentation claimed
-    /// UNREADABLE DENIES, and nothing denied.
-    ///
-    /// The test drives the real file: issue a grant, then replace the store's contents with
-    /// something that is not a grant store, and ask the snapshot what it thinks. It asserts
-    /// through the POLICY as well as the store, because the store reporting unreadable is
-    /// only worth anything if the decision refuses.
-    func testAStoreDamagedAfterStartupIsReportedUnreadableAndDenies() async throws {
+    /// In-memory store reports intact integrity unconditionally and evaluates cleanly under policy.
+    func testAnInMemoryStoreHasIntactIntegrity() async {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
+        let store = makeStore(clock: clock)
 
-        // Intact, and a grant is live.
-        let before = await store.snapshot()
-        XCTAssertEqual(before.integrity, .intact)
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.integrity, .intact)
 
-        // DAMAGE IT THE WAY A RECOVERY WOULD: replace the file with bytes that are not a
-        // grant store, on the same path, keeping the mode and owner the checks expect.
-        let descriptor = try FileManager.default.createFile(
-            atPath: path,
-            contents: Data("this is not a grant store".utf8),
-            attributes: [.posixPermissions: 0o600],
-        )
-        XCTAssertNotNil(descriptor, "the fixture must be able to damage the store")
-
-        let after = await store.snapshot()
-        guard case .unreadable = after.integrity else {
-            XCTFail("a store replaced with non-store bytes reported \(after.integrity)")
-            return
-        }
-        // AND THE DECISION REFUSES RATHER THAN TREATING IT AS EMPTY.
         let decision = AuthorizationPolicy.evaluate(
             request: AuthorizationRequest(
-                id: AuthorizationRequestID(rawValue: "damaged"),
+                id: AuthorizationRequestID(rawValue: "intact"),
                 rpcName: "\(RPCAuthorizationMap.serviceName)/GetClipboard",
                 capability: .clipboardRead,
                 scope: AuthorizationScope(),
@@ -130,21 +99,22 @@ final class GrantStoreTests: XCTestCase {
                 origin: .mcpProxy,
             ),
             identity: Self.identity(),
-            grants: after.grants,
-            envelopes: after.envelopes,
+            grants: snapshot.grants,
+            envelopes: snapshot.envelopes,
             posture: .balanced,
-            context: .unixSocket(store: after.integrity),
+            context: .unixSocket(store: snapshot.integrity),
             now: clock.now(),
         )
-        XCTAssertEqual(decision.denialReason, .grantStoreUnreadable)
+        // With no grants, balanced posture prompts for consent rather than failing with grantStoreUnreadable.
+        XCTAssertEqual(decision.basis, .promptRequired)
+        XCTAssertNil(decision.denialReason)
     }
 
-    /// A grant survives the process: torn down, reopened from the same file, and still there
-    /// with the origin the operator would need to reason about it.
-    func testAGrantSurvivesTheStoreBeingRebuilt() throws {
+    /// STANDING INVARIANT 12: Zero decision state on disk.
+    /// Grants fail-closed on restart; a fresh store instance starts completely empty.
+    func testAGrantFailsClosedAndDoesNotPersistAcrossStoreInstances() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let issued = try store.issue(
             capability: .clipboardRead,
@@ -153,32 +123,51 @@ final class GrantStoreTests: XCTestCase {
             holder: Self.identity(),
             request: Self.clipboardRequest,
         )
+        XCTAssertEqual(store.liveGrants().count, 1)
 
-        // A NEW store over the same path: a torn-down-and-rebuilt store, not a re-read of
-        // the same object.
-        let reopened = try GrantStore.openStore(path: path, clock: clock)
-        let live = reopened.liveGrants()
-        XCTAssertEqual(live.count, 1)
-        let recovered = try XCTUnwrap(live.first)
-        XCTAssertEqual(recovered.id, issued.id)
-        XCTAssertEqual(recovered.capability, .clipboardRead)
-        XCTAssertEqual(recovered.scope, issued.scope)
-        XCTAssertEqual(recovered.holder, issued.holder)
-        XCTAssertEqual(recovered.origin, issued.origin)
-
-        // The origin the grants manager shows is the REQUEST, and it survived too.
-        let stored = try XCTUnwrap(reopened.grantsForDisplay().first { $0.id == issued.id })
+        // The origin the grants manager shows is the REQUEST.
+        let stored = try XCTUnwrap(store.grantsForDisplay().first { $0.id == issued.id })
         XCTAssertEqual(stored.originRPCName, "exactmac.v1.ExactMac/GetClipboard")
         XCTAssertEqual(stored.originArgumentSummary, "the clipboard")
+
+        // A brand new store instance in memory has zero grants (fails closed).
+        let freshStore = makeStore(clock: clock)
+        XCTAssertEqual(freshStore.liveGrants().count, 0)
+        XCTAssertTrue(freshStore.grantsForDisplay().isEmpty)
     }
+
+    /// STANDING INVARIANT 12: Zero decision state on disk.
+    /// Neither grants nor envelopes ever create any file on disk.
+    func testStandingInvariant12ZeroDecisionStateOnDisk() throws {
+        let clock = MovableClock()
+        let store = makeStore(clock: clock)
+
+        // Issue grants and envelopes in memory.
+        try store.issue(
+            capability: .clipboardRead,
+            scope: AuthorizationScope(application: .any),
+            duration: .monotonicSeconds(600),
+            holder: Self.identity(),
+            request: Self.clipboardRequest,
+        )
+        try store.issueEnvelope(envelope: Self.envelope(id: "e-inv12"), now: clock.now())
+
+        XCTAssertEqual(store.liveGrants().count, 1)
+        XCTAssertEqual(store.liveEnvelopes().count, 1)
+
+        // Verify that no grants.json or related decision state file exists in temporary or home paths.
+        let tmpGrants = FileManager.default.temporaryDirectory.appendingPathComponent("grants.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmpGrants.path))
+    }
+
+    // MARK: - Code Identity Binding
 
     /// THE BINDING TEST. A grant belongs to a binary, not to a number the kernel hands out,
     /// so a grant issued to a signed application is not honoured by an unsigned binary at
     /// another path running as the same user.
     func testAGrantDoesNotTransferToAnUnsignedBinaryAtAnotherPath() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let granted = try store.issue(
             capability: .clipboardRead,
@@ -208,8 +197,7 @@ final class GrantStoreTests: XCTestCase {
     /// which is the recycled-pid case a grant keyed by a number cannot defend against.
     func testAGrantDoesNotTransferToAProcessThatLaterReceivesTheOriginalPID() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let original = Self.identity(pid: 4242)
         let granted = try store.issue(
@@ -239,8 +227,7 @@ final class GrantStoreTests: XCTestCase {
     /// which would let any process claim a grant it cannot prove.
     func testAnUnsignedHolderBindsByCanonicalPathAndNotByNothing() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let unsigned = Self.identity(
             path: "/usr/local/bin/exactmac",
@@ -274,8 +261,7 @@ final class GrantStoreTests: XCTestCase {
     /// store has and showing nothing else can matter.
     func testExpiryIsMonotonicAndAWallClockChangeCannotExtendAGrant() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         try store.issue(
             capability: .clipboardRead,
@@ -296,39 +282,11 @@ final class GrantStoreTests: XCTestCase {
         )
     }
 
-    /// A store written under an EARLIER BOOT is expired in full, because a monotonic
-    /// deadline does not survive a reboot and reading it anyway is the fail-open direction.
-    func testAStoreWrittenUnderAnEarlierBootIsExpiredInFull() throws {
-        let clock = MovableClock()
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-\(UUID().uuidString).json").path
-        defer { try? FileManager.default.removeItem(atPath: path) }
-
-        // A store stamped with a boot that is not this one.
-        let contents = GrantStoreContents(
-            grants: [],
-            envelopes: [],
-            bootWallClockSeconds: SystemBoot.wallClockSeconds + 1,
-            sequence: 0,
-        )
-        try JSONEncoder().encode(contents).write(to: URL(fileURLWithPath: path))
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
-
-        let store = try GrantStore.openStore(path: path, clock: clock)
-        XCTAssertEqual(store.liveGrants().count, 0, "a grant from another boot is not live")
-        XCTAssertEqual(
-            store.persistedContents().bootWallClockSeconds,
-            SystemBoot.wallClockSeconds,
-            "the store must be restamped for this boot",
-        )
-    }
-
     /// A count-bounded grant is CONSUMABLE, and the decrement is the store's job because the
-    /// engine takes grants by value and could not persist one.
+    /// engine takes grants by value and could not mutate one.
     func testACountBoundedGrantIsConsumableAndNeverAmortises() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let request = AuthorizationRequest(
             id: AuthorizationRequestID(rawValue: "req-count"),
@@ -349,25 +307,22 @@ final class GrantStoreTests: XCTestCase {
         )
         XCTAssertEqual(granted.remainingOperations, 3)
 
-        XCTAssertTrue(try store.consume(granted.id))
+        XCTAssertTrue(store.consume(granted.id))
         XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
-        XCTAssertTrue(try store.consume(granted.id))
-        XCTAssertTrue(try store.consume(granted.id))
+        XCTAssertTrue(store.consume(granted.id))
+        XCTAssertTrue(store.consume(granted.id))
         // Exhausted: the grant is REMOVED, not left at zero looking reusable.
         XCTAssertEqual(store.liveGrants().count, 0)
-        XCTAssertFalse(try store.consume(granted.id), "a removed grant cannot be spent again")
+        XCTAssertFalse(store.consume(granted.id), "a removed grant cannot be spent again")
     }
 
     /// INVARIANT 9, AT THE STORE: a batch spend — the commit or rollback of a transaction
     /// authorized as a scope with a declared operation count — decrements by the DECLARED
     /// count, refuses when the remaining count cannot cover it, and removes the grant at
-    /// exhaustion. The single-operation consume above covers one-at-a-time grants; this is
-    /// the batch shape, and before it existed no production path called consume at all,
-    /// which made every count on every grant decoration.
+    /// exhaustion.
     func testABatchSpendDecrementsByTheDeclaredCountAndExhaustionRemovesTheGrant() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let granted = try store.issue(
             capability: .transactionManage,
@@ -377,22 +332,20 @@ final class GrantStoreTests: XCTestCase {
             remainingOperations: 5,
         )
 
-        XCTAssertTrue(try store.consume(granted.id, operations: 3))
+        XCTAssertTrue(store.consume(granted.id, operations: 3))
         XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
-        // Two left cannot cover three: the same predicate the engine judged, re-checked
-        // under the store's lock, because the snapshot it judged is already stale.
-        XCTAssertFalse(try store.consume(granted.id, operations: 3))
+        // Two left cannot cover three: the predicate re-checked under the store's lock refuses.
+        XCTAssertFalse(store.consume(granted.id, operations: 3))
         XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 2)
-        XCTAssertTrue(try store.consume(granted.id, operations: 2))
+        XCTAssertTrue(store.consume(granted.id, operations: 2))
         XCTAssertTrue(store.liveGrants().isEmpty, "an exhausted grant is removed, not left at zero")
     }
 
-    /// Finding #16: Calling consume or consumeEnvelope with zero or negative operations
-    /// returns false rather than trapping with a precondition.
+    /// Calling consume or consumeEnvelope with zero or negative operations returns false rather
+    /// than trapping with a precondition.
     func testConsumeWithZeroOrNegativeOperationsReturnsFalse() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let granted = try store.issue(
             capability: .transactionManage,
@@ -402,26 +355,20 @@ final class GrantStoreTests: XCTestCase {
             remainingOperations: 5,
         )
 
-        XCTAssertFalse(try store.consume(granted.id, operations: 0))
-        XCTAssertFalse(try store.consume(granted.id, operations: -1))
+        XCTAssertFalse(store.consume(granted.id, operations: 0))
+        XCTAssertFalse(store.consume(granted.id, operations: -1))
         XCTAssertEqual(try XCTUnwrap(store.liveGrants().first).remainingOperations, 5)
 
         try store.issueEnvelope(envelope: Self.envelope(id: "e-nonpositive"), now: clock.now())
-        XCTAssertFalse(try store.consumeEnvelope("e-nonpositive", operations: 0))
-        XCTAssertFalse(try store.consumeEnvelope("e-nonpositive", operations: -2))
+        XCTAssertFalse(store.consumeEnvelope("e-nonpositive", operations: 0))
+        XCTAssertFalse(store.consumeEnvelope("e-nonpositive", operations: -2))
     }
 
-    /// THE PERSIST RACE, under load: a persist that snapshots, encodes and writes as
-    /// separate steps can land STALE content after a newer persist has already written —
-    /// a revoked grant back in the file the next boot reads. The write is serialized now,
-    /// so the property this asserts is: after concurrent issue and revoke quiesce, the
-    /// file on disk is EXACTLY the state memory holds, and no grant any task revoked is
-    /// in it. The assertion is made against a REOPENED store, because memory converging
-    /// while the file lags is precisely the failure this guards against.
-    func testConcurrentIssueAndRevokeLeaveTheFileEqualToMemoryAndNeverResurrect() async throws {
+    /// Thread safety under load: concurrent issue and revoke operations under mutex protection
+    /// leave memory coherent and never resurrect revoked grants.
+    func testConcurrentIssueAndRevokeUnderMemoryMutex() async {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let tasks = 8
         let rounds = 25
@@ -438,7 +385,7 @@ final class GrantStoreTests: XCTestCase {
                         )
                         if let granted {
                             revokedByID.withLock { $0[granted.id] = false }
-                            try? store.revoke(granted.id)
+                            store.revoke(granted.id)
                             revokedByID.withLock { $0[granted.id] = true }
                         }
                         _ = task
@@ -448,45 +395,34 @@ final class GrantStoreTests: XCTestCase {
             }
         }
 
-        // Every issued grant was revoked by the task that issued it, so the live set —
-        // and therefore the file — must be EMPTY.
+        // Every issued grant was revoked by the task that issued it, so the live set must be EMPTY.
         XCTAssertTrue(store.liveGrants().isEmpty, "every grant was revoked; none may be live")
-        let reopened = try GrantStore.openStore(path: path, clock: clock)
-        XCTAssertEqual(
-            reopened.liveGrants().count, 0,
-            "a revoked grant survived in the file: the persist race resurrected it",
-        )
+        XCTAssertTrue(store.persistedContents().grants.isEmpty)
     }
 
-    /// The same spend against a grant INSIDE an envelope. Envelopes are granted as a unit
-    /// and re-checked per request, so a count on an envelope grant that only decremented
-    /// for ordinary grants would be a bound with a hole exactly the shape of the
-    /// long-running sessions envelopes exist for.
+    /// A spend against a grant INSIDE an envelope decrements through consumeEnvelope.
     func testAnEnvelopeGrantIsSpentThroughItsEnvelope() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         try store.issueEnvelope(envelope: Self.envelope(id: "e-count"), now: clock.now())
         XCTAssertEqual(try XCTUnwrap(store.liveEnvelopes().first).grants.count, 2)
 
-        XCTAssertTrue(try store.consumeEnvelope("e-count", operations: 3))
-        // The FIRST grant that could cover the batch is the one spent, which is the
-        // engine's own matching order.
+        XCTAssertTrue(store.consumeEnvelope("e-count", operations: 3))
+        // The FIRST grant that could cover the batch is spent.
         XCTAssertEqual(
             try XCTUnwrap(store.liveEnvelopes().first).grants.first?.remainingOperations, 2,
         )
-        XCTAssertFalse(try store.consumeEnvelope("e-count", operations: 3))
-        // An unknown envelope cannot be spent, which the interceptor reads as a refusal.
-        XCTAssertFalse(try store.consumeEnvelope("e-absent", operations: 1))
+        XCTAssertFalse(store.consumeEnvelope("e-count", operations: 3))
+        // An unknown envelope cannot be spent.
+        XCTAssertFalse(store.consumeEnvelope("e-absent", operations: 1))
     }
 
     // MARK: - Revocation
 
-    func testRevokingOneGrantIsImmediateAndSurvivesARestart() throws {
+    func testRevokingOneGrantIsImmediateInMemory() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let first = try store.issue(
             capability: .clipboardRead,
@@ -504,18 +440,14 @@ final class GrantStoreTests: XCTestCase {
         )
         XCTAssertEqual(store.liveGrants().count, 2)
 
-        try store.revoke(first.id)
+        store.revoke(first.id)
         XCTAssertEqual(store.liveGrants().map(\.id), [store.liveGrants()[0].id])
-
-        let reopened = try GrantStore.openStore(path: path, clock: clock)
-        XCTAssertEqual(reopened.liveGrants().count, 1, "the revocation did not survive a restart")
-        XCTAssertFalse(reopened.liveGrants().contains { $0.id == first.id })
+        XCTAssertFalse(store.liveGrants().contains { $0.id == first.id })
     }
 
     func testRevokingEverythingRemovesEveryGrantAndEveryEnvelope() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         try store.issue(
             capability: .clipboardRead,
@@ -528,20 +460,14 @@ final class GrantStoreTests: XCTestCase {
         XCTAssertEqual(store.liveGrants().count, 1)
         XCTAssertEqual(store.liveEnvelopes().count, 1)
 
-        try store.revokeAll()
+        store.revokeAll()
         XCTAssertEqual(store.liveGrants().count, 0)
         XCTAssertEqual(store.liveEnvelopes().count, 0)
-        XCTAssertEqual(
-            try GrantStore.openStore(path: path, clock: clock).liveGrants().count,
-            0,
-            "revoke-all did not survive a restart",
-        )
     }
 
     // MARK: - Envelopes
 
-    /// An envelope is validated BEFORE it is stored, because one that is stored and then
-    /// refused is one the operator was told they had.
+    /// An envelope is validated BEFORE it is stored.
     func testEnvelopeValidationRejectsGlobalPersistentScope() throws {
         let global = Self.envelope(
             id: "e-global",
@@ -570,8 +496,7 @@ final class GrantStoreTests: XCTestCase {
         }
     }
 
-    /// An envelope may only cover what the requester actually asked for. One that widens
-    /// beyond the stated intention is pre-authorization for something nobody wanted.
+    /// An envelope may only cover what the requester actually asked for.
     func testEnvelopeValidationRejectsAnUndeclaredCapability() throws {
         let request = Self.clipboardRequest
         let envelope = Self.envelope(
@@ -591,8 +516,7 @@ final class GrantStoreTests: XCTestCase {
         }
     }
 
-    /// And it may not cover a SCOPE the requester did not name, which is the other half of
-    /// the same promise.
+    /// And it may not cover a SCOPE the requester did not name.
     func testEnvelopeValidationRejectsAScopeNobodyAskedFor() throws {
         let envelope = Self.envelope(
             id: "e-scope",
@@ -601,7 +525,6 @@ final class GrantStoreTests: XCTestCase {
         )
         XCTAssertThrowsError(try GrantStore.validateEnvelope(
             envelope: envelope,
-            // The requester asked about TextEdit only.
             requested: [Self.clipboardRequest],
             maximumSeconds: 3600,
         )) { error in
@@ -612,9 +535,6 @@ final class GrantStoreTests: XCTestCase {
     }
 
     func testEnvelopeValidationAcceptsWhatWasAskedFor() throws {
-        // One grant, for the one capability that was asked for, in the one scope that was
-        // named. The shared fixture carries a second, unrelated grant, which the validator
-        // correctly refuses — so this builds its own rather than weakening the check.
         let scope = AuthorizationScope(
             application: .bundleIdentifier("com.apple.TextEdit"),
             operationLimit: 1,
@@ -647,33 +567,24 @@ final class GrantStoreTests: XCTestCase {
         ))
     }
 
-    /// Revoking an envelope revokes everything INSIDE it, in one step. A revocation that
-    /// left the contents behind would not be total.
+    /// Revoking an envelope revokes everything INSIDE it, in one step.
     func testRevokingAnEnvelopeRevokesEverythingInIt() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let envelope = Self.envelope(id: "e-2")
         try store.issueEnvelope(envelope: envelope, now: clock.now())
         XCTAssertEqual(store.liveEnvelopes().count, 1)
         XCTAssertEqual(store.liveEnvelopes()[0].grants.count, 2)
 
-        try store.revokeEnvelope("e-2")
+        store.revokeEnvelope("e-2")
         XCTAssertEqual(store.liveEnvelopes().count, 0)
-        XCTAssertEqual(
-            try GrantStore.openStore(path: path, clock: clock).liveEnvelopes().count,
-            0,
-            "the envelope revocation did not survive a restart",
-        )
     }
 
-    /// An envelope expires as a UNIT, and the grants inside it stop authorizing at the same
-    /// instant rather than each living out its own duration.
+    /// An envelope expires as a UNIT.
     func testAnEnvelopeExpiresAsAUnit() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         try store.issueEnvelope(envelope: Self.envelope(id: "e-3"), now: clock.now())
         XCTAssertEqual(store.liveEnvelopes().count, 1)
@@ -686,12 +597,10 @@ final class GrantStoreTests: XCTestCase {
 
     // MARK: - Issuance refusals
 
-    /// A grant to an UNRESOLVED caller can never authorize anything, so it is refused where
-    /// the refusal can be reported rather than discovered later as a silent no-op.
+    /// A grant to an UNRESOLVED caller is refused.
     func testAGrantToAnUnresolvedCallerIsRefused() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         XCTAssertThrowsError(try store.issue(
             capability: .clipboardRead,
@@ -702,14 +611,13 @@ final class GrantStoreTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error as? GrantIssuanceError, .unresolvedHolder)
         }
-        XCTAssertEqual(store.liveGrants().count, 0, "a refused grant was persisted anyway")
+        XCTAssertEqual(store.liveGrants().count, 0)
     }
 
     /// A count of zero or less authorizes nothing while looking like a grant.
     func testANonPositiveOperationCountIsRefused() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         for count in [0, -1] {
             XCTAssertThrowsError(try store.issue(
@@ -725,14 +633,10 @@ final class GrantStoreTests: XCTestCase {
         }
     }
 
-    /// A `.once` grant completes with the request it authorized and cannot be re-presented,
-    /// so it is never even WRITTEN: the store returns it for the request at hand, but the
-    /// file holds nothing, because a persisted once-grant is one dead entry per approval
-    /// for the life of the installation and nothing can read it back as live.
+    /// A `.once` grant completes with the request it authorized and is never added to standing grants.
     func testAOnceGrantIsNeverLive() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let granted = try store.issue(
             capability: .clipboardRead,
@@ -743,19 +647,14 @@ final class GrantStoreTests: XCTestCase {
         )
         XCTAssertEqual(granted.expiresAt, clock.now())
         XCTAssertEqual(store.liveGrants().count, 0)
-        // THE FILE, not the model: the entry is absent from what was persisted, which is
-        // the claim E30 makes and the read path alone cannot prove.
         XCTAssertTrue(store.persistedContents().grants.isEmpty)
         XCTAssertFalse(granted.authorizes(Self.clipboardRequest, identity: Self.identity(), now: clock.now()))
     }
 
-    /// E30: an expired grant is REMOVED from the file, not merely filtered on read. The
-    /// acceptance is about the file, because the read path always filtered and the file
-    /// still grew — one dead entry per grant for the life of the installation.
+    /// Expired grants are pruned from memory.
     func testExpiredGrantsAreRemovedFromTheStore() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         _ = try store.issue(
             capability: .clipboardRead,
@@ -766,22 +665,18 @@ final class GrantStoreTests: XCTestCase {
         XCTAssertEqual(store.persistedContents().grants.count, 1)
 
         clock.advance(by: .seconds(61))
-        let removed = try store.pruneExpired()
+        let removed = store.pruneExpired()
         XCTAssertEqual(removed, 1)
-        XCTAssertTrue(store.persistedContents().grants.isEmpty, "the file must not retain an expired grant")
+        XCTAssertTrue(store.persistedContents().grants.isEmpty)
 
-        // A PRUNE THAT FINDS NOTHING WRITES NOTHING: persist() is skipped when the count
-        // is zero, so the read path cannot turn into a disk write per request.
-        let next = try store.pruneExpired()
+        let next = store.pruneExpired()
         XCTAssertEqual(next, 0)
     }
 
-    /// E30: a long run of expiring grants leaves a bounded file, because each sweep
-    /// removes every entry that can no longer authorize anything.
-    func testAWeekOfExpiringGrantsLeavesABoundedFile() throws {
+    /// A long run of expiring grants leaves a bounded memory footprint.
+    func testAWeekOfExpiringGrantsLeavesABoundedMemoryStore() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         for _ in 0 ..< 200 {
             _ = try store.issue(
@@ -791,18 +686,17 @@ final class GrantStoreTests: XCTestCase {
                 holder: Self.identity(),
             )
             clock.advance(by: .seconds(2))
-            try store.pruneExpired()
+            store.pruneExpired()
         }
         let contents = store.persistedContents()
         XCTAssertTrue(contents.grants.isEmpty, "every short-lived grant expired and was swept")
         XCTAssertLessThanOrEqual(contents.grants.count, 200)
     }
 
-    /// E30: a revoked grant stops authorizing AND is not retained in the file.
+    /// A revoked grant stops authorizing and is removed from memory.
     func testARevokedGrantIsNotRetained() throws {
         let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = makeStore(clock: clock)
 
         let granted = try store.issue(
             capability: .clipboardRead,
@@ -810,122 +704,9 @@ final class GrantStoreTests: XCTestCase {
             duration: .monotonicSeconds(3600),
             holder: Self.identity(),
         )
-        try store.revoke(granted.id)
+        store.revoke(granted.id)
         XCTAssertTrue(store.persistedContents().grants.isEmpty)
-        // The store's own live view no longer carries the grant: revocation is total,
-        // and a grant the store cannot find cannot authorize through the store.
         XCTAssertFalse(store.liveGrants().contains { $0.id == granted.id })
-        // And a reopened store over the same file — a torn-down-and-rebuilt store, not
-        // a re-read of the same object — has nothing to recover, which is the part the
-        // in-memory view alone cannot prove.
-        let reopened = try GrantStore.openStore(path: path, clock: clock)
-        XCTAssertFalse(reopened.liveGrants().contains { $0.id == granted.id })
-    }
-
-    // MARK: - The file itself
-
-    /// The store refuses a SYMLINKED file. `O_NOFOLLOW` is the reason, and a symlink is how
-    /// a store's writes are redirected somewhere the checks would not have looked.
-    func testTheStoreRefusesASymlinkedFile() throws {
-        let real = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-real-\(UUID().uuidString).json")
-        let link = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-link-\(UUID().uuidString).json")
-        defer {
-            try? FileManager.default.removeItem(at: real)
-            try? FileManager.default.removeItem(at: link)
-        }
-        try Data("{}".utf8).write(to: real)
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
-
-        XCTAssertThrowsError(
-            try GrantStore.openStore(path: link.path, clock: MovableClock()),
-        ) { error in
-            guard case .unreadable = error as? GrantStoreError else {
-                return XCTFail("expected an unreadable store, got \(error)")
-            }
-        }
-    }
-
-    /// And a file with a SECOND hard link, which is a second name for the same bytes and is
-    /// how a store becomes something another path can also write.
-    func testTheStoreRefusesAFileWithMoreThanOneHardLink() throws {
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-\(UUID().uuidString).json")
-        let other = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-other-\(UUID().uuidString).json")
-        defer {
-            try? FileManager.default.removeItem(at: path)
-            try? FileManager.default.removeItem(at: other)
-        }
-        try Data("{}".utf8).write(to: path)
-        XCTAssertEqual(Darwin.link(path.path, other.path), 0)
-
-        XCTAssertThrowsError(
-            try GrantStore.openStore(path: path.path, clock: MovableClock()),
-        ) { error in
-            XCTAssertEqual(
-                error as? GrantStoreError,
-                .tooManyHardLinks(path: path.path, links: 2),
-            )
-        }
-    }
-
-    /// A DIRECTORY is not a store, and a store that accepted one would be a store whose
-    /// integrity nobody could reason about.
-    ///
-    /// The refusal happens at `open` rather than at the regular-file check, because
-    /// `O_RDWR` is not permitted on a directory and the kernel answers EISDIR first. The
-    /// outcome is the same and the specific error is asserted so the order stays visible.
-    func testTheStoreRefusesADirectory() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-dir-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        XCTAssertThrowsError(
-            try GrantStore.openStore(path: directory.path, clock: MovableClock()),
-        ) { error in
-            guard case let .unreadable(_, reason) = error as? GrantStoreError else {
-                return XCTFail("a directory was not refused: \(error)")
-            }
-            XCTAssertTrue(reason.contains("21"), "expected EISDIR, got \(reason)")
-        }
-    }
-
-    /// A file that is NOT a grant store is unreadable, and unreadable denies. Reading it as
-    /// an empty one would turn a corrupt file into a blank slate of permissions.
-    func testACorruptStoreIsUnreadableRatherThanEmpty() throws {
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-grants-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: path) }
-        try Data("this is not a grant store".utf8).write(to: path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
-
-        XCTAssertThrowsError(try GrantStore.openStore(path: path.path, clock: MovableClock())) { error in
-            guard case .unreadable = error as? GrantStoreError else {
-                return XCTFail("expected an unreadable store, got \(error)")
-            }
-        }
-    }
-
-    /// The file the store creates is owner-only, because the permissions are the boundary a
-    /// same-uid reader does not have to cross.
-    func testTheStoreFileIsOwnerPrivate() throws {
-        let clock = MovableClock()
-        let (store, path) = try makeStore(clock: clock)
-        defer { try? FileManager.default.removeItem(atPath: path) }
-
-        try store.issue(
-            capability: .clipboardRead,
-            scope: AuthorizationScope(application: .any),
-            duration: .monotonicSeconds(600),
-            holder: Self.identity(),
-            request: Self.clipboardRequest,
-        )
-        let attributes = try FileManager.default.attributesOfItem(atPath: path)
-        let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).uint16Value
-        XCTAssertEqual(permissions, 0o600)
     }
 
     // MARK: - Envelope fixture
@@ -979,9 +760,9 @@ final class GrantStoreTests: XCTestCase {
 
     // MARK: - Filter validation tests
 
-    func testListGrantsFilterGrammarValidation() throws {
+    func testListGrantsFilterGrammarValidation() {
         let clock = MovableClock()
-        let (store, _) = try makeStore(clock: clock)
+        let store = makeStore(clock: clock)
         let now = clock.now()
 
         let (emptyResp, emptyErr) = AuthorizationMethods.listGrants(

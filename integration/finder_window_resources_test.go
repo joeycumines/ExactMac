@@ -337,14 +337,14 @@ func TestFinderWindows_Resize(t *testing.T) {
 	initialWidth := finderWindow.Bounds.Width
 	initialHeight := finderWindow.Bounds.Height
 
-	// Calculate target size (different from initial)
-	targetWidth := 600.0
-	targetHeight := 400.0
+	// Calculate target size (different from initial, respecting Finder minimum window width)
+	targetWidth := 850.0
+	targetHeight := 500.0
 	if math.Abs(initialWidth-targetWidth) < 50 {
-		targetWidth = 700.0
+		targetWidth = 950.0
 	}
 	if math.Abs(initialHeight-targetHeight) < 50 {
-		targetHeight = 500.0
+		targetHeight = 600.0
 	}
 
 	t.Logf("Resizing window to %.0fx%.0f...", targetWidth, targetHeight)

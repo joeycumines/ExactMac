@@ -384,9 +384,9 @@ console selection lands on the next request without a rebuild, and a change
 can never alter a decision already made. The console writes through
 `HostedPostureHandle`, delivered at startup via `serveHosted(onPostureReady:)`
 (before `serve` is awaited; the function's return value only fires at
-shutdown). Storage is `~/.exactmac/posture.json` at 0600; an absent,
-unreadable, malformed, or unknown-valued file reads as *no preference*
-(→ strict, fail-closed).
+shutdown). Storage is `UserDefaults` (suite `com.exactmac.console` via `PreferencesStore`); an absent,
+unreadable, malformed, unconfirmed, or unknown-valued preference reads as *no preference*
+(→ strict, fail-closed per Option 2).
 
 ### 10.1 One environment variable, two parsers, two typo semantics
 

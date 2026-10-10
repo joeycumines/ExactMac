@@ -63,12 +63,7 @@ final class AgentReasonWireTransportTests: XCTestCase {
     func testAMultibyteReasonCrossesARealTransportByteIdentical() async throws {
         let policy = try PublicRequestDescriptorPolicy.load()
         let clock = SystemMonotonicClock()
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-reason-wire-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let grantStore = try GrantStore.openStore(
-            path: directory.appendingPathComponent("grants.json").path,
+        let grantStore = GrantStore(
             clock: clock,
             maximumEnvelopeSeconds: 3600,
         )

@@ -7,95 +7,6 @@ import os
 // MARK: - Where the server's own state lives
 
 /// The one place the server, the operator interface and the deployment documentation agree on
-/// where state is kept.
-///
-/// THE PATHS ARE HERE RATHER THAN IN THE CALLERS because they have to agree: a grant store the
-/// prompt cannot find, or a state directory the server and the host spell differently, is a
-/// service that denies everything and says nothing useful. `~/.exactmac` is one short
-/// directory, which is not tidiness — it is the whole point of a single derivation.
-enum ExactMacRuntimePaths {
-    /// `~/.exactmac`, or `EXACTMAC_STATE_DIRECTORY` when the operator sets it.
-    ///
-    /// The override exists for the end-to-end verification, which must not write into the
-    /// operator's real state, and for a deployment that keeps state on another volume. It is
-    /// a plain directory path rather than a bundle of individual overrides, because two
-    /// processes disagreeing about where the STATE is the failure, and one variable cannot
-    /// express a partial disagreement.
-    static func stateDirectory(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-    ) -> String {
-        if let override = environment["EXACTMAC_STATE_DIRECTORY"], !override.isEmpty {
-            return override
-        }
-        return NSHomeDirectory() + "/.exactmac"
-    }
-
-    static func auditLogPath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        stateDirectory(environment: environment) + "/audit.log"
-    }
-
-    static func grantStorePath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        stateDirectory(environment: environment) + "/grants.json"
-    }
-
-    /// Creates the state directory at `0700` if it is absent, and refuses it otherwise.
-    ///
-    /// REFUSES rather than repairs, because a directory that exists with the wrong mode or the
-    /// wrong owner is a fact about something the operator did, and quietly widening or
-    /// retaking it is how a store this system treats as private stops being private.
-    static func prepareStateDirectory(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-    ) throws {
-        let path = stateDirectory(environment: environment)
-        var info = stat()
-        if path.withCString({ lstat($0, &info) }) == 0 {
-            guard info.st_mode & mode_t(0o170000) == mode_t(0o040000) else {
-                throw ExactMacRuntimeError.statePathIsNotADirectory(path)
-            }
-            guard info.st_uid == geteuid() else {
-                throw ExactMacRuntimeError.stateDirectoryHasWrongOwner(path, actual: info.st_uid)
-            }
-            let permissions = info.st_mode & 0o777
-            guard permissions == 0o700 else {
-                throw ExactMacRuntimeError.stateDirectoryIsNotOwnerOnly(path, actual: permissions)
-            }
-            return
-        }
-        guard errno == ENOENT else {
-            throw ExactMacRuntimeError.systemCall(operation: "lstat", path: path, code: errno)
-        }
-        guard mkdir(path, 0o700) == 0 else {
-            throw ExactMacRuntimeError.systemCall(operation: "mkdir", path: path, code: errno)
-        }
-    }
-}
-
-enum ExactMacRuntimeError: Error, CustomStringConvertible {
-    case statePathIsNotADirectory(String)
-    case stateDirectoryHasWrongOwner(String, actual: uid_t)
-    case stateDirectoryIsNotOwnerOnly(String, actual: mode_t)
-    case systemCall(operation: String, path: String, code: Int32)
-    case auditUnavailable(reason: String)
-    case grantStoreUnavailable(reason: String)
-
-    var description: String {
-        switch self {
-        case let .statePathIsNotADirectory(path):
-            "\(path) exists and is not a directory"
-        case let .stateDirectoryHasWrongOwner(path, actual):
-            "\(path) is owned by uid \(actual); refusing to use a directory this user does not own"
-        case let .stateDirectoryIsNotOwnerOnly(path, actual):
-            "\(path) has permissions 0\(String(actual, radix: 8)); expected 0700"
-        case let .systemCall(operation, path, code):
-            "\(operation) failed for \(path): errno \(code)"
-        case let .auditUnavailable(reason):
-            "the decision audit is unavailable: \(reason)"
-        case let .grantStoreUnavailable(reason):
-            "the grant store is unavailable: \(reason)"
-        }
-    }
-}
-
 // MARK: - The audit
 
 /// Where a decision goes on the record.
@@ -167,22 +78,11 @@ struct GrantStoreSupply: GrantSupply {
     }
 
     func consume(_ grantIdentifier: String, operations: Int) async -> Bool {
-        do {
-            return try store.consume(grantIdentifier, operations: operations)
-        } catch {
-            // A store that cannot be WRITTEN is a store that cannot honestly record a
-            // spend, and reporting true would let a bound exist only in the log. The
-            // unreadable case denies through the same false an exhausted grant returns.
-            return false
-        }
+        store.consume(grantIdentifier, operations: operations)
     }
 
     func consumeEnvelope(_ envelopeIdentifier: String, operations: Int) async -> Bool {
-        do {
-            return try store.consumeEnvelope(envelopeIdentifier, operations: operations)
-        } catch {
-            return false
-        }
+        store.consumeEnvelope(envelopeIdentifier, operations: operations)
     }
 }
 
@@ -383,7 +283,6 @@ struct ProductionAuthorizationRuntime {
 
     let registry: ConnectionPeerRegistry
     let auditPath: String
-    let grantStorePath: String
     let authorizationRuntime: AuthorizationRuntime
     let consentTimeout: Duration
     /// The live posture, shared with the host: the console's settings control writes the
@@ -397,20 +296,17 @@ struct ProductionAuthorizationRuntime {
     /// after a relaunch shows the choice that survived it.
     let biometricGate: BiometricGateSource
 
-    /// - Throws: when the state directory, the audit log or the grant store cannot be
-    ///   established. Startup fails rather than continuing with a component missing, because a
-    ///   server that cannot record a decision has no reason to be listening, and a grant store
-    ///   that cannot be read is the state in which the system must not be granting things.
+    /// - Throws: when the state directory or the audit log cannot be established.
+    ///   Startup fails rather than continuing with a component missing.
     static func make(
         config: ServerConfig,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         consent: ConsentAnswering? = nil,
     ) throws -> ProductionAuthorizationRuntime {
-        try ExactMacRuntimePaths.prepareStateDirectory(environment: environment)
+        try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment)
 
         let clock = SystemMonotonicClock()
-        let auditPath = ExactMacRuntimePaths.auditLogPath(environment: environment)
-        let grantStorePath = ExactMacRuntimePaths.grantStorePath(environment: environment)
+        let auditPath = ExactMacPaths.auditLogPath(environment: environment)
         let registry = ConnectionPeerRegistry()
 
         // THE POSTURE ORDERING, decided once here: the environment override wins, then the
@@ -425,15 +321,7 @@ struct ProductionAuthorizationRuntime {
         default: nil
         }
         let postureSource = PostureSource(override: envOverride)
-        if envOverride == nil, let stored = PostureSource.loadStoredPreference(environment: environment) {
-            postureSource.setStoredPreference(stored)
-        }
-        // THE GATE IS SEEDED FROM ITS STORED CHOICE — default true, and the loader
-        // already answers true for every corrupt shape, so the seed is unconditional.
         let biometricGateSource = BiometricGateSource()
-        biometricGateSource.setCeremonyRequired(
-            BiometricGateSource.loadStoredGate(environment: environment),
-        )
 
         let audit: DecisionAudit
         do {
@@ -441,16 +329,10 @@ struct ProductionAuthorizationRuntime {
         } catch {
             throw ExactMacRuntimeError.auditUnavailable(reason: String(describing: error))
         }
-        let store: GrantStore
-        do {
-            store = try GrantStore.openStore(
-                path: grantStorePath,
-                clock: clock,
-                maximumEnvelopeSeconds: config.maximumEnvelopeSeconds,
-            )
-        } catch {
-            throw ExactMacRuntimeError.grantStoreUnavailable(reason: String(describing: error))
-        }
+        let store = GrantStore(
+            clock: clock,
+            maximumEnvelopeSeconds: config.maximumEnvelopeSeconds,
+        )
 
         let consentTimeout = Duration.seconds(config.consentTimeoutSeconds)
         let descriptorPolicy = try PublicRequestDescriptorPolicy.load()
@@ -480,12 +362,11 @@ struct ProductionAuthorizationRuntime {
             store: store,
             audit: audit,
             clock: clock,
-            stateDirectory: ExactMacRuntimePaths.stateDirectory(environment: environment),
+            stateDirectory: ExactMacPaths.applicationSupportDirectory(environment: environment),
         )
         return ProductionAuthorizationRuntime(
             registry: registry,
             auditPath: auditPath,
-            grantStorePath: grantStorePath,
             authorizationRuntime: runtime,
             consentTimeout: consentTimeout,
             postureSource: postureSource,

@@ -401,10 +401,9 @@ public struct HostedPostureHandle {
     ///
     /// THE ENVIRONMENT IS FORWARDABLE, and the forwarder exists for the test suite: a
     /// console test that drives the model drives the REAL persist path, and without this
-    /// seam that persist writes the OPERATOR's real `~/.exactmac/posture.json` on every
-    /// test run — a state-corrupting test that never fails either way, because persist
-    /// failures are swallowed. Production callers use the default, which is the process
-    /// environment; the suite passes a temporary state directory.
+    /// seam that persist writes the OPERATOR's real preferences on every test run.
+    /// Production callers use the default, which is the process environment; the suite
+    /// passes a temporary state directory.
     public func setStoredPreference(
         _ posture: Posture,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -415,6 +414,16 @@ public struct HostedPostureHandle {
         } catch {
             ExactMacServerLogger.posturePersistFailed(error)
         }
+    }
+
+    /// Whether interactive Touch ID confirmation is needed to activate a stored non-strict posture.
+    public var needsConfirmation: Bool {
+        source.needsConfirmation
+    }
+
+    /// Confirms the stored non-strict posture after an interactive Touch ID check.
+    public func confirmStoredPreference() {
+        source.confirmStoredPreference()
     }
 }
 
@@ -513,7 +522,6 @@ public func serveHosted(
         // THE GATE DELIVERS LIKE THE POSTURE DOES, and carries the STORED gate when one
         // exists — the loaded value is what the control must display at first render.
         let gate = BiometricGateSource()
-        gate.setCeremonyRequired(BiometricGateSource.loadStoredGate())
         await MainActor.run {
             onPostureReady?(HostedPostureHandle(source: source))
             onBiometricGateReady?(HostedBiometricGateHandle(source: gate))

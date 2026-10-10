@@ -96,17 +96,9 @@ mediating, not the app.
 
 `exactmac.console-install` runs `exactmac.retire-launchagents` for you, which
 unloads `com.exactmac.console` and `io.github.joeycumines.exactmac.server` and
-**archives** their plists under `~/.exactmac/retired-launchagents/` rather than
-deleting them. The order is deliberate: boot out, confirm the job is gone, then
-move the file. A plist left in place is re-bootstrapped at the next login, so a
-retirement that only removed the file would look finished and bring the old
-server back on the next reboot.
-
-To undo it:
-
-```sh
-gmake exactmac.restore-launchagents
-```
+removes their plists directly. The order is deliberate: boot out, confirm the job is gone, then
+remove the file. A plist left in place is re-bootstrapped at the next login, so a
+retirement that only unloaded the service would bring the old server back on the next reboot.
 
 To look without changing anything:
 
@@ -158,7 +150,7 @@ The console application targets build, package, sign, and install the menu-bar a
 | `gmake exactmac.console-build` | Builds the release binary at `Console/.build/release/ExactMacConsole`. |
 | `gmake exactmac.console-app` | Packages `ExactMacConsole.app`, copies SwiftPM resource bundles, writes `Info.plist`, and installs icons and glyphs into `Contents/Resources`. |
 | `gmake exactmac.console-sign` | Signs the bundle ad-hoc (or with `MACOS_SIGN_IDENTITY`) and runs `codesign --verify --deep --strict`. |
-| `gmake exactmac.console-install` | Runs the full build, package, sign, verify, and install sequence to `~/Applications/ExactMacConsole.app`, registers with `lsregister -f`, sets up `~/.exactmac/`, and archives legacy LaunchAgents. |
+| `gmake exactmac.console-install` | Runs the full build, package, sign, verify, and install sequence to `~/Applications/ExactMacConsole.app`, registers with `lsregister -f`, sets up `~/Library/Application Support/ExactMac/`, and removes legacy LaunchAgents. |
 | `gmake exactmac.console-stop` | Terminates running `ExactMacConsole` instances via `pkill -x ExactMacConsole`. |
 | `gmake exactmac.console-uninstall` | Stops the running app, removes `~/Applications/ExactMacConsole.app`, and deletes the socket. |
 
@@ -180,17 +172,16 @@ Source assets live in `Console/Resources/` (`MenuBarGlyph.svg`, `MenuBarGlyph.pn
 | What | Where | Mode |
 |---|---|---|
 | App bundle | `~/Applications/ExactMacConsole.app` | — |
-| gRPC socket | `~/Library/Caches/exactmac.sock` | `srw-------` |
-| State directory | `~/.exactmac/` | `0700` |
-| Grant store | `~/.exactmac/grants.json` | `0600` |
-| Decision log | `~/.exactmac/audit.log` | `0600` |
-| Retired plists | `~/.exactmac/retired-launchagents/` | `0700` |
+| gRPC socket | `~/Library/Application Support/ExactMac/exactmac.sock` | `srw-------` |
+| Application Support directory | `~/Library/Application Support/ExactMac/` | `0700` |
+| Grants & envelopes | Pure in-memory (Invariant 12) | — |
+| Decision log | `~/Library/Application Support/ExactMac/audit.log` | `0600` |
 | MCP binary | `$(go env GOBIN)/exactmac` | — |
 
-The state directory is created at `0700` and the two files inside it at `0600`,
-by the server, not by make. A state directory that exists with the wrong mode or
+The Application Support directory is created at `0700` and the audit log at `0600`,
+by the server, not by make. An Application Support directory that exists with the wrong mode or
 owner is **refused at startup** rather than repaired: it holds the operator's
-grants, and silently widening it would be the wrong repair.
+audit trail, and silently widening it would be the wrong repair.
 
 ## Connecting an agent
 
@@ -266,14 +257,14 @@ To confirm the whole path end to end:
 
 ```sh
 go build -o /tmp/exactmac ./cmd/exactmac
-EXACTMAC_SERVER_SOCKET_PATH=~/Library/Caches/exactmac.sock /tmp/exactmac health
+EXACTMAC_SERVER_SOCKET_PATH=~/Library/Application\ Support/ExactMac/exactmac.sock /tmp/exactmac health
 ```
 
 `server health: SERVING` means the app is listening and answering.
 
 ## The decision log
 
-Every decision is recorded to `~/.exactmac/audit.log` before any handler runs,
+Every decision is recorded to `~/Library/Application Support/ExactMac/audit.log` before any handler runs,
 and each entry carries its own hash chained to the previous one. Editing any
 entry breaks every hash after it; removing an entry from the middle is caught
 too. **Removing the last entry is not detected** — a process that can truncate
@@ -296,9 +287,9 @@ gmake exactmac.console-uninstall
 Stops the app, unregisters the bundle, and removes the app and the socket. It
 deliberately leaves two things and says so:
 
-- **The state directory**, `~/.exactmac/`, which holds your grants and your
+- **The Application Support directory**, `~/Library/Application Support/ExactMac/`, which holds your
   decision history. Remove it deliberately if you mean to:
-  `rm -rf ~/.exactmac/`.
+  `rm -rf ~/Library/Application\ Support/ExactMac/`.
 - **The login item**, which belongs to the bundle that registered it. macOS
   removes it with the bundle; it can also be turned off in System Settings →
   General → Login Items.

@@ -188,7 +188,17 @@ struct AuditVerification: Sendable, Equatable {
 /// the tail is protected would be false. What the chain does buy is that silent tampering
 /// requires re-deriving every subsequent hash, so a cheap edit is a detectable one. That
 /// limit is stated here rather than glossed, and the same limit is what the threat model
-/// records as accepted residual.
+/// The wall-clock time the kernel booted.
+enum SystemBoot {
+    static var wallClockSeconds: Int {
+        var info = timeval()
+        var size = MemoryLayout<timeval>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_BOOTTIME]
+        guard sysctl(&mib, 2, &info, &size, nil, 0) == 0 else { return 0 }
+        return Int(info.tv_sec)
+    }
+}
+
 final class DecisionAudit: @unchecked Sendable {
     let path: String
     private let clock: any MonotonicClock

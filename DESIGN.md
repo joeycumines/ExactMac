@@ -128,9 +128,15 @@ three consent sequences and the lane rules.
 Recorded 2026-10-09 during the UI-redesign replan. These are real operator needs with no drawn
 surface yet; each gets a design first, then code (invariant 16):
 
-1. Queue affordance: when requests queue behind an active prompt, nothing on the prompt says how
-   many are waiting, and there is no way to review or decide them in order. The popover's
-   pending notice carries a count; the prompt itself needs a queue indicator and a review path.
+1. Queue affordance — RESOLVED 2026-10-09 (drawn on the Screens page as `scr/queue-review`).
+   The design now draws both halves: a queue-indicator band at the top of the active prompt's
+   footer whenever requests wait behind it (hidden once the options expand or the prompt
+   settles), and the QueueReview sheet — full-bleed band with a Back link, the waiting count,
+   one row per queued request carrying its consequence, its server-default scope and a Decide
+   link that promotes it to the full prompt, then Approve all as default, the note, Deny all,
+   and the invariant line "Each request receives its own decision. No blanket grant is
+   created." The code implements exactly this: `QueueReview.swift` and the
+   `queuedCount`/`onReviewQueue` affordances on `ApprovalPrompt`.
 2. Notification: the app has no notification center integration. The drawn attention mechanism
    is the window surfacing plus the menu-bar state change; the design does not yet specify what
    happens when the operator is full-screen elsewhere.

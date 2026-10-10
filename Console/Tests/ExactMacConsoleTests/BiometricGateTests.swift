@@ -64,8 +64,7 @@ struct BiometricGateTests {
         )
         let clock = SystemMonotonicClock()
         let audit = try DecisionAudit(path: stateDirectory + "/audit.log", clock: clock)
-        let store = try GrantStore.openStore(
-            path: stateDirectory + "/grants.json",
+        let store = GrantStore(
             clock: clock,
             maximumEnvelopeSeconds: 86400,
         )
@@ -175,16 +174,16 @@ struct BiometricGateTests {
     // MARK: The gate survives a relaunch
 
     @Test
-    func `the gate state survives the file round trip a relaunch performs`() throws {
-        let stateDirectory = Self.temporaryStateDirectory()
-        let gate = BiometricGateSource()
+    func `the gate state survives the preference store round trip a relaunch performs`() throws {
+        let store = InMemoryPreferencesStore()
+        let gate = BiometricGateSource(store: store)
         gate.setCeremonyRequired(false)
-        try gate.persist(environment: ["EXACTMAC_STATE_DIRECTORY": stateDirectory])
+        try gate.persist()
 
-        // A "relaunch" is a fresh source reading the same directory.
+        // A "relaunch" is a fresh source reading the same store.
         #expect(
-            BiometricGateSource.loadStoredGate(environment: ["EXACTMAC_STATE_DIRECTORY": stateDirectory]) == false,
-            "the operator's choice is on disk, not in @State",
+            BiometricGateSource.loadStoredGate(store: store) == false,
+            "the operator's choice is in PreferencesStore, not in @State",
         )
     }
 
@@ -269,5 +268,56 @@ struct BiometricGateTests {
             rowMap["allowOnce"]?.lockedCaption
                 == "Fixed — the bar is set by what each request is, not by a switch here",
         )
+    }
+
+    // MARK: Non-strict stored posture Touch ID confirmation
+
+    @Test
+    func `unconfirmed stored non-strict posture requires Touch ID confirmation and activates upon ceremony`() async {
+        let store = InMemoryPreferencesStore(strings: [PostureSource.preferenceKey: Posture.balanced.rawValue])
+        let source = PostureSource(override: nil, store: store)
+        let handle = HostedPostureHandle(source: source)
+        #expect(handle.needsConfirmation == true)
+        #expect(handle.current == .strict, "unconfirmed non-strict posture fails closed to .strict")
+
+        let ceremony = ScriptedCeremony(outcome: .performed)
+        let windows = ConsoleWindowHost()
+        let settingsVM = SettingsViewModel(
+            presentation: ServerHosting.current(),
+            windows: windows,
+            ceremony: ceremony,
+        )
+        settingsVM.adoptPostureHandle(handle)
+        #expect(settingsVM.displayedPosture == .strict)
+
+        let confirmed = await settingsVM.confirmStoredPosture()
+        #expect(confirmed == true)
+        #expect(ceremony.nonces.count == 1)
+        #expect(ceremony.reasons.first?.contains("Balanced") == true)
+        #expect(settingsVM.displayedPosture == .balanced)
+        #expect(handle.needsConfirmation == false)
+    }
+
+    @Test
+    func `failed ceremony leaves unconfirmed non-strict posture as strict`() async {
+        let store = InMemoryPreferencesStore(strings: [PostureSource.preferenceKey: Posture.balanced.rawValue])
+        let source = PostureSource(override: nil, store: store)
+        let handle = HostedPostureHandle(source: source)
+        #expect(handle.needsConfirmation == true)
+
+        let ceremony = ScriptedCeremony(outcome: .unavailable(.hardwareUnavailable))
+        let windows = ConsoleWindowHost()
+        let settingsVM = SettingsViewModel(
+            presentation: ServerHosting.current(),
+            windows: windows,
+            ceremony: ceremony,
+        )
+        settingsVM.adoptPostureHandle(handle)
+        #expect(settingsVM.displayedPosture == .strict)
+
+        let confirmed = await settingsVM.confirmStoredPosture()
+        #expect(confirmed == false)
+        #expect(settingsVM.displayedPosture == .strict, "failed ceremony does not activate non-strict posture")
+        #expect(handle.needsConfirmation == true)
     }
 }

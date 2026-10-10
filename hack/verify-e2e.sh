@@ -23,19 +23,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # bundle is now the default, and the installed one is an explicit choice.
 ASSEMBLED="$ROOT/.build/macos/ExactMacConsole.app"
 APP="${EXACTMAC_E2E_APP:-$ASSEMBLED}"
-SOCKET="$HOME/Library/Caches/exactmac.sock"
-OWNER="$SOCKET.owner"
 WORK="$(mktemp -d "${TMPDIR:-/var/folders/_r/v0qs308n49952w5gddyqznbw0000gn/T/opencode}/exactmac-e2e.XXXXXX")"
-APP_PID=""
-
-# THE APP'S STATE IS A TEMPORARY DIRECTORY, NOT THE OPERATOR'S. The real ~/.exactmac holds the
-# operator's grants and their decision history, and an end-to-end check has no business
-# appending to either. The app honours EXACTMAC_STATE_DIRECTORY, so this is enough to keep the
-# check out of it -- and STATE is what the checks READ, which in the first version was
-# hardcoded to the operator's directory while the app wrote here, so the check was verifying a
-# log nothing had written to.
+export EXACTMAC_APP_SUPPORT_DIR="$WORK/state"
 export EXACTMAC_STATE_DIRECTORY="$WORK/state"
 STATE="$EXACTMAC_STATE_DIRECTORY"
+SOCKET="$STATE/exactmac.sock"
+export EXACTMAC_SOCKET="$SOCKET"
+OWNER="$SOCKET.owner"
+APP_PID=""
 # HEADLESS, AND THAT IS THE POINT RATHER THAN A LIMITATION. With an operator interface the
 # app installs a consent handler and WAITS for a person on every consent-requiring request, so
 # an unattended check would sit in a timeout rather than in a decision. Headless is the

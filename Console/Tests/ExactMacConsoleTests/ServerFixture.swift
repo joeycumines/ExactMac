@@ -25,6 +25,11 @@ enum ServerFixture {
         agentReason: String? = "answering a question about what you copied",
         operationLimit: Int? = nil,
         offeredKinds: [OfferedDecision.Kind]? = nil,
+        // WHICH OPTION THE ENGINE PUTS IN FOCUS, passed through to the decision so a test
+        // can build queued requests whose defaults differ — the batch decision applies
+        // each request's own mark, and a fixture that could only mark one way cannot test
+        // that.
+        defaultKind: OfferedDecision.Kind = .allowOnce,
         perOptionBiometric: [OfferedDecision.Kind: Bool]? = nil,
     ) -> (AuthorizationRequest, CallerIdentity, AuthorizationDecision) {
         (
@@ -44,6 +49,7 @@ enum ServerFixture {
             identity(),
             decision(
                 offered: offeredKinds ?? [.allowOnce, .allowTargetApplication, .allowSession, .deny],
+                defaultKind: defaultKind,
                 perOptionBiometric: perOptionBiometric,
             ),
         )

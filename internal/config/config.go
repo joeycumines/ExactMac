@@ -348,7 +348,7 @@ func defaultServerSocketPath() string {
 		// leaves the existing TCP branch in charge rather than inventing a path.
 		return ""
 	}
-	return filepath.Join(home, "Library", "Caches", "exactmac.sock")
+	return filepath.Join(home, "Library", "Application Support", "ExactMac", "exactmac.sock")
 }
 
 func getEnv(key, defaultValue string) string {

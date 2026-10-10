@@ -223,7 +223,7 @@ public final class ServerInspectionService: @unchecked Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
     ) throws {
         let (store, _) = try resolveStoreAndClock(environment: environment)
-        try store.revoke(id)
+        store.revoke(id)
     }
 
     /// Revokes all standing grants and pre-authorization envelopes.
@@ -231,7 +231,7 @@ public final class ServerInspectionService: @unchecked Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
     ) throws {
         let (store, _) = try resolveStoreAndClock(environment: environment)
-        try store.revokeAll()
+        store.revokeAll()
     }
 
     /// THE CONSOLE'S WRITE INTO THE DECISION LOG, for the one local act that is a decision:
@@ -334,19 +334,17 @@ public final class ServerInspectionService: @unchecked Sendable {
         environment: [String: String],
     ) throws -> (GrantStore, any MonotonicClock) {
         lock.lock()
+        defer { lock.unlock() }
         if let active = activeState {
             if environment["EXACTMAC_STATE_DIRECTORY"] == nil || environment["EXACTMAC_STATE_DIRECTORY"] == active.stateDirectory {
-                lock.unlock()
                 return (active.store, active.clock)
             }
         }
-        lock.unlock()
 
-        try ExactMacRuntimePaths.prepareStateDirectory(environment: environment)
-        let path = ExactMacRuntimePaths.grantStorePath(environment: environment)
+        // When offline, there is no persistent grant store on disk (Invariant 12).
+        // Return an empty in-memory store so queries yield zero grants.
         let clock = SystemMonotonicClock()
-        let store = try GrantStore.openStore(
-            path: path,
+        let store = GrantStore(
             clock: clock,
             maximumEnvelopeSeconds: ServerConfig.defaultMaximumEnvelopeSeconds,
         )
@@ -366,8 +364,8 @@ public final class ServerInspectionService: @unchecked Sendable {
         }
         lock.unlock()
 
-        try ExactMacRuntimePaths.prepareStateDirectory(environment: environment)
-        let path = ExactMacRuntimePaths.auditLogPath(environment: environment)
+        try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment)
+        let path = ExactMacPaths.auditLogPath(environment: environment)
         let clock = SystemMonotonicClock()
         let audit = try DecisionAudit(path: path, clock: clock)
         return (audit, path)

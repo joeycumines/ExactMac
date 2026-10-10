@@ -660,4 +660,3 @@ struct ErrorState: View {
         )
     }
 }
-

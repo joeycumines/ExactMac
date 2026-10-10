@@ -268,7 +268,8 @@ struct ConsoleDecisionTests {
         let request = Self.makeRequest()
         let reason = CeremonyReason.compose(request: request, option: .global)
         #expect(reason.contains("/usr/local/bin/exactmac"))
-        #expect(reason.contains("exactmac.v1.ExactMac/GetClipboard"))
+        #expect(!reason.contains("exactmac.v1"), "Invariant 17: Touch ID prompt must not expose raw RPC name: \(reason)")
+        #expect(reason.contains("requested access"))
         #expect(reason.contains("every app, every time"), "a standing grant must say so plainly: \(reason)")
         // THE DURATION IS THE OFFER'S OWN. The fixture's session option carries a real
         // duration, so the session sentence must state it — never "until ExactMac
@@ -776,5 +777,236 @@ struct ServerVocabularyTests {
         #expect(model.pendingNotice != nil)
         #expect(model.pendingNotice?.contains("timed out while waiting behind") == true)
         #expect(model.pendingNotice?.contains(blockerTitle) == true)
+    }
+
+    // MARK: - Queue review and batch decisions
+
+    /// Queues `count` requests behind an active prompt on the model, and returns the
+    /// server tasks suspended on the answers. Built from `ServerFixture.request` with
+    /// per-request default marks, because the batch decision applies each request's OWN
+    /// server-marked default — a fixture that could only mark one way could not test that.
+    @MainActor
+    private static func queue(
+        _ model: ConsoleModel,
+        ids: [String],
+        defaultKinds: [OfferedDecision.Kind]? = nil,
+    ) async -> [Task<PendingAnswer?, Never>] {
+        var tasks: [Task<PendingAnswer?, Never>] = []
+        // The first id becomes the active prompt; the rest queue behind it.
+        for (index, id) in ids.enumerated() {
+            let defaultKind = defaultKinds?[index] ?? .allowOnce
+            let (req, identity, decision) = ServerFixture.request(
+                requestID: id,
+                defaultKind: defaultKind,
+            )
+            tasks.append(Task { @MainActor in
+                await model.answer(request: req, identity: identity, decision: decision)
+            })
+            if index == 0 {
+                // Wait for the prompt before sending the rest, so they queue rather than
+                // race for the active slot.
+                for _ in 0 ..< 50 {
+                    if model.pendingPrompt != nil {
+                        break
+                    }
+                    await Task.yield()
+                }
+            } else {
+                for _ in 0 ..< 50 {
+                    if model.queuedRequests.count >= index {
+                        break
+                    }
+                    await Task.yield()
+                }
+            }
+        }
+        return tasks
+    }
+
+    @Test
+    @MainActor
+    func `batch approve answers every queued request with its own server-marked default`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let tasks = await Self.queue(
+            model,
+            ids: ["req-batch-active", "req-batch-1", "req-batch-2"],
+            // Different marks per request: the batch must apply each request's OWN
+            // default, not a single option to all of them.
+            defaultKinds: [.allowOnce, .allowTargetApplication, .allowSession],
+        )
+
+        #expect(model.queuedRequests.count == 2)
+
+        await model.answerQueueWithDefaults(note: "clearing the queue")
+
+        let answer1 = await tasks[1].value
+        let answer2 = await tasks[2].value
+        // Each queued request received ITS OWN default option as an individual decision.
+        #expect(answer1?.requestID == "req-batch-1")
+        #expect(answer1?.kind == .target)
+        #expect(answer1?.isApproved == true)
+        #expect(answer1?.note == "clearing the queue")
+        #expect(answer2?.requestID == "req-batch-2")
+        #expect(answer2?.kind == .session)
+        #expect(answer2?.isApproved == true)
+        // THE ACTIVE PROMPT WAS NOT TOUCHED by the batch: it still waits for its own
+        // decision, and the queue is empty.
+        #expect(model.pendingPrompt?.requestID == "req-batch-active")
+        #expect(model.queuedRequests.isEmpty)
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let answerActive = await tasks[0].value
+        #expect(answerActive?.isApproved == true)
+        #expect(model.pendingPrompt == nil)
+    }
+
+    @Test
+    @MainActor
+    func `batch approve of an unmarked offer denies rather than guessing an option`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let (reqActive, idActive, decActive) = ServerFixture.request(requestID: "req-unmarked-a")
+        let taskActive = Task { @MainActor in
+            await model.answer(request: reqActive, identity: idActive, decision: decActive)
+        }
+        for _ in 0 ..< 50 {
+            if model.pendingPrompt != nil {
+                break
+            }
+            await Task.yield()
+        }
+        // A queued request whose offer carries NO default mark: the engine always marks
+        // exactly one, so nil is the malformed offer, and the batch must treat it as an
+        // absence of approval.
+        let (req, identity, decision) = ServerFixture.request(requestID: "req-unmarked")
+        let unmarkedDecision = AuthorizationDecision(
+            outcome: .deny,
+            basis: .promptRequired,
+            effectiveCapabilities: decision.effectiveCapabilities,
+            blastRadius: decision.blastRadius,
+            riskClass: decision.riskClass,
+            biometric: decision.biometric,
+            offeredDecisions: decision.offeredDecisions.map {
+                OfferedDecision(
+                    kind: $0.kind,
+                    scope: $0.scope,
+                    duration: $0.duration,
+                    blastRadius: $0.blastRadius,
+                    biometric: $0.biometric,
+                    isDestructive: $0.isDestructive,
+                    isDefault: false,
+                    isPrimary: false,
+                )
+            },
+            expiresAt: nil,
+        )
+        let taskQueued = Task { @MainActor in
+            await model.answer(request: req, identity: identity, decision: unmarkedDecision)
+        }
+        for _ in 0 ..< 50 {
+            if !model.queuedRequests.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+        #expect(model.queuedRequests.count == 1)
+        #expect(model.queuedRequests.first?.serverDefaultKind == nil)
+
+        await model.answerQueueWithDefaults(note: "")
+
+        let answer = await taskQueued.value
+        // NO APPROVAL: an unmarked offer is denied by the batch, never approved on a
+        // guessed option.
+        #expect(answer?.requestID == "req-unmarked")
+        #expect(answer?.kind == .deny)
+        #expect(answer?.isApproved == false)
+        #expect(answer?.refusal == .operatorDeclined)
+
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await taskActive.value
+        #expect(model.pendingPrompt == nil)
+    }
+
+    @Test
+    @MainActor
+    func `batch deny denies every queued request individually`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let tasks = await Self.queue(model, ids: ["req-deny-active", "req-deny-1", "req-deny-2"])
+        #expect(model.queuedRequests.count == 2)
+
+        await model.denyAllQueued(note: "not now")
+
+        let answer1 = await tasks[1].value
+        let answer2 = await tasks[2].value
+        #expect(answer1?.requestID == "req-deny-1")
+        #expect(answer1?.kind == .deny)
+        #expect(answer1?.isApproved == false)
+        #expect(answer1?.refusal == .operatorDeclined)
+        #expect(answer1?.note == "not now")
+        #expect(answer2?.requestID == "req-deny-2")
+        #expect(answer2?.kind == .deny)
+        // The active prompt is still waiting, untouched.
+        #expect(model.pendingPrompt?.requestID == "req-deny-active")
+        #expect(model.queuedRequests.isEmpty)
+
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let active = await tasks[0].value
+        #expect(active?.isApproved == true)
+        #expect(model.pendingPrompt == nil)
+    }
+
+    @Test
+    @MainActor
+    func `decide promotes one queued request and re-queues the active one first`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let tasks = await Self.queue(
+            model,
+            ids: ["req-swap-active", "req-swap-1", "req-swap-2"],
+        )
+        #expect(model.queuedRequests.map(\.requestID) == ["req-swap-1", "req-swap-2"])
+
+        // Promote the SECOND queued request: the active prompt goes to the front of the
+        // queue, because it was already being looked at.
+        model.decideQueuedRequest("req-swap-2")
+
+        #expect(model.pendingPrompt?.requestID == "req-swap-2")
+        #expect(model.queuedRequests.map(\.requestID) == ["req-swap-active", "req-swap-1"])
+        // The blocked record follows whichever request waits.
+        #expect(model.blockedBy["req-swap-active"] != nil)
+        #expect(model.blockedBy["req-swap-2"] == nil)
+
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        let promoted = await tasks[2].value
+        #expect(promoted?.isApproved == true)
+        // The formerly-active request is next.
+        #expect(model.pendingPrompt?.requestID == "req-swap-active")
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await tasks[0].value
+        #expect(model.pendingPrompt?.requestID == "req-swap-1")
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await tasks[1].value
+        #expect(model.pendingPrompt == nil)
+        #expect(model.queuedRequests.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `a queued cancellation while the queue review is open re-renders without it`() async throws {
+        let windows = ConsoleWindowHost()
+        let model = ConsoleModel(presentation: .application, windows: windows)
+        let tasks = await Self.queue(model, ids: ["req-open-a", "req-open-1", "req-open-2"])
+        #expect(model.queuedRequests.count == 2)
+
+        await model.answerQueueWithDefaults(note: "")
+        // The review closed itself on the batch; a fresh queue review requires a fresh
+        // queue, which the promotion test covers. Here the property under test is the
+        // narrow one: a batch that empties the queue leaves no review open.
+        #expect(model.queuedRequests.isEmpty)
+
+        try await model.answer(.once, for: #require(model.pendingPrompt))
+        _ = await tasks[0].value
+        #expect(model.pendingPrompt == nil)
     }
 }

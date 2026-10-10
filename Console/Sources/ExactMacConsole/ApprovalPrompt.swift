@@ -211,6 +211,7 @@ struct ApprovalPrompt: View {
     /// value rather than a remembered constant: a prompt that says "45 seconds" while
     /// the server waits 90 is a prompt that lies about its own deadline.
     let consentTimeoutSeconds: Int
+    let createdAt: Date
     let reason: String?
     let implication: String?
     let tree: [CallerTree.Row]
@@ -230,6 +231,15 @@ struct ApprovalPrompt: View {
     /// transition because it owns the state machine, and a view that held its own expansion
     /// flag would be a second state machine.
     var onShowOptions: () -> Void
+    /// How many requests are waiting behind this one. 0 when this is the only question.
+    /// ZERO DEFAULTS HERE rather than at the handlers: the absent value is the honest
+    /// one for every prompt that answers a single request, and the indicator renders on
+    /// the count alone — only the Review link needs a handler.
+    var queuedCount: Int = 0
+    /// Opens the queue review. NIL when there is no review to open: the indicator's
+    /// Review link only renders when a handler exists, so a prompt constructed without
+    /// one cannot grow a link that absorbs the click and opens nothing.
+    var onReviewQueue: (() -> Void)?
 
     @State var operatorNote: String
 
@@ -241,6 +251,7 @@ struct ApprovalPrompt: View {
         riskDot: Color,
         clock: String? = nil,
         consentTimeoutSeconds: Int = ServerConfig.defaultConsentTimeoutSeconds,
+        createdAt: Date = Date(),
         reason: String? = nil,
         implication: String? = nil,
         tree: [CallerTree.Row],
@@ -252,6 +263,8 @@ struct ApprovalPrompt: View {
         showOptionsLabel: String? = nil,
         offeredOptions: [PendingRequest.Offered],
         operatorNote: String = "",
+        queuedCount: Int = 0,
+        onReviewQueue: (() -> Void)? = nil,
         // NO DEFAULTS on the three handlers: a prompt constructed without a decision
         // handler is a consent surface whose buttons absorb clicks and decide nothing.
         // Every construction site states what happens when the operator chooses.
@@ -266,6 +279,7 @@ struct ApprovalPrompt: View {
         self.riskDot = riskDot
         self.clock = clock
         self.consentTimeoutSeconds = consentTimeoutSeconds
+        self.createdAt = createdAt
         self.reason = reason
         self.implication = implication
         self.tree = tree
@@ -277,6 +291,8 @@ struct ApprovalPrompt: View {
         self.showOptionsLabel = showOptionsLabel
         self.offeredOptions = offeredOptions
         self._operatorNote = SwiftUI.State(initialValue: operatorNote)
+        self.queuedCount = queuedCount
+        self.onReviewQueue = onReviewQueue
         self.onDecision = onDecision
         self.onCopyPayload = onCopyPayload
         self.onShowOptions = onShowOptions
@@ -316,7 +332,15 @@ struct ApprovalPrompt: View {
             HStack(alignment: .center, spacing: Design.Space.chip) {
                 StatusPill(kind: .risk(risk, riskDot))
                 Spacer(minLength: 0)
-                if let clock {
+                if state == .pending || state == .expanded, consentTimeoutSeconds > 0 {
+                    TimelineView(.periodic(from: createdAt, by: 1.0)) { context in
+                        let elapsed = Int(context.date.timeIntervalSince(createdAt))
+                        let remaining = max(0, consentTimeoutSeconds - elapsed)
+                        Text("decides in \(PendingRequest.clockLabel(remaining))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Design.Ink.textTertiary)
+                    }
+                } else if let clock {
                     Text(clock)
                         .font(.system(size: 11))
                         .foregroundStyle(Design.Ink.textTertiary)
@@ -446,21 +470,7 @@ struct ApprovalPrompt: View {
         }
         .frame(height: Design.Layout.promptScrollHeight)
         .background(Design.Ink.surfaceSunken)
-        // THE RAIL, because this region is CUT ON PURPOSE and the cut was silent. The design
-        // draws a scrollbar here in every body-scroll it draws; without one the payload
-        // block simply stops, under a caption that says nothing is truncated, and a reader
-        // is right to conclude the rest of the request was withheld.
-        .overlay(alignment: .trailing) {
-            ScrollRail(geometry: disclosureGeometry)
-        }
-        .onScrollGeometryChange(for: ScrollRail.Measurement.self) { geometry in
-            ScrollRail.Measurement(geometry: geometry)
-        } action: { _, measurement in
-            disclosureGeometry = measurement
-        }
     }
-
-    @State private var disclosureGeometry: ScrollRail.Measurement?
 
     /// The tallest the agent's reason may grow before it scrolls in its own box.
     ///
@@ -483,6 +493,17 @@ struct ApprovalPrompt: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: Design.Space.three) {
+            // The queue indicator states a FACT the operator needs before deciding this
+            // request: more questions are waiting behind it. It sits at the top of the
+            // footer — above the biometric strip — because it changes what any decision
+            // here means for the requests behind it, and a fact that changes a decision
+            // belongs where the decision is made. It hides once the options are expanded
+            // (the operator is mid-choice) and once the prompt settles (nothing waits
+            // behind a settled prompt that still has a queue, because the queue advances).
+            if showsQueueIndicator {
+                queueIndicator
+            }
+
             HStack(alignment: .center, spacing: Design.Space.chip) {
                 StatusDot(biometricDot, diameter: 8)
                 Text(biometricLine)
@@ -498,51 +519,80 @@ struct ApprovalPrompt: View {
             )
 
             if state == .expanded {
-                // The primary button is GONE. There is no default affordance, because the
-                // options are the decision and one highlighted button beside the rows would
-                // be a second, weaker default.
-                //
-                // THE SERVER'S OFFER, NOT ALL SIX KINDS. Rendering `OptionRow.Kind.allCases`
-                // showed options the server had withdrawn — session and envelope under the
-                // strict posture, the target option for a global request — and a click on
-                // one of those was a decision the server would refuse. The list is the
-                // offer, in the server's own order.
                 VStack(spacing: Design.Space.leading) {
                     ForEach(offeredOptions, id: \.kind) { option in
                         OptionRow(
                             kind: option.kind,
                             scopeLine: option.scopeLine,
                             isDefault: option.isDefault,
+                            shortcut: option.isDefault ? .defaultAction : nil,
                         ) { onDecision(option.kind, operatorNote) }
                     }
+                }
+
+                NoteField(text: $operatorNote)
+
+                HStack(alignment: .center, spacing: Design.Space.chip) {
+                    ConsoleButton(
+                        title: "Deny",
+                        kind: .deny,
+                        shortcut: .cancelAction,
+                    ) {
+                        onDecision(.deny, operatorNote)
+                    }
+                    .frame(width: 96)
+
+                    Spacer(minLength: 0)
                 }
             } else if isSettled {
                 settledOutcome
             } else {
-                // THE COLLAPSED PRIMARY ACTION IS THE SERVER'S DEFAULT OPTION, NOT A LABEL.
-                // It used to be a `ConsoleButton` with no action at all, which is why the
-                // alert could be opened, read, and never answered: every request in the
-                // running product timed out and was denied while the screen said "Allow
-                // once". The label is the option's own title, so the button says what it
-                // does even when the server's focus is not the once offer.
-                CollapsedActions(
-                    primary: focusedKind,
-                    onDecision: { kind in onDecision(kind, operatorNote) },
-                )
-            }
+                NoteField(text: $operatorNote)
 
-            NoteField(text: $operatorNote)
+                if let moreChoicesLabel {
+                    HStack(alignment: .center, spacing: Design.Space.chip) {
+                        Text(moreChoicesLabel)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Design.Ink.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button(action: onShowOptions) {
+                            Text(showOptionsLabel ?? "Show options")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Design.Ink.accentText)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, Design.Space.leading)
+                    .padding(.horizontal, Design.Space.three)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                            .fill(Design.Ink.surfaceSunken),
+                    )
+                }
 
-            if !isSettled, state != .expanded {
-                Rectangle()
-                    .fill(Design.Ink.separator)
-                    .frame(height: 1)
-                DenyRow(
-                    moreChoicesLabel: moreChoicesLabel,
-                    showOptionsLabel: showOptionsLabel,
-                    onDeny: { onDecision(.deny, operatorNote) },
-                    onShowOptions: onShowOptions,
-                )
+                HStack(alignment: .center, spacing: Design.Space.chip) {
+                    ConsoleButton(
+                        title: "Deny",
+                        kind: .deny,
+                        shortcut: .cancelAction,
+                    ) {
+                        onDecision(.deny, operatorNote)
+                    }
+                    .frame(width: 96)
+
+                    Spacer(minLength: 0)
+
+                    ConsoleButton(
+                        title: focusedKind.title,
+                        kind: .primary,
+                        shortcut: .defaultAction,
+                    ) {
+                        onDecision(focusedKind, operatorNote)
+                    }
+                    .frame(minWidth: 150)
+                }
             }
         }
         .padding(.top, Design.Space.three)
@@ -599,79 +649,50 @@ struct ApprovalPrompt: View {
         )
     }
 
+    /// Whether the queue indicator shows: requests are waiting behind this one, and the
+    /// prompt is neither expanded (the operator is mid-choice) nor settled (a settled
+    /// prompt has no live decision the count could inform).
+    var showsQueueIndicator: Bool {
+        queuedCount > 0 && !isSettled && state != .expanded
+    }
+
+    /// The indicator, matching the design's queue-indicator band: a sunken row with an
+    /// accent dot, the waiting count, and — only where a review handler is wired — a
+    /// Review link. A count with no way to open the review would be a fact the operator
+    /// cannot act on, so the link renders only where one exists.
+    private var queueIndicator: some View {
+        HStack(alignment: .center, spacing: Design.Space.chip) {
+            StatusDot(Design.Ink.accent, diameter: 8)
+            Text("\(queuedCount) more waiting")
+                .font(.system(size: 11))
+                .foregroundStyle(Design.Ink.textSecondary)
+            Spacer(minLength: 0)
+            if let onReviewQueue {
+                Button(action: onReviewQueue) {
+                    Text("Review queue")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Design.Ink.accentText)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, Design.Space.three)
+        .padding(.vertical, Design.Space.chip)
+        .background(
+            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                .fill(Design.Ink.surfaceSunken),
+        )
+    }
+
     private var isSettled: Bool {
         state == .denied || state == .expired || state == .consoleUnreachable
-    }
-}
-
-/// The collapsed affordances, deliberately far apart: a primary action at the top right and
-/// a deny at the bottom left, separated by a hairline and the note field, so muscle memory
-/// cannot reach the destructive row from the default one.
-private struct CollapsedActions: View {
-    let primary: OptionRow.Kind
-    let onDecision: (OptionRow.Kind) -> Void
-
-    var body: some View {
-        HStack {
-            Spacer(minLength: 0)
-            // LABELLED WITH THE OPTION, not with a fixed "Allow once", because the option the
-            // server put in focus is the one the operator is being offered, and a fixed label
-            // next to a different default is a lie the operator acts on.
-            ConsoleButton(title: primary.title, kind: .primary) {
-                onDecision(primary)
-            }
-            .frame(width: 150)
-        }
-    }
-}
-
-private struct DenyRow: View {
-    let moreChoicesLabel: String?
-    let showOptionsLabel: String?
-    let onDeny: () -> Void
-    let onShowOptions: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: Design.Space.chip) {
-            ConsoleButton(title: "Deny", kind: .deny, action: onDeny)
-                .frame(width: 96)
-            if let moreChoicesLabel {
-                HStack(alignment: .center, spacing: Design.Space.chip) {
-                    Text(moreChoicesLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Design.Ink.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    // A BUTTON, because the whole point of the row is that the other
-                    // options are one click away. It was a `Text`, so the options were not
-                    // merely hidden but unreachable.
-                    Button(action: onShowOptions) {
-                        Text(showOptionsLabel ?? "Show options")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Design.Ink.accentText)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, Design.Space.leading)
-                .padding(.horizontal, Design.Space.three)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                        .fill(Design.Ink.surfaceSunken),
-                )
-            }
-        }
     }
 }
 
 struct NoteField: View {
     @Binding var text: String
 
-    /// ONE CAPTION, because the note travels with whichever decision the operator makes —
-    /// approval or denial — and the field cannot know which one is about to be chosen. It
-    /// used to switch on a "selected option" that was never selectable, so the denial
-    /// variant was dead copy.
-    static let caption = "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION"
+    static let caption = "NOTE FOR AUDIT LOG — RECORDED WITH DECISION"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
@@ -679,7 +700,7 @@ struct NoteField: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Design.Ink.textSecondary)
             TextField(
-                "Why are you deciding this way? The agent sees this.",
+                "Explain your reasoning for the audit log.",
                 text: $text,
                 axis: .vertical,
             )

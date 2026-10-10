@@ -55,7 +55,9 @@ enum CeremonyReason {
         case .global: "allow every app, every time, for \(duration(of: .global, in: request))"
         }
         let asked = "ExactMac asks to \(permits)"
-        let caller = "\(request.executablePath) called \(request.rpcName)"
+        // Strip internal rpcName to strictly satisfy Invariant 17:
+        // No operator-facing string exposes an internal identifier or RPC name.
+        let caller = "\(request.executablePath) requested access"
         guard let failure else { return "\(caller). \(asked)." }
         return "\(caller). \(asked). It did not happen: \(failure.explanation)."
     }

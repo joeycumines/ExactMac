@@ -12,12 +12,9 @@ import Testing
 /// things that host has to get right, and one of them is why the host takes an application
 /// seam at all.
 ///
-/// THE POLICY CHOREOGRAPHY IS THE PART THAT MATTERS AND THE PART THAT HAD NEVER BEEN
-/// EXERCISED: presenting a window makes the app `regular` so the ceremony's frontmost check
-/// can pass, and closing the last window puts it back to `accessory` so the Dock icon does
-/// not outlive the window that needed it. It is asserted through a fake application because
-/// this package's tests must run with no window server, and `NSApp` does not exist in a test
-/// process at all.
+/// THE PERMANENT ACCESSORY POLICY ELIMINATES DOCK ICON THRASHING: presenting a window or
+/// performing a ceremony activates the application without flipping activation policy to `regular`.
+/// The app remains permanently an accessory, and the Dock icon never appears or flickers.
 @Suite("Console windows")
 @MainActor
 struct ConsoleWindowHostTests {
@@ -26,23 +23,13 @@ struct ConsoleWindowHostTests {
         private(set) var transitions: [String] = []
         private(set) var activations = 0
         private(set) var attentionRequests = 0
-        private var regular = false
+        var regular = false
         /// Settable so a test can pin whether the console is already frontmost, which is
         /// what decides whether a new request asks for attention at all.
         var isActive = false
 
         var isRegular: Bool {
             regular
-        }
-
-        func becomeRegular() {
-            regular = true
-            transitions.append("regular")
-        }
-
-        func becomeAccessory() {
-            regular = false
-            transitions.append("accessory")
         }
 
         func activate() {
@@ -78,7 +65,7 @@ struct ConsoleWindowHostTests {
     }
 
     @Test
-    func `the ceremony is what takes focus, and only then`() async {
+    func `the ceremony activates the application without policy transitions`() async {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
         let model = ConsoleModel(
@@ -88,25 +75,21 @@ struct ConsoleWindowHostTests {
         let request = ConsoleDecisionTests.fixtureRequest(requiresBiometric: true)
         model.deliverPending(request)
         #expect(!application.isRegular, "arriving did not take focus")
+        #expect(application.activations == 0)
 
-        // THE REAL OPERATOR PATH, not `answerValue`. This test's subject is focus, and the
-        // close that hands focus back happens on the answering path — a substitution here
-        // would have quietly tested a function that never closes anything. Whether the
-        // ceremony ran is a different subject and `ConsoleDecisionTests` owns it, against
-        // the value the model returns.
+        // THE REAL OPERATOR PATH, not `answerValue`. This test's subject is activation, and the
+        // close that hands focus back happens on the answering path.
         await model.answer(.session, for: request)
 
-        // The TRANSITION, not the end state: the decision closes the window, and closing the
-        // last window hands focus back. Asserting the end state would assert that the app was
-        // left regular with nothing on screen, which is the bug the host exists to prevent.
         #expect(
-            application.transitions.first == "regular",
-            "the ceremony refuses unless the console is frontmost, so this is where focus is paid for: \(application.transitions)",
+            application.transitions.isEmpty,
+            "permanent accessory policy: zero policy flips to regular and back",
         )
         #expect(
-            application.transitions == ["regular", "accessory"],
-            "and it is given back when the decision closes the window: \(application.transitions)",
+            application.activations > 0,
+            "the ceremony activates the application to ensure it is frontmost for sensor check",
         )
+        #expect(!application.isRegular)
     }
 
     @Test
@@ -119,10 +102,12 @@ struct ConsoleWindowHostTests {
         )
         model.deliverPending(ConsoleDecisionTests.fixtureRequest())
 
-        // The operator clicked it. They asked for this window, so it comes forward with the
-        // application rather than asking them to click again to raise it.
+        // The operator clicked it. They asked for this window, so it activates the
+        // application without policy thrashing.
         model.openApproval()
-        #expect(application.isRegular)
+        #expect(!application.isRegular)
+        #expect(application.activations > 0)
+        #expect(application.transitions.isEmpty)
     }
 
     @Test
@@ -150,21 +135,19 @@ struct ConsoleWindowHostTests {
         let host = ConsoleWindowHost(application: application)
         host.present(.activity, title: "Activity", activates: true) { Text("activity") }
         let window = try #require(host.window(forTesting: .activity))
-        #expect(application.isRegular)
+        #expect(!application.isRegular)
+        #expect(application.activations > 0)
 
         // The operator's own close button goes through AppKit's delegate rather than through
-        // the host, and a host that still believed a window was open would leave the app
-        // `regular` with nothing on screen.
+        // the host, and a host that still believed a window was open would leave stale state.
         window.performClose(nil)
-        #expect(
-            !application.isRegular,
-            "a window closed with its own button must restore the accessory policy",
-        )
+        #expect(!application.isRegular)
+        #expect(application.transitions.isEmpty)
         #expect(host.window(forTesting: .activity) == nil)
     }
 
     @Test
-    func `different surfaces are different windows and closing all restores the accessory`() throws {
+    func `different surfaces are different windows and closing all cleans up`() throws {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
         host.present(.approval, title: "Approval", activates: true) { Text("a") }
@@ -175,6 +158,7 @@ struct ConsoleWindowHostTests {
 
         host.closeAll()
         #expect(!application.isRegular)
+        #expect(application.transitions.isEmpty)
         #expect(host.window(forTesting: .approval) == nil)
         #expect(host.window(forTesting: .activity) == nil)
     }
@@ -237,23 +221,28 @@ struct ConsoleWindowHostTests {
         // The row the operator clicks.
         model.openApproval()
 
-        #expect(application.isRegular, "the prompt must be a real window, not a popover line")
+        #expect(!application.isRegular)
+        #expect(application.activations > 0)
+        #expect(application.transitions.isEmpty)
         #expect(model.windows.window(forTesting: .approval) != nil)
     }
 
     @Test
-    func `the approval window persists in the foreground as a floating window`() throws {
+    func `the approval window persists in the foreground as a floating panel`() throws {
         let application = FakeApplication()
         let host = ConsoleWindowHost(application: application)
         let model = ConsoleModel(windows: host, ceremony: nil)
         model.deliverPending(ConsoleDecisionTests.fixtureRequest())
 
         let window = try #require(host.window(forTesting: .approval))
-        // FLOATING, not normal: a normal window sinks behind whatever the operator
+        // FLOATING PANEL, not normal: a normal window sinks behind whatever the operator
         // switches to next, and a consent request that expires unseen is a denial the
         // operator never knew about. Floating keeps it above other apps' windows without
         // becoming key, so the keyboard stays where the operator left it.
+        #expect(window is ConsoleFloatingPanel)
+        #expect((window as? NSPanel)?.isFloatingPanel == true)
         #expect(window.level == .floating)
+        #expect(window.canBecomeKey)
         #expect(
             window.collectionBehavior.contains(.canJoinAllSpaces),
             "the request must follow the operator across Spaces rather than waiting on the one it opened on",
@@ -307,14 +296,18 @@ struct ConsoleWindowHostTests {
             await model.answer(request: req1, identity: id1, decision: dec1)
         }
         for _ in 0 ..< 50 {
-            if model.pendingPrompt != nil { break }
+            if model.pendingPrompt != nil {
+                break
+            }
             await Task.yield()
         }
         let task2 = Task { @MainActor in
             await model.answer(request: req2, identity: id2, decision: dec2)
         }
         for _ in 0 ..< 50 {
-            if !model.queuedRequests.isEmpty { break }
+            if !model.queuedRequests.isEmpty {
+                break
+            }
             await Task.yield()
         }
         let first = try #require(windows.window(forTesting: .approval))

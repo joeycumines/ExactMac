@@ -40,20 +40,32 @@ enum ScopeDescription {
         return sentence
     }
 
+    /// Resolves a bundle identifier like "com.apple.TextEdit" to a readable application name like "TextEdit".
+    static func displayName(forBundleID bundleID: String) -> String {
+        if let last = bundleID.split(separator: ".").last, !last.isEmpty {
+            return String(last)
+        }
+        return bundleID
+    }
+
     /// The application half, or nil when the scope is not narrowed to one.
     private static func application(_ target: TargetApplication) -> String? {
         switch target {
         case .any:
             nil
         case let .bundleIdentifier(identifier):
-            "in \(identifier)"
+            "in \(displayName(forBundleID: identifier))"
         case let .processIdentifier(pid):
             "in process \(pid)"
         case let .opaqueApplication(resourceName, resolvedBundleIdentifier):
-            // THE RESOLVED NAME IS PREFERRED AND THE OPAQUE ONE IS THE FALLBACK, because a
-            // resource name is a 64-character digest and an operator cannot picture it. The
-            // engine carries the resolved identifier for exactly this.
-            "in \(resolvedBundleIdentifier ?? resourceName)"
+            // The resolved name is preferred and raw digests are concealed per Invariant 17.
+            if let resolved = resolvedBundleIdentifier, !resolved.isEmpty {
+                "in \(displayName(forBundleID: resolved))"
+            } else if resourceName.contains("/") || resourceName.count >= 32 {
+                "in target application"
+            } else {
+                "in \(displayName(forBundleID: resourceName))"
+            }
         }
     }
 

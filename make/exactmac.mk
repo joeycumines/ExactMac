@@ -45,32 +45,8 @@ EXACTMAC_RESOURCE_BUNDLE_NAME    ?= ExactMacServer_ExactMacServer.bundle
 EXACTMAC_REQUIRED_RESOURCE_BUNDLE := $(EXACTMAC_SERVER_BUILD_DIR)/$(EXACTMAC_RESOURCE_BUNDLE_NAME)
 
 EXACTMAC_PLIST          ?= $(HOME)/Library/LaunchAgents/$(EXACTMAC_BUNDLE_ID).plist
-EXACTMAC_SOCKET         ?= $(HOME)/Library/Caches/exactmac.sock
-# The consent channel, in the same owner-only state directory as the grant store and the audit
-# log. It is set HERE and not defaulted in the server, because an absent channel is a
-# deliberate fail-closed configuration: a server without one refuses every consent-requiring
-# capability, and a server that went looking for a channel nobody configured would bind a
-# socket it had no reason to own.
-# The state directory, WHERE THE SERVER KEEPS ITS OWN STATE, and it is spelled out rather
-# than derived.
-#
-# IT USED TO BE `$(dir $(EXACTMAC_CONSOLE_SOCKET))`, on the reasoning that deriving it kept
-# the two in agreement. The console socket is gone — the app is one process and presents
-# consent itself — so the derivation was a live coupling to a retired path: renaming the
-# console socket, or a person "tidying up" a pathname they thought was dead, would have
-# silently moved the GRANT STORE and the audit log with it. A state directory that moves
-# because a different variable changed is a state directory that can be lost.
-#
-# The trailing slash is deliberate and load-bearing: it is used as a path PREFIX below
-# (`$(EXACTMAC_STATE_DIR)grant-store`), which is what `$(dir ...)` used to provide, and
-# dropping it would concatenate `~joeyc.exactmac`.
-EXACTMAC_STATE_DIR       ?= $(HOME)/.exactmac/
-# The retired console socket, kept only so a stale deployment's environment can still be
-# READ and diagnosed. NOTHING creates it, nothing connects to it, and it is deliberately
-# NOT handed to any generated plist: the server still parses it into a config field that no
-# production code reads, so passing it would be a deployment asserting a channel that the
-# architecture no longer has. See `exactmac.retire-launchagents`.
-EXACTMAC_CONSOLE_SOCKET  ?= $(HOME)/.exactmac/console.sock
+EXACTMAC_APP_SUPPORT_DIR ?= $(HOME)/Library/Application Support/ExactMac
+EXACTMAC_SOCKET         ?= $(EXACTMAC_APP_SUPPORT_DIR)/exactmac.sock
 EXACTMAC_STDOUT_LOG     ?= $(HOME)/Library/Logs/exactmac.log
 EXACTMAC_STDERR_LOG     ?= $(HOME)/Library/Logs/exactmac.error.log
 
@@ -308,7 +284,7 @@ $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUILD_VERSION))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_VERSION))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_BUNDLE_ID))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_APP_NAME))
-$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_CONSOLE_SOCKET))
+$(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_APP_SUPPORT_DIR))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDOUT_LOG))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_STDERR_LOG))
 $(eval $(call EXACTMAC_VALIDATE_CONFIG,EXACTMAC_SERVER_BUILD_DIR))
@@ -341,7 +317,7 @@ export EXACTMAC_LAUNCHD_PLIST_E := $(EXACTMAC_LAUNCHD_PLIST)
 # Export user-configurable XML inputs as data; recipes read these through shell
 # variables after the make-time safety gate above.
 export EXACTMAC_APP_NAME EXACTMAC_BUNDLE_ID EXACTMAC_VERSION EXACTMAC_BUILD_VERSION
-export EXACTMAC_MIN_MACOS EXACTMAC_APP_EXECUTABLE EXACTMAC_SOCKET EXACTMAC_CONSOLE_SOCKET
+export EXACTMAC_MIN_MACOS EXACTMAC_APP_EXECUTABLE EXACTMAC_SOCKET EXACTMAC_APP_SUPPORT_DIR
 export EXACTMAC_STDOUT_LOG EXACTMAC_STDERR_LOG
 
 # Only the two piped build recipes need Bash's pipefail.  `private` prevents
@@ -554,18 +530,17 @@ exactmac.launchd: ## Write, bootstrap, and wait for the per-user LaunchAgent.
 	validate_xml_value "$$EXACTMAC_BUNDLE_ID" EXACTMAC_BUNDLE_ID; \
 	validate_xml_value "$$EXACTMAC_APP_EXECUTABLE" EXACTMAC_APP_EXECUTABLE; \
 	validate_xml_value "$$EXACTMAC_SOCKET" EXACTMAC_SOCKET; \
-	validate_xml_value "$$EXACTMAC_CONSOLE_SOCKET" EXACTMAC_CONSOLE_SOCKET; \
 	validate_xml_value "$$EXACTMAC_STDOUT_LOG" EXACTMAC_STDOUT_LOG; \
 	validate_xml_value "$$EXACTMAC_STDERR_LOG" EXACTMAC_STDERR_LOG; \
-	if ! mkdir -p "$(EXACTMAC_STATE_DIR)"; then printf '%s\n' 'ERROR: failed to create the state directory.' >&2; exit 1; fi; \
-	if ! chmod 700 "$(EXACTMAC_STATE_DIR)"; then printf '%s\n' 'ERROR: failed to restrict the state directory to 0700.' >&2; exit 1; fi; \
-	if [ "$$(stat -f '%Lp' "$(EXACTMAC_STATE_DIR)")" != "700" ]; then printf '%s\n' 'ERROR: the state directory is not 0700; the server will refuse to start against it.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(EXACTMAC_APP_SUPPORT_DIR)"; then printf '%s\n' 'ERROR: failed to create the Application Support directory.' >&2; exit 1; fi; \
+	if ! chmod 700 "$(EXACTMAC_APP_SUPPORT_DIR)"; then printf '%s\n' 'ERROR: failed to restrict the Application Support directory to 0700.' >&2; exit 1; fi; \
+	if [ "$$(stat -f '%Lp' "$(EXACTMAC_APP_SUPPORT_DIR)")" != "700" ]; then printf '%s\n' 'ERROR: the Application Support directory is not 0700; the server will refuse to start against it.' >&2; exit 1; fi; \
 	if [ ! -x "$(EXACTMAC_APP_EXECUTABLE)" ]; then \
 		printf '%s\n' 'ERROR: installed app executable is missing.' >&2; \
 		exit 1; \
 	fi; \
 	if ! codesign --verify --deep --strict "$(EXACTMAC_APP_DIR)"; then printf '%s\n' 'ERROR: app signature verification failed.' >&2; exit 1; fi; \
-	if ! mkdir -p "$(dir $(EXACTMAC_PLIST))" "$(dir $(EXACTMAC_SOCKET))" "$(dir $(EXACTMAC_CONSOLE_SOCKET))" "$(dir $(EXACTMAC_STDOUT_LOG))" "$(dir $(EXACTMAC_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
+	if ! mkdir -p "$(dir $(EXACTMAC_PLIST))" "$(dir $(EXACTMAC_SOCKET))" "$(dir $(EXACTMAC_STDOUT_LOG))" "$(dir $(EXACTMAC_STDERR_LOG))"; then printf '%s\n' 'ERROR: failed to create LaunchAgent, socket, or log parent directories.' >&2; exit 1; fi; \
 	plist_tmp=$$(mktemp "$(EXACTMAC_PLIST).tmp.XXXXXX") || { printf '%s\n' 'ERROR: failed to create temporary LaunchAgent plist.' >&2; exit 1; }; \
 	cleanup_plist_tmp() { rm -f "$$plist_tmp"; }; \
 	trap cleanup_plist_tmp EXIT INT TERM; \
@@ -952,7 +927,7 @@ exactmac.console-install: ## Build, sign, install and register the app, then ret
 	if ! ditto "$(MACOS_BUNDLE_DIR)" "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to copy the app into Applications.' >&2; exit 1; fi; \
 	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: the installed bundle failed signature verification.' >&2; exit 1; fi; \
 	if ! "$(EXACTMAC_LSREGISTER)" -f "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: LaunchServices registration failed.' >&2; exit 1; fi; \
-	mkdir -p "$(EXACTMAC_STATE_DIR)"; chmod 700 "$(EXACTMAC_STATE_DIR)"; \
+	mkdir -p "$(EXACTMAC_APP_SUPPORT_DIR)"; chmod 700 "$(EXACTMAC_APP_SUPPORT_DIR)"; \
 	printf 'Installed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.retire-launchagents
 	@printf '%s\n' ''
@@ -1025,9 +1000,9 @@ exactmac.console-uninstall: ## Remove the installed app and the socket. The stat
 	printf '%s\n' 'bundle that created it and macOS removes it when the bundle goes, but it can'; \
 	printf '%s\n' 'also be turned off in System Settings > General > Login Items.'; \
 	printf '%s\n' ''; \
-	printf '%s\n' 'NOT removed: $(EXACTMAC_STATE_DIR)'; \
-	printf '%s\n' '  that is your grant store and decision log. Removing it is a separate,'; \
-	printf '%s\n' '  deliberate act: rm -rf $(EXACTMAC_STATE_DIR)'
+	printf '%s\n' 'NOT removed: $(EXACTMAC_APP_SUPPORT_DIR)'; \
+	printf '%s\n' '  that is your audit log. Removing it is a separate,'; \
+	printf '%s\n' '  deliberate act: rm -rf "$(EXACTMAC_APP_SUPPORT_DIR)"'
 
 .PHONY: exactmac.console-status
 # NO LAUNCHD PROBE HERE, and the omission is deliberate. There is no longer anything launchd
@@ -1038,10 +1013,10 @@ exactmac.console-uninstall: ## Remove the installed app and the socket. The stat
 # login-item registration, which lives inside the app and is visible in System Settings.
 exactmac.console-status: ## Report the console's bundle, signature, and server socket.
 	@set -u; \
-	printf '  App:       %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
-	printf '  Bundle ID: %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
+	printf '  App:           %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	printf '  Bundle ID:     %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
 	printf '  Server socket: %s\n' "$(EXACTMAC_SOCKET)"; \
-	printf '  State dir:     %s\n' "$(EXACTMAC_STATE_DIR)"; \
+	printf '  App Support:   %s\n' "$(EXACTMAC_APP_SUPPORT_DIR)"; \
 	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then \
 		if codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)" 2>/dev/null; then printf '  Signature: verified\n'; else printf '  Signature: MISSING OR INVALID\n'; fi; \
 		ls -ld "$(EXACTMAC_CONSOLE_APP_DIR)"; \
@@ -1076,9 +1051,6 @@ exactmac.console-status: ## Report the console's bundle, signature, and server s
 
 # The two labels the old deployment installed, as a list the recipes iterate.
 EXACTMAC_RETIRED_LABELS := $(EXACTMAC_CONSOLE_BUNDLE_ID) $(EXACTMAC_BUNDLE_ID)
-# Plists are MOVED here rather than deleted, so a mistaken retirement costs one command.
-EXACTMAC_RETIRED_PLIST_DIR ?= $(EXACTMAC_STATE_DIR)retired-launchagents
-
 # 1 reports what WOULD happen and changes nothing. It exists because the first thing anyone
 # does with a target that unloads a running server is wonder what it will touch, and
 # answering that should not require running it. Every mutating step below is guarded on this.
@@ -1107,24 +1079,18 @@ exactmac.retire-launchagents-status: ## Report which superseded LaunchAgents are
 		else printf '  %-52s not loaded\n' "$$label"; fi; \
 		if [ -f "$$plist" ]; then printf '  %-52s installed: %s\n' '' "$$plist"; installed=$$((installed + 1)); fi; \
 	done; \
-	printf '  archive would be: %s\n' '$(EXACTMAC_RETIRED_PLIST_DIR)'; \
 	printf '%s\n' 'To retire them: gmake exactmac.retire-launchagents'
 
 .PHONY: exactmac.retire-launchagents
-exactmac.retire-launchagents: ## Unload and archive the superseded LaunchAgents. Idempotent; reversible with exactmac.restore-launchagents.
+exactmac.retire-launchagents: ## Unload and remove the superseded LaunchAgents directly.
 	@set -u; \
 	dry=0; \
 	[ "$(EXACTMAC_RETIRE_DRY_RUN)" = "1" ] && dry=1; \
 	changed=0; \
-	if [ "$$dry" -eq 0 ]; then \
-		if ! mkdir -p '$(EXACTMAC_RETIRED_PLIST_DIR)'; then printf '%s\n' 'ERROR: could not create the archive directory.' >&2; exit 1; fi; \
-		chmod 700 '$(EXACTMAC_RETIRED_PLIST_DIR)'; \
-	fi; \
 	agents_dir='$(patsubst %/,%,$(dir $(EXACTMAC_CONSOLE_PLIST)))'; \
 	for label in $(EXACTMAC_RETIRED_LABELS); do \
 		target="$(EXACTMAC_LAUNCH_DOMAIN)/$$label"; \
 		plist="$$agents_dir/$$label.plist"; \
-		archive='$(EXACTMAC_RETIRED_PLIST_DIR)'/"$$label".plist; \
 		if launchctl print "$$target" >/dev/null 2>&1; then \
 			if [ "$$dry" -eq 1 ]; then printf '  would unload %s\n' "$$label"; \
 			else \
@@ -1140,54 +1106,24 @@ exactmac.retire-launchagents: ## Unload and archive the superseded LaunchAgents.
 			fi; changed=$$((changed + 1)); \
 		else printf '  %s was not loaded\n' "$$label"; fi; \
 		if [ -f "$$plist" ]; then \
-			if [ "$$dry" -eq 1 ]; then printf '  would archive %s to %s\n' "$$plist" "$$archive"; \
+			if [ "$$dry" -eq 1 ]; then printf '  would remove %s\n' "$$plist"; \
 			else \
-				if [ -e "$$archive" ]; then \
-					printf '  %s: replacing the previously archived plist\n' "$$label"; \
-					rm -f "$$archive"; \
-				fi; \
-				mv "$$plist" "$$archive" || { printf 'ERROR: could not archive %s.\n' "$$plist" >&2; exit 1; }; \
-				chmod 600 "$$archive"; \
-				printf '  %s archived: %s\n' "$$label" "$$archive"; \
+				rm -f "$$plist"; \
+				printf '  %s removed: %s\n' "$$label" "$$plist"; \
 			fi; changed=$$((changed + 1)); \
-		elif [ -f "$$archive" ]; then \
-			printf '  %s was already retired\n' "$$label"; \
 		else printf '  %s has no installed plist\n' "$$label"; fi; \
 	done; \
 	if [ "$$changed" -eq 0 ]; then \
 		printf '%s\n' 'Nothing to retire; both LaunchAgents were already retired.'; \
 	else \
-		printf 'Retired. The app is the service now; turn on its menu bar toggle to have it start at login.'; \
-		printf 'To put them back: gmake exactmac.restore-launchagents\n'; \
+		printf 'Retired. The app is the service now; turn on its menu bar toggle to have it start at login.\n'; \
 	fi
 
 .PHONY: exactmac.restore-launchagents
-exactmac.restore-launchagents: ## Put the archived LaunchAgents back and reload them. Reverses exactmac.retire-launchagents.
-	@set -u; \
-	dry=0; \
-	[ "$(EXACTMAC_RETIRE_DRY_RUN)" = "1" ] && dry=1; \
-	restored=0; \
-	agents_dir='$(patsubst %/,%,$(dir $(EXACTMAC_CONSOLE_PLIST)))'; \
-	for label in $(EXACTMAC_RETIRED_LABELS); do \
-		target="$(EXACTMAC_LAUNCH_DOMAIN)/$$label"; \
-		plist="$$agents_dir/$$label.plist"; \
-		archive='$(EXACTMAC_RETIRED_PLIST_DIR)'/"$$label".plist; \
-		if [ -f "$$plist" ]; then \
-			printf '  %s is already installed; leaving it alone\n' "$$label"; \
-		elif [ -f "$$archive" ]; then \
-			if ! mkdir -p "$$(dirname "$$plist")"; then printf 'ERROR: could not create the LaunchAgents directory.\n' >&2; exit 1; fi; \
-			mv "$$archive" "$$plist" || { printf 'ERROR: could not restore %s.\n' "$$plist" >&2; exit 1; }; \
-			chmod 600 "$$plist"; \
-			printf '  %s restored: %s\n' "$$label" "$$plist"; restored=$$((restored + 1)); \
-		else printf '  %s was never retired\n' "$$label"; fi; \
-		if [ -f "$$plist" ]; then \
-			launchctl enable "$$target" >/dev/null 2>&1 || true; \
-			launchctl bootstrap '$(EXACTMAC_LAUNCH_DOMAIN)' "$$plist" >/dev/null 2>&1 \
-				|| launchctl kickstart "$$target" >/dev/null 2>&1 \
-				|| printf '  WARNING: %s is installed but did not load; run "launchctl print %s" to see why.\n' "$$label" "$$target"; \
-		fi; \
-	done; \
-	if [ "$$restored" -eq 0 ]; then printf '%s\n' 'Nothing was archived; nothing restored.'; fi
+exactmac.restore-launchagents: ## Retired: superseded LaunchAgents are deleted directly; use make exactmac.install to install.
+	@printf '%s\n' 'Restoring legacy LaunchAgents is no longer supported.' >&2; \
+	printf '%s\n' 'The app hosts the server directly. Run "gmake exactmac.console-install" to install.' >&2; \
+	exit 1
 
 # Short aliases. The catalog uses the exactmac.* prefix for everything else in this file, and
 # these exist because the deployment contract names them in that form; they forward, so there

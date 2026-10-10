@@ -119,7 +119,7 @@ let consentHandler: ConsentAnswering? = if operatorInterface.canObtainConsent {
 /// started by hand, and it is the WRONG default for the app, which is the product and would
 /// come up denying everything with no way to say why. An environment variable already set is
 /// left alone, so a diagnostic run can still point the app somewhere else.
-let defaultSocketPath = NSHomeDirectory() + "/Library/Caches/exactmac.sock"
+let defaultSocketPath = ExactMacPaths.defaultSocketPath()
 if ProcessInfo.processInfo.environment["GRPC_UNIX_SOCKET"]?.isEmpty != false {
     setenv("GRPC_UNIX_SOCKET", defaultSocketPath, 1)
 }

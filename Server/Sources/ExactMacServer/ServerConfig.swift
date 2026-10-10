@@ -30,14 +30,6 @@ public struct ServerConfig {
     // also the STRICTER of the two available answers wherever a choice exists, so a server
     // started with no configuration at all is the one least able to do anything.
 
-    /// Where the consent console's socket is, when the server serves one.
-    ///
-    /// NIL BY DEFAULT, and nil is the safe answer: no console socket means the server never
-    /// enters the consent path and every consent-requiring capability is denied. Pointing
-    /// this at a path that does not exist is equally safe, because the connection fails and a
-    /// failed connection is a denial rather than an allow.
-    public let consoleSocketPath: String?
-
     /// How long an operator has to answer before the request is denied.
     ///
     /// Ninety seconds. Long enough to read a disclosure with a payload in it, short enough
@@ -73,13 +65,6 @@ public struct ServerConfig {
         let socket = environment["GRPC_UNIX_SOCKET"]
         let socketValue = socket?.isEmpty == false ? socket : nil
 
-        // NIL BY DEFAULT, and that is the fail-closed rule the rest of this block follows: a
-        // server started with nothing configured is the one least able to do anything. The
-        // deployment states `EXACTMAC_CONSOLE_SOCKET` explicitly, and a server without it
-        // refuses every consent-requiring capability with `consoleUnreachable` — which is the
-        // correct answer, and a server that quietly went looking for a channel nobody
-        // configured would be a server that bound a socket it had no reason to own.
-        let consoleSocket = environment["EXACTMAC_CONSOLE_SOCKET"]
         // An unparseable duration is the DURATION'S DEFAULT rather than its maximum, and the
         // default is the shorter one. A typo in a consent timeout must not double it.
         let consentTimeout = Self.positiveSeconds(
@@ -96,7 +81,6 @@ public struct ServerConfig {
             listenAddress: hostValue,
             port: port,
             unixSocketPath: socketValue,
-            consoleSocketPath: consoleSocket.flatMap { $0.isEmpty ? nil : $0 },
             consentTimeoutSeconds: consentTimeout,
             maximumEnvelopeSeconds: maximumEnvelope,
             defaultPosture: posture,
@@ -134,7 +118,6 @@ public struct ServerConfig {
         listenAddress: String,
         port: Int,
         unixSocketPath: String? = nil,
-        consoleSocketPath: String? = nil,
         consentTimeoutSeconds: Int = ServerConfig.defaultConsentTimeoutSeconds,
         maximumEnvelopeSeconds: Int = ServerConfig.defaultMaximumEnvelopeSeconds,
         defaultPosture: Posture = .strict,
@@ -142,7 +125,6 @@ public struct ServerConfig {
         self.listenAddress = listenAddress
         self.port = port
         self.unixSocketPath = unixSocketPath
-        self.consoleSocketPath = consoleSocketPath
         self.consentTimeoutSeconds = consentTimeoutSeconds
         self.maximumEnvelopeSeconds = maximumEnvelopeSeconds
         self.defaultPosture = defaultPosture

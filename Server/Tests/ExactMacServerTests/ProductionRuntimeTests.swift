@@ -40,13 +40,12 @@ final class ProductionRuntimeTests: XCTestCase {
     /// `ServerConfig` reads the process environment, which a test must not mutate, so the
     /// values under test are handed to the assembler explicitly and the rest come from the
     /// real reader.
-    private func config(_ environment: [String: String]) -> ServerConfig {
+    private func config(_: [String: String]) -> ServerConfig {
         let read = ServerConfig.fromEnvironment()
         return ServerConfig(
             listenAddress: read.listenAddress,
             port: read.port,
             unixSocketPath: nil,
-            consoleSocketPath: environment["EXACTMAC_CONSOLE_SOCKET"].flatMap { $0.isEmpty ? nil : $0 },
             consentTimeoutSeconds: read.consentTimeoutSeconds,
             maximumEnvelopeSeconds: read.maximumEnvelopeSeconds,
             defaultPosture: read.defaultPosture,
@@ -58,22 +57,22 @@ final class ProductionRuntimeTests: XCTestCase {
     /// The directory is created owner-only, and a second call is not an error — a server
     /// restarting finds it and must not treat its own state as foreign.
     func testTheStateDirectoryIsCreatedOwnerOnlyAndIsReusable() throws {
-        try ExactMacRuntimePaths.prepareStateDirectory(environment: environment())
-        let path = ExactMacRuntimePaths.stateDirectory(environment: environment())
+        try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment())
+        let path = ExactMacPaths.applicationSupportDirectory(environment: environment())
         var info = stat()
         XCTAssertEqual(lstat(path, &info), 0)
         XCTAssertEqual(info.st_mode & 0o777, 0o700)
-        XCTAssertNoThrow(try ExactMacRuntimePaths.prepareStateDirectory(environment: environment()))
+        XCTAssertNoThrow(try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment()))
     }
 
     /// A state directory that exists with the wrong mode is REFUSED, not repaired. Silently
     /// widening or retaking a directory the operator made is how a store this system treats
     /// as private stops being private.
     func testAStateDirectoryWithTheWrongModeIsRefusedRatherThanRepaired() throws {
-        let path = ExactMacRuntimePaths.stateDirectory(environment: environment())
-        try ExactMacRuntimePaths.prepareStateDirectory(environment: environment())
+        let path = ExactMacPaths.applicationSupportDirectory(environment: environment())
+        try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment())
         XCTAssertEqual(chmod(path, 0o755), 0)
-        XCTAssertThrowsError(try ExactMacRuntimePaths.prepareStateDirectory(environment: environment()))
+        XCTAssertThrowsError(try ExactMacPaths.prepareApplicationSupportDirectory(environment: environment()))
     }
 
     /// Every path the server and the deployment documentation use is derived from one
@@ -85,9 +84,8 @@ final class ProductionRuntimeTests: XCTestCase {
     /// not exist.
     func testEveryPathComesFromOneDirectory() {
         let environment = environment()
-        let directory = ExactMacRuntimePaths.stateDirectory(environment: environment)
-        XCTAssertEqual(ExactMacRuntimePaths.auditLogPath(environment: environment), directory + "/audit.log")
-        XCTAssertEqual(ExactMacRuntimePaths.grantStorePath(environment: environment), directory + "/grants.json")
+        let directory = ExactMacPaths.applicationSupportDirectory(environment: environment)
+        XCTAssertEqual(ExactMacPaths.auditLogPath(environment: environment), directory + "/audit.log")
     }
 
     // MARK: - The assembled runtime
@@ -110,16 +108,10 @@ final class ProductionRuntimeTests: XCTestCase {
         )
 
         XCTAssertTrue(runtime.auditPath.hasSuffix("/audit.log"))
-        XCTAssertTrue(runtime.grantStorePath.hasSuffix("/grants.json"))
-
-        // A grant that is not a placeholder: the store round-trips through the file.
-        let store = try GrantStore.openStore(
-            path: runtime.grantStorePath,
-            clock: SystemMonotonicClock(),
-        )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: runtime.grantStorePath))
         XCTAssertTrue(FileManager.default.fileExists(atPath: runtime.auditPath))
-        XCTAssertTrue(store.liveGrants().isEmpty)
+
+        // Invariant 12: Zero decision state on disk. Grants live exclusively in memory.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateDirectory + "/grants.json"))
 
         // And the consent posture is stated, not inferred. This process presents the prompt
         // itself, so there is no channel to configure and no socket to assert on; the posture

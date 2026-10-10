@@ -156,9 +156,9 @@ func TestMCPServer_UnixSocketAddressFormat(t *testing.T) {
 		},
 		{
 			name:       "user socket path",
-			socketPath: "/Users/test/.exactmac/socket",
+			socketPath: "/Users/test/Library/Application Support/ExactMac/exactmac.sock",
 			wantPrefix: "unix://",
-			wantPath:   "/Users/test/.exactmac/socket",
+			wantPath:   "/Users/test/Library/Application Support/ExactMac/exactmac.sock",
 		},
 	}
 

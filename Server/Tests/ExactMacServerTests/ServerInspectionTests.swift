@@ -90,9 +90,8 @@ final class ServerInspectionTests: XCTestCase {
     // MARK: - Grants Inspection Tests
 
     func testGrantExpiryCalculationAndCountdownStates() throws {
-        let clock = MovableClock(10_000_000_000)
-        let grantStorePath = stateDirectory + "/grants.json"
-        let store = try GrantStore.openStore(path: grantStorePath, clock: clock, maximumEnvelopeSeconds: 86400)
+        let clock = MovableClock()
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let auditPath = stateDirectory + "/audit.log"
         let audit = try DecisionAudit(path: auditPath, clock: clock)
 
@@ -174,7 +173,7 @@ final class ServerInspectionTests: XCTestCase {
 
     func testRevocationIndividuallyAndAll() throws {
         let clock = MovableClock()
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let audit = try DecisionAudit(path: stateDirectory + "/audit.log", clock: clock)
 
         ServerInspectionService.register(
@@ -227,7 +226,7 @@ final class ServerInspectionTests: XCTestCase {
         let clock = MovableClock()
         let auditPath = stateDirectory + "/audit.log"
         let audit = try DecisionAudit(path: auditPath, clock: clock)
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
 
         ServerInspectionService.register(
             store: store,
@@ -294,7 +293,7 @@ final class ServerInspectionTests: XCTestCase {
         let clock = MovableClock()
         let auditPath = stateDirectory + "/audit.log"
         let audit = try DecisionAudit(path: auditPath, clock: clock)
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
 
         let caller = Self.sampleIdentity()
         let req = Self.sampleRequest()
@@ -343,7 +342,7 @@ final class ServerInspectionTests: XCTestCase {
 
     func testNegativeClockSkewDoesNotUnderflow() throws {
         let clock = MovableClock(1_000_000_000)
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
         let audit = try DecisionAudit(path: stateDirectory + "/audit.log", clock: clock)
 
         ServerInspectionService.register(
@@ -377,7 +376,7 @@ final class ServerInspectionTests: XCTestCase {
     func testDenialReasonsAndInvariant17() throws {
         let clock = MovableClock()
         let audit = try DecisionAudit(path: stateDirectory + "/audit.log", clock: clock)
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
 
         ServerInspectionService.register(
             store: store,
@@ -426,7 +425,7 @@ final class ServerInspectionTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: invalidPath)
         let clock = MovableClock()
         let audit = try DecisionAudit(path: invalidPath, clock: clock)
-        let store = try GrantStore.openStore(path: stateDirectory + "/grants.json", clock: clock, maximumEnvelopeSeconds: 86400)
+        let store = GrantStore(clock: clock, maximumEnvelopeSeconds: 86400)
 
         ServerInspectionService.register(
             store: store,

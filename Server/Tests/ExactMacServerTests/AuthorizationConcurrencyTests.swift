@@ -26,10 +26,7 @@ final class AuthorizationConcurrencyTests: XCTestCase {
     /// with nothing, not with seven.
     func testACountBoundedGrantCannotBeDoubleConsumedUnderConcurrency() throws {
         let clock = MovableClock()
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-concurrency-\(UUID().uuidString).json").path
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        let store = try GrantStore.openStore(path: path, clock: clock)
+        let store = GrantStore(clock: clock)
 
         let grant = try store.issue(
             capability: .transactionManage,
@@ -67,10 +64,7 @@ final class AuthorizationConcurrencyTests: XCTestCase {
     /// grant they took back.
     func testRevocationRacingAnInFlightDecisionResolvesToNoGrant() throws {
         let clock = MovableClock()
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-revoke-\(UUID().uuidString).json").path
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        let store = try GrantStore.openStore(path: path, clock: clock)
+        let store = GrantStore(clock: clock)
 
         let grant = try store.issue(
             capability: .clipboardRead,
@@ -107,10 +101,7 @@ final class AuthorizationConcurrencyTests: XCTestCase {
     /// the store stays readable afterwards rather than being left half-written.
     func testRevokeAllDuringConcurrentDecisionsLeavesNothingStanding() throws {
         let clock = MovableClock()
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exactmac-revokeall-\(UUID().uuidString).json").path
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        let store = try GrantStore.openStore(path: path, clock: clock)
+        let store = GrantStore(clock: clock)
         for index in 0 ..< 5 {
             _ = try store.issue(
                 capability: .clipboardRead,
@@ -122,13 +113,9 @@ final class AuthorizationConcurrencyTests: XCTestCase {
         }
         XCTAssertEqual(store.liveGrants(now: clock.now()).count, 5)
 
-        try store.revokeAll()
+        store.revokeAll()
         XCTAssertEqual(store.liveGrants(now: clock.now()).count, 0)
         XCTAssertEqual(store.liveEnvelopes(now: clock.now()).count, 0)
-
-        // And the store survives the churn, which is what "survives a restart" means.
-        let reopened = try GrantStore.openStore(path: path, clock: clock)
-        XCTAssertEqual(reopened.liveGrants(now: clock.now()).count, 0)
     }
 
     // MARK: - Fixtures

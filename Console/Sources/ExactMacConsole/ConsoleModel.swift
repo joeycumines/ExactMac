@@ -4,108 +4,96 @@ import Foundation
 import os
 import SwiftUI
 
-/// What the popover reads, and the one place the console decides anything.
+/// Coordinator model for the ExactMac console, orchestrating specialized view models and managers.
 ///
-/// Every state here is a property of the LISTENER, not a flag the console sets: whether the
-/// service is up, whether it is answering, and whether it is reachable at all. The console
-/// reports those; it does not decide them.
+/// Decomposed into:
+/// - `ConsentQueueManager`: request queue, continuations, starvation prevention, and diagnostics.
+/// - `ApprovalViewModel`: active prompt disclosure, sheet transitions, and decision evaluation.
+/// - `GrantsViewModel`: in-memory standing grants inspection and revocation.
+/// - `ActivityViewModel`: audit log inspection and hash-chain verification.
+/// - `SettingsViewModel`: posture, biometric gate, login-item, and service lifecycle.
 @MainActor
 @Observable
 final class ConsoleModel {
-    private(set) var serviceState: ServiceState = .running
+    let queueManager: ConsentQueueManager
+    let approvalViewModel: ApprovalViewModel
+    let grantsViewModel: GrantsViewModel
+    let activityViewModel: ActivityViewModel
+    let settingsViewModel: SettingsViewModel
 
-    /// Whether the ExactMac automation service is actively running or pending a decision.
-    var isServiceRunning: Bool {
-        serviceState == .running || serviceState == .pending
-    }
-
-    /// Whether the service is enabled (synonymous with running/pending service state).
-    var isServiceEnabled: Bool {
-        isServiceRunning
-    }
-
-    /// Whether ExactMac is registered to start at login, read from the system via SMAppService.
-    var isStartAtLoginEnabled: Bool {
-        startAtLogin.status == .enabled
-    }
-
-    /// Number of requests currently waiting on operator consent.
-    var waitingCount: Int {
-        max(waiting.count, pendingPrompt != nil ? 1 : 0)
-    }
-
-    /// `.none` when there is nothing wrong, and the band when there is. An OPTIONAL SLOT at a
-    /// fixed index, which is why the popover's height is driven by it and nothing else.
-    private(set) var failClosed: (title: String, body: String)?
-    private(set) var pendingNotice: String?
-    /// Records the last timeout notice that occurred while another prompt was visible,
-    /// so the operator is informed after the blocker resolves.
-    private(set) var lastTimeoutNotice: String?
-    var pendingPrompt: PendingRequest?
-    /// Requests queued behind the active prompt, in arrival order.
-    private(set) var queuedRequests: [PendingRequest] = []
-    /// Records which prompt blocked another, for diagnostics and transparency.
-    private(set) var blockedBy: [String: String] = [:]
-
-    /// Start-at-login, the one on/off the app can still honour.
-    ///
-    /// IT REPLACED A LAUNCHCTL CONTROLLER, and the reason is structural rather than
-    /// cosmetic. The app IS the service now: there is no daemon to start and stop, so
-    /// "turn ExactMac off" could only ever mean "quit", which is a different act with
-    /// different consequences and belongs on the menu's own Quit row. What remains that the
-    /// operator can genuinely switch is whether ExactMac comes back at login, and that is
-    /// registered by the platform through `SMAppService` rather than by a plist in a
-    /// dot-directory. So the control stayed and its subject changed.
-    private let startAtLogin: StartAtLogin
-    /// Whether this process can put a consent prompt in front of the operator.
-    ///
-    /// IT IS A DEPENDENCY RATHER THAN A CONSTANT so the one behaviour that matters — that
-    /// a process with nowhere to show a window never reports itself as running — is
-    /// assertable. Classified once at launch from the real process, and never re-derived,
-    /// because a window server session cannot appear under a running app and a bundle
-    /// cannot be shed by one either.
-    private let presentation: OperatorInterface
     private let logger = Logger(
         subsystem: "io.github.joeycumines.exactmac.console",
         category: "console",
     )
 
-    /// The window host and the ceremony are dependencies rather than constructions, so a
-    /// test can drive a decision without a window server or a sensor — which is the only way
-    /// either is testable unattended, and the console has to be testable unattended.
-    /// /// THE HOST IS ALSO READABLE, because the test that proves the operator's button opens a
-    /// window has to be able to see whether one opened; the accessor is the only way out, and
-    /// it is read-only so nothing in the app can drive the host that way.
-    let windows: ConsoleWindowHost
+    // MARK: - Forwarded Properties
 
-    /// The request whose options are expanded, or nil for the collapsed affordance.
-    /// /// HELD HERE AND NOT IN THE VIEW because the view is rebuilt from the request, and a flag
-    /// inside it would reset every time the window's content was refreshed. It is also the
-    /// only place a second request can be distinguished from the first: a stale window that
-    /// said "options expanded" for a request that is no longer pending is a decision offered
-    /// on the wrong question.
-    private var optionsExpandedFor: String?
-    /// The request whose envelope review is showing, or nil when the prompt shows the
-    /// ordinary decision surface. Separate from `optionsExpandedFor` because a review is
-    /// not an expansion: it replaces the footer entirely with a different sheet, and the
-    /// two states are mutually exclusive.
-    private var envelopeReviewFor: String?
-    private let ceremony: (any CeremonyPerforming)?
+    var serviceState: ServiceState {
+        settingsViewModel.serviceState
+    }
 
-    // The activity rows, the integrity badge and the subtitle are GONE rather than left at
-    // their initial values. They were read from a reply that arrived over the console socket,
-    // and the socket is gone: the audit log is the server library's, behind an API this
-    // module cannot call. Keeping three properties that nothing writes and a window that
-    // renders them is the shape of a lie that compiles.
+    var isServiceRunning: Bool {
+        settingsViewModel.isServiceRunning
+    }
 
-    /// The environment every PERSISTING write through the server goes out under, and a
-    /// DEPENDENCY RATHER THAN A CONSTANT for the same reason the ceremony is: the test
-    /// suite drives the real write path, and without the seam a console test that toggles
-    /// the posture rewrites the OPERATOR's real `~/.exactmac/posture.json` — a
-    /// state-corrupting test that never fails, because persist failures are swallowed.
-    /// Production uses the default, which is the process environment; the suite passes a
-    /// temporary state directory via `EXACTMAC_STATE_DIRECTORY`.
-    private let stateEnvironment: [String: String]
+    var isServiceEnabled: Bool {
+        settingsViewModel.isServiceEnabled
+    }
+
+    var isStartAtLoginEnabled: Bool {
+        settingsViewModel.isStartAtLoginEnabled
+    }
+
+    var waitingCount: Int {
+        max(queueManager.waitingCount, pendingPrompt != nil ? 1 : 0)
+    }
+
+    var failClosed: (title: String, body: String)? {
+        settingsViewModel.failClosed
+    }
+
+    var pendingNotice: String? {
+        settingsViewModel.pendingNotice
+    }
+
+    var lastTimeoutNotice: String? {
+        queueManager.lastTimeoutNotice
+    }
+
+    var pendingPrompt: PendingRequest? {
+        get { approvalViewModel.pendingPrompt }
+        set { approvalViewModel.pendingPrompt = newValue }
+    }
+
+    var queuedRequests: [PendingRequest] {
+        queueManager.queuedRequests
+    }
+
+    var blockedBy: [String: String] {
+        queueManager.blockedBy
+    }
+
+    var postureHandle: HostedPostureHandle? {
+        settingsViewModel.postureHandle
+    }
+
+    var displayedPosture: Posture {
+        settingsViewModel.displayedPosture
+    }
+
+    var biometricGateHandle: HostedBiometricGateHandle? {
+        settingsViewModel.biometricGateHandle
+    }
+
+    var displayedBiometricGate: Bool {
+        settingsViewModel.displayedBiometricGate
+    }
+
+    var windows: ConsoleWindowHost {
+        approvalViewModel.windows
+    }
+
+    // MARK: - Initialization
 
     init(
         startAtLogin: StartAtLogin = StartAtLogin(),
@@ -114,30 +102,21 @@ final class ConsoleModel {
         ceremony: (any CeremonyPerforming)? = BiometricCeremony(),
         stateEnvironment: [String: String] = ProcessInfo.processInfo.environment,
     ) {
-        self.startAtLogin = startAtLogin
-        self.presentation = presentation
-        self.windows = windows
-        self.ceremony = ceremony
-        self.stateEnvironment = stateEnvironment
+        self.queueManager = ConsentQueueManager()
+        self.approvalViewModel = ApprovalViewModel(windows: windows, ceremony: ceremony)
+        self.grantsViewModel = GrantsViewModel(windows: windows, ceremony: ceremony)
+        self.activityViewModel = ActivityViewModel(windows: windows)
+        self.settingsViewModel = SettingsViewModel(
+            startAtLogin: startAtLogin,
+            presentation: presentation,
+            windows: windows,
+            ceremony: ceremony,
+            stateEnvironment: stateEnvironment,
+        )
     }
 
-    // MARK: Answering a request the server asked
+    // MARK: - Request Answering Flow
 
-    /// The requests waiting on the operator, keyed by request id.
-    ///
-    /// A MAP RATHER THAN A SINGLE SLOT because the server can have several consent requests
-    /// in flight at once, and the model already refused to answer one request with another
-    /// request's decision. A second arrival gets its own entry, its own window content, and
-    /// its own answer; collapsing them would make the second request's decision answer the
-    /// first.
-    private var waiting: [String: CheckedContinuation<PendingAnswer?, Never>] = [:]
-
-    /// Puts a request in front of the operator and suspends until they answer it, or the
-    /// surrounding task is cancelled.
-    ///
-    /// THE RETURN IS OPTIONAL and nil is the refusal, because the caller — the server's
-    /// interceptor — is the thing that turns "nobody answered" into a denial, and a value it
-    /// cannot construct for that case cannot be confused with an answer.
     func answer(
         request: AuthorizationRequest,
         identity: CallerIdentity,
@@ -154,36 +133,24 @@ final class ConsoleModel {
         )
 
         if pendingPrompt == nil {
-            pendingPrompt = pending
-            pendingNotice = pending.popoverNoticeBody
+            approvalViewModel.setActivePrompt(pending)
+            settingsViewModel.setPendingNotice(pending.popoverNoticeBody)
             apply(.pending)
 
             windows.present(.approval, title: "ExactMac needs your approval", width: Design.Layout.promptWidth) {
-                approvalWindow(for: pending)
+                self.approvalWindow(for: pending)
             }
         } else {
-            // A request is already in front of the operator.
-            // Queue this request behind it rather than overwriting the active prompt.
-            queuedRequests.append(pending)
-            if let active = pendingPrompt {
-                blockedBy[pending.requestID] = active.promptTitle
-            }
+            queueManager.enqueue(pending, blockedBy: pendingPrompt?.promptTitle)
             apply(.pending)
-            logger.notice(
-                "Request \(pending.requestID, privacy: .private) queued behind active prompt \(self.pendingPrompt?.requestID ?? "", privacy: .private)",
-            )
         }
 
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                // CANCELLED BEFORE SUSPENDING IS A LEAK, so the continuation is stored first
-                // and a request already being answered is refused rather than overwriting
-                // whoever is holding the slot.
-                guard waiting[pending.requestID] == nil else {
+                guard queueManager.registerContinuation(continuation, for: pending.requestID) else {
                     continuation.resume(returning: nil)
                     return
                 }
-                waiting[pending.requestID] = continuation
             }
         } onCancel: {
             Task { @MainActor [weak self] in
@@ -192,18 +159,13 @@ final class ConsoleModel {
         }
     }
 
-    /// Hands the operator's answer back to whoever is waiting for it.
     private func finish(_ requestID: String, with answer: PendingAnswer?) {
-        let continuation = waiting.removeValue(forKey: requestID)
-        queuedRequests.removeAll { $0.requestID == requestID }
-        let blockedReason = blockedBy.removeValue(forKey: requestID)
+        let (continuation, blockedReason) = queueManager.removeWaiting(for: requestID)
 
         if pendingPrompt?.requestID == requestID {
-            optionsExpandedFor = nil
-            if let next = queuedRequests.first {
-                queuedRequests.removeFirst()
-                pendingPrompt = next
-                pendingNotice = next.popoverNoticeBody
+            if let next = queueManager.promoteNext() {
+                approvalViewModel.setActivePrompt(next)
+                settingsViewModel.setPendingNotice(next.popoverNoticeBody)
                 windows.present(
                     .approval,
                     title: "ExactMac needs your approval",
@@ -216,17 +178,15 @@ final class ConsoleModel {
                     "Advanced approval prompt to next queued request \(next.requestID, privacy: .private)",
                 )
             } else {
-                pendingPrompt = nil
+                approvalViewModel.clearPrompt()
                 if answer == nil, let blocked = blockedReason {
-                    pendingNotice = "A request timed out while waiting behind \(blocked)"
-                } else if let notice = lastTimeoutNotice {
-                    pendingNotice = notice
-                    lastTimeoutNotice = nil
+                    settingsViewModel.setPendingNotice("A request timed out while waiting behind \(blocked)")
+                } else if let notice = queueManager.consumeLastTimeoutNotice() {
+                    settingsViewModel.setPendingNotice(notice)
                 } else {
-                    pendingNotice = nil
+                    settingsViewModel.setPendingNotice(nil)
                 }
-                windows.close(.approval)
-                if serviceState == .pending, waiting.isEmpty {
+                if serviceState == .pending, queueManager.isWaitingEmpty {
                     apply(.running)
                 }
             }
@@ -235,10 +195,14 @@ final class ConsoleModel {
             logger.notice(
                 "Queued request \(requestID, privacy: .private) was cancelled or timed out while waiting behind \(blocked, privacy: .public)",
             )
-            if pendingPrompt == nil {
-                pendingNotice = notice
+            if let active = pendingPrompt {
+                queueManager.setLastTimeoutNotice(notice)
+                if queueManager.queuedRequests.isEmpty {
+                    approvalViewModel.dismissSheet()
+                }
+                refreshApprovalWindow(for: active)
             } else {
-                lastTimeoutNotice = notice
+                settingsViewModel.setPendingNotice(notice)
             }
         }
 
@@ -249,234 +213,51 @@ final class ConsoleModel {
         finish(requestID, with: nil)
     }
 
-    // MARK: The server this process hosts
+    // MARK: - Posture & Biometric Gate Forwarding
 
-    /// Reports that the server this process hosts is up and serving.
-    ///
-    /// THE APP'S STATE NOW COMES FROM THE SERVER IT OWNS RATHER THAN FROM A SOCKET. Before
-    /// this, the only thing that could move the model out of its initialiser state was the
-    /// console-channel loop, so "the server is running" was something the app inferred by
-    /// failing to reach a peer process. It is now a fact this process establishes itself and
-    /// states once.
-    func reportServerStarted() {
-        apply(.running)
-    }
-
-    // MARK: The operator's posture
-
-    /// The live posture the hosted server enforces, captured when the server starts.
-    /// NIL UNTIL THEN, and the control treats nil as "the server has not come up" rather
-    /// than inventing a selection: a control that displays a choice nobody made and that
-    /// nothing enforces is E27's pretend-button shape, which is the exact defect this
-    /// wiring exists to end.
-    private(set) var postureHandle: HostedPostureHandle?
-
-    /// Called with the handle at server startup, through `serveHosted`'s
-    /// `onPostureReady` — which fires the moment the runtime exists, not when the server
-    /// stops. Until it fires the control is inert, and truthful about it: it displays the
-    /// engine's fallback and its writes are dropped, because there is no live source to
-    /// write into yet.
     func adoptPostureHandle(_ handle: HostedPostureHandle) {
-        postureHandle = handle
-        // THE MIRROR IS SET HERE TOO, because adoption is when the control's display first
-        // becomes the server's actual posture: the handle already carries the loaded
-        // stored preference, so the very first render after startup shows it.
-        displayedPosture = handle.current
+        settingsViewModel.adoptPostureHandle(handle)
     }
 
-    /// What the control DISPLAYS. A STORED, OBSERVABLE MIRROR of the handle's live value,
-    /// and the mirror is the whole point: `@Observable` schedules invalidation on writes to
-    /// STORED properties, and `setPosture` writes only the mutex inside `PostureSource`, so
-    /// a computed read of `postureHandle?.current` never re-rendered anything — the control
-    /// kept showing the pre-click posture while the server enforced the post-click one.
-    /// The mirror is written by every path that changes the live posture (adoption, and
-    /// every set), so a selection re-renders in the moment the operator is looking at it.
-    /// The getter still falls back to the live handle so a drift between mirror and source
-    /// can display as the truth rather than as a stale copy.
-    private(set) var displayedPosture: Posture = .strict
-
-    /// The operator's choice, written through the handle and persisted. THE WRITE IS A
-    /// REAL ONE: the source is the same object the interceptor consults per request, so
-    /// the next request is judged under the posture the operator just chose — no restart,
-    /// no propagation delay beyond the request already in flight. THE MIRROR IS WRITTEN
-    /// WITH IT, which is what turns the write into a re-render; without that the control
-    /// was a live switch wired to a frozen display.
     func setPosture(_ posture: Posture) {
-        guard let postureHandle else {
-            logger.notice("Cannot set posture: server handle is not ready")
-            return
-        }
-        postureHandle.setStoredPreference(posture, environment: stateEnvironment)
-        displayedPosture = postureHandle.current
+        settingsViewModel.setPosture(posture)
     }
 
-    // MARK: The operator's biometric gate
-
-    /// The live console gate the hosted server holds, captured at server startup beside
-    /// the posture handle. NIL UNTIL THEN, for the same reason: until the gate exists the
-    /// row displays the server's default (the ceremony) and its writes are dropped,
-    /// because there is no live source to write into yet.
-    private(set) var biometricGateHandle: HostedBiometricGateHandle?
-
-    /// Whether the gate row DISPLAYS the ceremony as on. A STORED, OBSERVABLE MIRROR for
-    /// exactly the reason `displayedPosture` is one: the toggle writes the mutex inside
-    /// the source, and only a stored-property write schedules the re-render.
-    private(set) var displayedBiometricGate: Bool = true
-
-    /// Called with the gate handle at server startup, through `serveHosted`'s
-    /// `onBiometricGateReady` — the same hop the posture handle rides, so the console
-    /// adopts both together or neither. The handle carries the loaded stored gate, so
-    /// this first write is the row's display becoming the server's actual state.
     func adoptBiometricGateHandle(_ handle: HostedBiometricGateHandle) {
-        biometricGateHandle = handle
-        displayedBiometricGate = handle.isCeremonyRequired
+        settingsViewModel.adoptBiometricGateHandle(handle)
     }
 
-    /// Guards against concurrent or re-entrant gate toggles while a ceremony is in flight.
-    private var isPerformingBiometricGateChange: Bool = false
-
-    /// THE TOGGLE, AND THE ORDER IS THE WHOLE ACCEPTANCE.
-    ///
-    /// 1. CEREMONY FIRST, IN BOTH DIRECTIONS. Turning the gate OFF is a request to weaken
-    ///    the system's own authentication; turning it back ON is a change to what the
-    ///    ceremony protects. An actor who cannot authenticate can do neither, which is
-    ///    the property the control exists for. No ceremony installed is a refusal, not a
-    ///    downgrade path: the same-uid residual this product accepts for its state files
-    ///    does not extend to letting a headless or compromised console silently strip
-    ///    its own protection.
-    /// 2. THEN THE RECORD. Every attempt, successful or not, reaches the decision log
-    ///    through `recordOperatorAction` — the approved change as an allow, the failed
-    ///    ceremony as a deny naming `biometricUnavailable`.
-    /// 3. THEN THE APPLY, AND ONLY ON A RECORD THAT TOOK. An unrecordable change is not
-    ///    applied, which is the same discipline as `auditUnavailable` on the RPC path:
-    ///    the log is what the operator afterwards asks, and a downgrade that happened
-    ///    off the record is a downgrade an auditor cannot see. A persist failure after a
-    ///    good record still applies — the change is live and logged, while the persist is
-    ///    best-effort (logged to unified logging) mirroring posture preference persistence.
     func setBiometricGate(_ requiring: Bool) {
-        Task { @MainActor in
-            await performBiometricGateChange(requiring)
-        }
+        settingsViewModel.setBiometricGate(requiring)
     }
 
-    /// The toggle's body, awaited so a test can drive the whole flow — ceremony, record,
-    /// apply — without a window server or a sensor.
     func performBiometricGateChange(_ requiring: Bool) async {
-        guard !isPerformingBiometricGateChange else { return }
-        isPerformingBiometricGateChange = true
-        defer { isPerformingBiometricGateChange = false }
-
-        let action = requiring
-            ? "the console biometric gate was turned on"
-            : "the console biometric gate was turned off"
-        // NO CEREMONY INSTALLED REFUSES THE CHANGE, recorded. The branch mirrors
-        // answerValue's discipline: a protection that cannot be checked is not skipped.
-        guard let ceremony else {
-            logger.error(
-                "The biometric gate was asked to change and no ceremony is installed; refusing rather than changing without the check",
-            )
-            let recorded = ServerInspectionService.recordOperatorAction(
-                action: action,
-                approved: false,
-                biometricObtained: false,
-                refusalReason: .biometricUnavailable,
-                environment: stateEnvironment,
-            )
-            if !recorded {
-                pendingNotice = "The setting was not changed: the decision log could not record the attempt."
-            }
-            return
-        }
-        // ACTIVATION IS PAID HERE, as in answerValue: the ceremony refuses unless the
-        // console is frontmost, and the operator just committed to a change that needs
-        // the sensor.
-        windows.activateForCeremony()
-        let outcome = await ceremony.perform(
-            nonce: UUID().uuidString,
-            reason: requiring
-                ? "ExactMac asks to require Touch ID again to open Grants and Activity"
-                : "ExactMac asks before Touch ID stops protecting Grants and Activity",
-        )
-        guard case .performed = outcome else {
-            logger.notice("The biometric gate change was refused: the ceremony did not complete")
-            let recorded = ServerInspectionService.recordOperatorAction(
-                action: action,
-                approved: false,
-                biometricObtained: false,
-                refusalReason: .biometricUnavailable,
-                environment: stateEnvironment,
-            )
-            if !recorded {
-                pendingNotice = "The setting was not changed: the decision log could not record the attempt."
-            }
-            return
-        }
-        // THE RECORD BEFORE THE APPLY: an entry that did not land leaves the gate alone.
-        let recorded = ServerInspectionService.recordOperatorAction(
-            action: action,
-            approved: true,
-            biometricObtained: true,
-            refusalReason: nil,
-            environment: stateEnvironment,
-        )
-        guard recorded else {
-            pendingNotice = "The setting was not changed: the decision log could not take the record."
-            logger.error("The biometric gate change was not applied: the audit could not record it")
-            return
-        }
-        guard let biometricGateHandle else {
-            logger.notice("Cannot set biometric gate: server handle is not ready")
-            return
-        }
-        biometricGateHandle.setCeremonyRequired(requiring, environment: stateEnvironment)
-        displayedBiometricGate = biometricGateHandle.isCeremonyRequired
+        await settingsViewModel.performBiometricGateChange(requiring)
     }
 
-    /// Reports that the server this process hosts could not start, and says why.
-    ///
-    /// IT IS DISTINCT FROM "THE SERVICE IS OFF" because the operator turned nothing off.
-    /// The likeliest cause is a socket pathname another server still holds, and the useful
-    /// thing to say is that, rather than a state that invites the operator to toggle
-    /// something that is not what is wrong.
+    func reportServerStarted() {
+        settingsViewModel.reportServerStarted()
+    }
+
     func reportServerStartFailure(reason: String) {
-        logger.error("The hosted server did not start: \(reason, privacy: .public)")
-        pendingNotice = "ExactMac could not start its server: \(reason)"
-        // `.stopped` RATHER THAN `.unreachable`, and the two are not interchangeable. The
-        // unreachable band says nothing can put a question in front of the operator, which
-        // is a claim about this process's ability to present. A server that failed to start
-        // is a different fault with a different fix, and sending an operator after the wrong
-        // one is worse than saying nothing — its own comment said the distinction mattered,
-        // and the state it chose did not make it.
-        apply(.stopped)
+        settingsViewModel.reportServerStartFailure(reason: reason)
     }
 
-    // MARK: The service control
+    // MARK: - Service Lifecycle Forwarding
 
-    /// Stops the ExactMac service: closes active approval prompts, refuses waiting requests, and sets state to stopped.
     func stopService() {
-        logger.info("Stopping ExactMac service by operator request")
-        queuedRequests.removeAll()
-        blockedBy.removeAll()
-        lastTimeoutNotice = nil
-        let waitingKeys = Array(waiting.keys)
-        for key in waitingKeys {
-            finish(key, with: nil)
+        let allWaiting = queueManager.cancelAllWaiting()
+        for item in allWaiting {
+            item.continuation.resume(returning: nil)
         }
-        windows.close(.approval)
-        apply(.stopped)
-        failClosed = (
-            "The service is off",
-            "You turned ExactMac off. Nothing is served and nothing is exposed until you turn it back on.",
-        )
+        approvalViewModel.clearPrompt()
+        settingsViewModel.stopService()
     }
 
-    /// Starts the ExactMac service, moving state to running unless vetoed by presentation.
     func startService() {
-        logger.info("Starting ExactMac service by operator request")
-        apply(.running)
+        settingsViewModel.startService()
     }
 
-    /// Toggles the service between running and stopped.
     func toggleService() {
         if isServiceRunning {
             stopService()
@@ -485,7 +266,6 @@ final class ConsoleModel {
         }
     }
 
-    /// Enables or disables the service.
     func setServiceEnabled(_ enabling: Bool) {
         if enabling {
             startService()
@@ -494,32 +274,16 @@ final class ConsoleModel {
         }
     }
 
-    // MARK: Login-item registration
-
-    /// Registers or unregisters ExactMac for start at login via SMAppService.
     func setStartAtLoginEnabled(_ enabling: Bool) {
-        let outcome = startAtLogin.setEnabled(enabling)
-        switch outcome {
-        case .none:
-            break
-        case .register:
-            logger.info("ExactMac registered to start at login")
-        case .unregister:
-            logger.info("ExactMac removed from start at login")
-        case .operatorApprovalRequired:
-            break
-        }
-        pendingNotice = startAtLogin.lastRefusal
+        settingsViewModel.setStartAtLoginEnabled(enabling)
     }
 
-    /// Flips start-at-login.
     func toggleStartAtLogin() {
-        setStartAtLoginEnabled(!isStartAtLoginEnabled)
+        settingsViewModel.toggleStartAtLogin()
     }
 
-    /// Re-reads the registration, because the operator can change it outside this app.
     func refreshServiceState() {
-        startAtLogin.refresh()
+        settingsViewModel.refreshServiceState()
     }
 
     func quit() {
@@ -527,81 +291,56 @@ final class ConsoleModel {
         NSApp.terminate(nil)
     }
 
-    // MARK: The windows
+    func apply(_ state: ServiceState) {
+        settingsViewModel.apply(state)
+    }
 
-    /// Opens the approval prompt for the request that is waiting.
-    /// /// NOTHING ELSE CAN ANSWER IT, which is why this exists at all. The popover states that
-    /// one request is waiting; before this, there was no way to see it, let alone answer
-    /// it, and a request that cannot be answered becomes a timeout and then a denial.
-    /// /// A NEW WINDOW EACH TIME is wrong and reusing is right: the same request has one nonce,
-    /// and a second window answering the same nonce would leave the operator deciding which
-    /// of two identical prompts they meant.
-    /// Installs a request the operator can be asked about.
-    /// /// THE SAME ENTRY THE CHANNEL USES, so a test that drives this drives the real path
-    /// rather than a parallel one: a second route into `pendingPrompt` would let a test
-    /// pass against state the console could never actually reach.
+    // MARK: - Prompt Surfaces
+
     func deliverPending(_ request: PendingRequest) {
-        // A new request COLLAPSES the options, and the expansion was for the previous one.
-        // Leaving it set would offer the new request the previous one's breadth at a glance.
-        optionsExpandedFor = nil
-        envelopeReviewFor = nil
-        pendingPrompt = request
-        pendingNotice = request.popoverNoticeBody
+        approvalViewModel.setActivePrompt(request)
+        settingsViewModel.setPendingNotice(request.popoverNoticeBody)
         apply(.pending)
-        // IT SURFACES ITSELF, AND THAT IS NOT OPTIONAL. A consent request expires, and one
-        // that expires unseen becomes a denial the operator never knew was asked for. Waiting
-        // for the operator to notice the menu bar dot and click it means the request has
-        // already timed out whenever they are not looking at the menu bar, which is almost
-        // always. The window orders front WITHOUT activating: the decision is on screen and
-        // the operator's keystrokes still go where they were going.
         windows.present(
             .approval,
             title: "ExactMac needs your approval",
-            // The prompt's OWN width, not the window's default. It is a 420pt card, and
-            // putting it in a 720pt window centred it with 150pt of empty chrome either
-            // side, which is not a layout anyone chose.
             width: Design.Layout.promptWidth,
         ) {
-            approvalWindow(for: request)
+            self.approvalWindow(for: request)
         }
     }
 
-    /// The approval surface for one request.
-    /// /// A SEPARATE FUNCTION from `openApproval` because two callers need the same view and
-    /// they are not the same action: this one is the automatic surfacing when a request
-    /// arrives, and `openApproval` is the operator bringing it forward from the popover. They
-    /// must render identically, so they render the same view.
-    ///
-    /// THREE STATES: the prompt, the expanded options, and the envelope review. The review
-    /// is the design's own surface for the pre-authorization decision, and selecting the
-    /// envelope option routes HERE rather than answering immediately: an operator who chose
-    /// the broadest standing option without seeing its full disclosure has not been shown
-    /// what they agreed to.
+    func openApproval() {
+        guard let request = pendingPrompt else { return }
+        windows.present(
+            .approval,
+            title: "ExactMac needs your approval",
+            width: Design.Layout.promptWidth,
+            activates: true,
+        ) {
+            self.approvalWindow(for: request)
+        }
+    }
+
     @ViewBuilder
     private func approvalWindow(for request: PendingRequest) -> some View {
-        if envelopeReviewFor == request.requestID {
+        if approvalViewModel.envelopeReviewFor == request.requestID {
             envelopeReview(for: request)
+        } else if approvalViewModel.queueReviewFor == request.requestID {
+            queueReview()
         } else {
             ApprovalPrompt(
-                state: optionsExpandedFor == request.requestID ? .expanded : .pending,
+                state: approvalViewModel.optionsExpandedFor == request.requestID ? .expanded : .pending,
                 title: request.promptTitle,
                 capabilityLine: request.promptScopeLine,
                 risk: request.riskClass.label,
                 riskDot: request.riskClass.dot,
                 clock: request.clockText,
-                // The request's ACTUAL timeout, so the expired line states the deadline
-                // this request really ran rather than a remembered constant.
                 consentTimeoutSeconds: request.consentTimeoutSeconds,
+                createdAt: request.createdAt,
                 reason: request.agentReason,
                 implication: request.implicationText,
                 tree: CallerTree.rows(for: request),
-                // THE TARGET FIELD IS OMITTED, and that is a decision rather than an omission.
-                // The wire carries ONE scope string and the prompt had two places for it — the
-                // scope line and this field — so "every application · until you revoke it"
-                // appeared twice in four lines. The design's target field holds a resolved PATH
-                // (/Users/…/notes.txt) which the server does not send; it held the scope instead.
-                // Showing the scope once, on the line the design puts the breadth, beats showing
-                // it twice. E7's design pass is where a real target gets designed.
                 target: nil,
                 payload: request.argumentSummary,
                 biometricLine: request.biometricLine,
@@ -609,34 +348,28 @@ final class ConsoleModel {
                 moreChoicesLabel: request.moreChoicesText,
                 showOptionsLabel: "Show options",
                 offeredOptions: request.offered,
+                queuedCount: queueManager.queuedRequests.count,
+                onReviewQueue: queueManager.queuedRequests.isEmpty
+                    ? nil
+                    : { self.presentQueueReview(for: request) },
                 onDecision: { kind, note in
                     if kind == .envelope {
-                        // THE ENVELOPE IS A DIFFERENT DECISION AND GETS ITS OWN SURFACE.
-                        // Answering it directly would grant a standing permission the
-                        // operator never saw itemized; the review is the disclosure the
-                        // design draws for exactly this option.
                         self.presentEnvelopeReview(for: request)
                     } else {
                         Task { await self.answer(kind, for: request, note: note) }
                     }
                 },
-                onCopyPayload: { self.copyToPasteboard(request.argumentSummary) },
+                onCopyPayload: { self.approvalViewModel.copyToPasteboard(request.argumentSummary) },
                 onShowOptions: { self.expandOptions(for: request) },
             )
         }
     }
 
-    /// Shows the pre-authorization review for a request, replacing the prompt's decision
-    /// surface with the design's own envelope sheet.
     private func presentEnvelopeReview(for request: PendingRequest) {
-        envelopeReviewFor = request.requestID
+        approvalViewModel.presentEnvelopeReview(for: request)
         refreshApprovalWindow(for: request)
     }
 
-    /// The envelope review surface for one request. Built from the request's own offered
-    /// option, never from invented values: the capabilities listed are what THIS request
-    /// would actually permit, the duration is the option's real ceiling, and the biometric
-    /// line states the cost of THIS option.
     private func envelopeReview(for request: PendingRequest) -> some View {
         EnvelopeReview(
             requester: request.envelopeRequester,
@@ -648,919 +381,147 @@ final class ConsoleModel {
                 ? "\(BiometricCeremony.biometricType) will confirm this pre-authorization"
                 : "Nothing else is asked of you. This one needs no fingerprint.",
             onApprove: { note in
-                self.envelopeReviewFor = nil
+                self.approvalViewModel.dismissSheet()
                 Task { await self.answer(.envelope, for: request, note: note) }
             },
             onDeny: { note in
-                self.envelopeReviewFor = nil
+                self.approvalViewModel.dismissSheet()
                 Task { await self.answer(.deny, for: request, note: note) }
             },
         )
     }
 
-    /// Answers a request, performing the ceremony FIRST when its option needs one.
-    ///
-    /// Exposed rather than private so a test can drive the whole decision — ceremony, nonce
-    /// and answer — without a window server or a sensor. What is asserted is the answer, which
-    /// is the thing that must not be wrong.
-    func answer(_ kind: OptionRow.Kind, for request: PendingRequest, note: String = "") async {
-        let answer = await answerValue(kind, for: request, note: note)
-        await post(answer, for: request)
+    private func presentQueueReview(for request: PendingRequest) {
+        approvalViewModel.presentQueueReview(for: request)
+        refreshApprovalWindow(for: request)
     }
 
-    /// THE PRESENT-THEN-ANSWER FLOW, AS A VALUE.
-    ///
-    /// IT IS SEPARATED FROM POSTING so the same implementation serves both callers: the one
-    /// that hands the answer to a transport, and the one that hands it back to the server
-    /// that asked. The ceremony-ordering rule is the whole substance of this function and it
-    /// must not be written twice — two copies of "perform the ceremony before the decision,
-    /// and a failed ceremony is a denial" is two places for the ordering to be got wrong,
-    /// and the ordering is the invariant.
-    ///
-    /// A CEREMONY THAT FAILED IS A DENIAL, returned as one rather than thrown, because a
-    /// caller that cannot express "denied" would either offer a cheaper path or leave the
-    /// operator believing the weaker one was accepted.
+    private func queueReview() -> some View {
+        QueueReview(
+            items: queueManager.queuedRequests.map {
+                QueueReview.Item(
+                    id: $0.requestID,
+                    title: $0.promptTitle,
+                    scopeLine: $0.serverDefaultScopeLine,
+                )
+            },
+            onDecide: { requestID in
+                self.decideQueuedRequest(requestID)
+            },
+            onDenyAll: { note in
+                Task { await self.denyAllQueued(note: note) }
+            },
+            onBack: {
+                self.approvalViewModel.dismissSheet()
+                if let active = self.pendingPrompt {
+                    self.refreshApprovalWindow(for: active)
+                }
+            },
+        )
+    }
+
+    func decideQueuedRequest(_ requestID: String) {
+        guard let active = pendingPrompt,
+              let chosen = queueManager.promoteQueued(requestID: requestID, active: active)
+        else { return }
+        approvalViewModel.setActivePrompt(chosen)
+        settingsViewModel.setPendingNotice(chosen.popoverNoticeBody)
+        refreshApprovalWindow(for: chosen)
+    }
+
+    func answerQueueWithDefaults(note: String) async {
+        approvalViewModel.dismissSheet()
+        let queued = queueManager.queuedRequests
+        for request in queued {
+            await answer(request.serverDefaultKind ?? .deny, for: request, note: note)
+        }
+        if let active = pendingPrompt {
+            refreshApprovalWindow(for: active)
+        }
+    }
+
+    func denyAllQueued(note: String) async {
+        approvalViewModel.dismissSheet()
+        let queued = queueManager.queuedRequests
+        for request in queued {
+            await answer(.deny, for: request, note: note)
+        }
+        if let active = pendingPrompt {
+            refreshApprovalWindow(for: active)
+        }
+    }
+
+    func answer(_ kind: OptionRow.Kind, for request: PendingRequest, note: String = "") async {
+        let answer = await answerValue(kind, for: request, note: note)
+        finish(request.requestID, with: answer)
+    }
+
     func answerValue(
         _ kind: OptionRow.Kind,
         for request: PendingRequest,
         note: String = "",
     ) async -> PendingAnswer {
-        var biometricObtained = false
-        // THE SELECTED OPTION'S OWN CEREMONY BAR, not the focused one's. The prompt's
-        // default is the NARROWEST option and the narrowest is the one most likely to need
-        // no sensor, while the broad options escalate: gating on `request.requiresBiometric`
-        // read the low bar while the operator chose the high one, so the broad option ran
-        // no ceremony at all and the server — which checks the SELECTED option's
-        // requirement — refused it every time. Fail-closed, but the option was a lie.
-        if request.requiresBiometric(for: kind) {
-            // ACTIVATION IS PAID HERE AND NOT EARLIER. The ceremony refuses unless the
-            // console is frontmost, so the app has to come forward — but only once the
-            // operator has committed to an option that needs a sensor, which is the moment
-            // taking focus stops being an interruption and starts being the response to
-            // something they did.
-            windows.activateForCeremony()
-            // A REQUIRED CEREMONY THAT CANNOT BE PERFORMED IS A DENIAL, and this branch
-            // used to approve instead. With no ceremony installed, the old code fell through
-            // and returned the operator's chosen option carrying `biometricObtained: false`
-            // — an approval for a check that never happened, on exactly the requests that
-            // asked for one. That is the silent downgrade invariant 3 forbids, and it was
-            // invisible in the old world because the answer was posted with the same
-            // `biometricObtained` flag a genuine non-biometric approval carried. The app
-            // always installs a ceremony in production, so the branch is test-reachable
-            // rather than operator-reachable — but "unreachable" is not a reason to leave a
-            // downgrade in the path that grants things.
-            guard let ceremony else {
-                logger.error(
-                    "A request required a biometric and no ceremony is installed; denying rather than approving without the check: \(request.requestID, privacy: .private)",
-                )
-                return answer(.deny, for: request, note: note, refusal: .ceremonyRefused)
-            }
-            let outcome = await ceremony.perform(
-                nonce: request.nonce,
-                reason: CeremonyReason.compose(request: request, option: kind),
-            )
-            switch outcome {
-            case .performed:
-                biometricObtained = true
-            case let .unavailable(failure):
-                pendingNotice = "The request was not approved: \(failure.explanation)"
-                logger.error(
-                    "A ceremony failed for \(request.requestID, privacy: .private): \(String(describing: failure), privacy: .public)",
-                )
-                return answer(.deny, for: request, note: note, refusal: .ceremonyRefused)
-            }
+        await approvalViewModel.answerValue(kind, for: request, note: note) { [weak self] notice in
+            self?.settingsViewModel.setPendingNotice(notice)
         }
-        return answer(
-            kind,
-            for: request,
-            note: note,
-            biometricObtained: biometricObtained,
-            refusal: kind == .deny ? .operatorDeclined : nil,
-        )
     }
 
-    /// The value for one option, with the request's own nonce and digest attached.
-    private func answer(
-        _ kind: OptionRow.Kind,
-        for request: PendingRequest,
-        note: String = "",
-        biometricObtained: Bool = false,
-        refusal: AnswerRefusal? = nil,
-    ) -> PendingAnswer {
-        PendingAnswer(
-            requestID: request.requestID,
-            nonce: request.nonce,
-            requestDigest: request.requestDigest,
-            kind: kind,
-            note: note,
-            biometricObtained: biometricObtained,
-            refusal: refusal,
-        )
-    }
-
-    /// Hands a produced answer to whoever is waiting for it.
-    ///
-    /// NOT `post(...)`. There is no transport to post to: the server asked this process
-    /// directly and is suspended on the continuation this resumes, so "delivering" the answer
-    /// and "returning" it are the same act. The window is closed first so the prompt cannot
-    /// still be on screen for a request that has already been answered.
-    private func post(_ answer: PendingAnswer, for request: PendingRequest) async {
-        finish(request.requestID, with: answer)
-    }
-
-    /// Expands the collapsed affordances into the full option set for this request.
     func expandOptions(for request: PendingRequest) {
-        optionsExpandedFor = request.requestID
+        approvalViewModel.expandOptions(for: request)
         refreshApprovalWindow(for: request)
     }
 
-    /// Rebuilds the window's content, which is the only way an already-open window can come
-    /// to show something new.
-    /// /// REPLACING THE CONTENT VIEW RATHER THAN ORDERING THE WINDOW AGAIN, because the early
-    /// return that avoided a second window also avoided a refresh: a second request arriving
-    /// while the first was open found a window that still showed the first request, and
-    /// answering it would have posted a decision bound to the first request's nonce.
     private func refreshApprovalWindow(for request: PendingRequest) {
         windows.setContent(.approval) { self.approvalWindow(for: request) }
     }
 
-    /// Brings the request the operator was already shown back to the front.
-    func openApproval() {
-        guard let request = pendingPrompt else { return }
-        // The operator clicked it, so it comes forward WITH the application: they asked for
-        // this window, and making them click again to raise it would be a worse answer than
-        // the one they gave.
-        windows.present(
-            .approval,
-            title: "ExactMac needs your approval",
-            width: Design.Layout.promptWidth,
-            activates: true,
-        ) {
-            approvalWindow(for: request)
-        }
-    }
+    // MARK: - Grants & Activity Windows
 
-    private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    /// Opens the Grants management window, reading live standing grants from the server.
-    ///
-    /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
-    ///
-    /// GATED, AND THE GATE IS THE SERVER'S: when the live gate says a ceremony is
-    /// required, the window costs a fingerprint, because what it reveals — every standing
-    /// permission — is exactly what the row's own detail text says it protects. The
-    /// ceremony happens BEFORE anything is read or shown; a refusal opens nothing. THE
-    /// FUNCTION IS ASYNC RATHER THAN FIRE-AND-FORGET so a caller (and a test) can await
-    /// the whole flow: a spawn-and-return here would make the ceremony race the very
-    /// window it is supposed to precede.
     func openGrants() async {
-        guard await passBiometricGate(for: "Grants") else { return }
+        guard await settingsViewModel.passBiometricGate(for: "Grants") else { return }
         refreshGrants()
     }
 
-    /// Refreshes the Grants management window with current server state.
     func refreshGrants() {
-        let grantsResult: Result<[DisplayGrant], Error> = Result {
-            try ServerInspectionService.inspectGrants()
-        }
-
-        let view: GrantsManager
-        switch grantsResult {
-        case let .success(grants):
-            let models = grants.map { GrantRow.Model(from: $0) }
-            let subtitle = ServerInspectionService.grantsSubtitle(for: grants)
-            view = GrantsManager(
-                grants: models,
-                subtitle: subtitle,
-                onRevoke: { [weak self] id in
-                    self?.revokeGrant(id: id)
-                },
-                onRevokeAll: { [weak self] in
-                    self?.revokeAllGrants()
-                },
-            )
-        case let .failure(error):
-            logger.error("Failed to inspect grants: \(String(describing: error), privacy: .public)")
-            view = GrantsManager(
-                grants: [],
-                errorMessage: "ExactMac cannot tell what is permitted, so it is denying every request that needs consent. Nothing is being granted on a guess.",
-                // The error view renders no revoke buttons, but the closures are the
-                // real ones anyway: a Grants window that can show a button must never
-                // hold a handler that does nothing.
-                onRevoke: { [weak self] id in
-                    self?.revokeGrant(id: id)
-                },
-                onRevokeAll: { [weak self] in
-                    self?.revokeAllGrants()
-                },
-            )
-        }
-
-        windows.present(
-            .grants,
-            title: "Grants",
-            activates: true,
-            updateIfPresent: true,
-        ) {
-            view
-        }
+        grantsViewModel.refresh()
     }
 
-    /// Revokes a specific standing grant and refreshes the Grants window.
     func revokeGrant(id: String) {
-        do {
-            try ServerInspectionService.revokeGrant(id: id)
-        } catch {
-            logger.error("Failed to revoke grant \(id, privacy: .private): \(String(describing: error), privacy: .public)")
-        }
-        refreshGrants()
+        grantsViewModel.revokeGrant(id: id)
     }
 
-    /// Revokes all standing grants and envelopes, performing the biometric ceremony when installed.
     func revokeAllGrants() {
-        Task { @MainActor in
-            await performRevokeAllGrants()
-        }
+        grantsViewModel.revokeAllGrants()
     }
 
-    /// Performs revocation of all standing grants and envelopes with biometric ceremony verification.
     func performRevokeAllGrants() async {
-        guard let ceremony else {
-            logger.error("Cannot revoke all grants: no biometric ceremony is installed")
-            return
-        }
-        windows.activateForCeremony()
-        let outcome = await ceremony.perform(
-            nonce: UUID().uuidString,
-            reason: "ExactMac asks to revoke every grant at once",
-        )
-        guard case .performed = outcome else {
-            logger.notice("Revoke-all ceremony was cancelled or declined")
-            return
-        }
-        do {
-            try ServerInspectionService.revokeAllGrants()
-        } catch {
-            logger.error("Failed to revoke all grants: \(String(describing: error), privacy: .public)")
-        }
-        refreshGrants()
+        await grantsViewModel.performRevokeAllGrants()
     }
 
-    /// The one destructive act in Settings: every standing permission is revoked and the
-    /// posture is returned to the server's default. IT COSTS A CEREMONY for the same reason
-    /// the Grants window's revoke-all does — it is the first control someone else with your
-    /// session would reach for, and the fingerprint is what proves the operator is the one
-    /// doing it.
-    ///
-    /// THE POSTURE RESET FOLLOWS THE REVOCATION, never before: restoring strict while the
-    /// grants were still live would change what happens to the NEXT request before the
-    /// standing ones were gone, and the reset promises both. The posture write clears the
-    /// stored preference to the engine's default rather than setting a stored strict — the
-    /// operator is choosing to hold nothing, not to store a new choice.
-    ///
-    /// The button-facing entry. IT SPAWNS AND RETURNS, exactly as `revokeAllGrants` and
-    /// `setBiometricGate` do, because the row's `onAction` is a synchronous closure and a
-    /// sync call site cannot await. The async body is `performResetEverything`, which is
-    /// what a test drives so it can await the whole flow.
     func resetEverything() {
-        Task { @MainActor in
-            await performResetEverything()
+        settingsViewModel.resetEverything { [weak self] in
+            self?.grantsViewModel.refresh()
         }
     }
 
-    /// The reset body, awaited so a test can drive ceremony, revocation, and posture
-    /// restore to completion rather than spawning past them.
     func performResetEverything() async {
-        guard let ceremony else {
-            logger.error("Cannot reset everything: no biometric ceremony is installed")
-            return
+        await settingsViewModel.performResetEverything { [weak self] in
+            self?.grantsViewModel.refresh()
         }
-        windows.activateForCeremony()
-        let outcome = await ceremony.perform(
-            nonce: UUID().uuidString,
-            reason: "ExactMac asks to reset everything: revoke every grant and restore the default posture",
-        )
-        guard case .performed = outcome else {
-            logger.notice("The reset ceremony was cancelled or declined")
-            return
-        }
-        do {
-            try ServerInspectionService.revokeAllGrants()
-        } catch {
-            // REPORTED AND STOPPED: a reset that revoked nothing must not restore the
-            // posture, because the operator was promised both or neither. The grant state
-            // is what the next request is judged under, and changing the judgement while
-            // the grants survive is a half-reset the operator cannot see.
-            logger.error("Reset failed to revoke grants: \(String(describing: error), privacy: .public)")
-            pendingNotice = "The reset did not complete: grants could not be revoked. Nothing else was changed."
-            return
-        }
-        postureHandle?.setStoredPreference(.strict, environment: stateEnvironment)
-        if let postureHandle {
-            displayedPosture = postureHandle.current
-        }
-        refreshGrants()
     }
 
-    /// Opens the Activity timeline window, reading and verifying the decision audit log from the server.
-    ///
-    /// Never writes to `pendingNotice`: opening a window must not hijack the consent prompt slot.
-    ///
-    /// GATED like Grants, and for the matching half of the row's reason: what was ASKED
-    /// is the other thing an operator at the keyboard can read that someone else may not
-    /// be meant to see. ASYNC for the same reason Grants is.
     func openActivity() async {
-        guard await passBiometricGate(for: "Activity") else { return }
+        guard await settingsViewModel.passBiometricGate(for: "Activity") else { return }
         refreshActivity()
     }
 
-    /// The gate an open passes: false means the window did NOT open. With no handle the
-    /// server has not come up, and the server's default is the ceremony — but with no
-    /// gate to ask and no ceremony to pay, the open REFUSES rather than skips, which is
-    /// the same fail-closed direction the toggle takes. A nil ceremony under an on-gate
-    /// refuses too: a protection that cannot be checked is not skipped.
-    private func passBiometricGate(for surface: String) async -> Bool {
-        guard let handle = biometricGateHandle else {
-            logger.notice("Opening \(surface, privacy: .public) was refused: the server's gate has not come up")
-            return false
-        }
-        guard handle.isCeremonyRequired else {
-            return true
-        }
-        guard let ceremony else {
-            logger.notice(
-                "Opening \(surface, privacy: .public) was refused: the gate requires a ceremony and none is installed",
-            )
-            return false
-        }
-        windows.activateForCeremony()
-        let outcome = await ceremony.perform(
-            nonce: UUID().uuidString,
-            reason: "ExactMac asks before showing \(surface) — what is permitted and what was asked",
-        )
-        guard case .performed = outcome else {
-            logger.notice("Opening \(surface, privacy: .public) was refused: the ceremony did not complete")
-            return false
-        }
-        return true
-    }
-
-    /// Refreshes the Activity timeline window with current server state and verified hash chain.
     func refreshActivity() {
-        let activityResult: Result<DisplayActivityReport, Error> = Result {
-            try ServerInspectionService.inspectActivity()
-        }
-
-        let view: ActivityTimeline
-        switch activityResult {
-        case let .success(report):
-            if case let .unreadable(reason) = report.integrity {
-                view = ActivityTimeline(
-                    rows: [],
-                    integrity: .unchecked,
-                    subtitle: "Unavailable",
-                    errorMessage: "The decision log did not open: \(reason). Decisions are still being enforced; this view is missing, not the protection.",
-                    onRetry: { [weak self] in
-                        self?.refreshActivity()
-                    },
-                )
-            } else {
-                let models = report.items.map { ActivityRow.Model(from: $0) }
-                let badgeState = IntegrityBadge.State(from: report.integrity, itemCount: models.count)
-                view = ActivityTimeline(
-                    rows: models,
-                    integrity: badgeState,
-                    subtitle: report.subtitle,
-                    onRetry: { [weak self] in
-                        self?.refreshActivity()
-                    },
-                )
-            }
-        case let .failure(error):
-            logger.error("Failed to inspect activity: \(String(describing: error), privacy: .public)")
-            view = ActivityTimeline(
-                rows: [],
-                integrity: .unchecked,
-                subtitle: "Unavailable",
-                errorMessage: "The decision log did not open. Decisions are still being enforced; this view is missing, not the protection.",
-                onRetry: { [weak self] in
-                    self?.refreshActivity()
-                },
-            )
-        }
-
-        windows.present(
-            .activity,
-            title: "Activity",
-            activates: true,
-            updateIfPresent: true,
-        ) {
-            view
-        }
+        activityViewModel.refresh()
     }
 
     func openSettings() {
         windows.present(.settings, title: "Settings") {
             SettingsWindow(model: self)
         }
-    }
-
-    // MARK: What this process reports about itself
-
-    /// The state this process is actually able to report.
-    ///
-    /// SEPARATE FROM `apply` so the two other places that set the state directly cannot
-    /// bypass it. `setServiceEnabled` and `refreshServiceState` both wrote `.running`
-    /// themselves, and both would have left a headless process reporting a healthy state
-    /// with the fail-closed band cleared — which is the exact failure `apply` was changed to
-    /// prevent, reached by a different route.
-    private func vetoed(_ state: ServiceState) -> ServiceState {
-        guard !presentation.canObtainConsent else { return state }
-        switch state {
-        case .running, .pending: return .unreachable
-        case .degraded, .reduced, .stopped, .unreachable: return state
-        }
-    }
-
-    /// Folds a reported state into what the popover draws, and decides the fail-closed band.
-    ///
-    /// INTERNAL RATHER THAN PRIVATE SO A TEST CAN DRIVE IT, which is the same reasoning
-    /// `answer` uses: the posture decision is the whole function of this model and it has to
-    /// be assertable without a server on the other end of a socket. A test that could only
-    /// reach it by standing up a real server would be a test that runs once.
-    func apply(_ state: ServiceState) {
-        // THE POSTURE IS A PROPERTY OF THE PROCESS AND IT VETOES THE STATES THAT CLAIM
-        // CONSENT IS OBTAINABLE.
-        //
-        // This used to be a straight assignment, which meant a menu bar app that could not
-        // open a window still reported `Running` and drew a healthy dot. `Running` claims
-        // something an operator will act on — that ExactMac is working and will ask them
-        // when something needs approving — and a process with nowhere to show a prompt
-        // cannot deliver on that claim. The request would sit until it expired and be
-        // denied, while the operator looked at a green dot throughout.
-        //
-        // ONLY `.running` AND `.pending` ARE VETOED. The other four already mean "consent is
-        // not available here", so rewriting them would replace a more specific and more
-        // useful state with a vaguer one — an operator who turned ExactMac off should be
-        // told it is off, not told it cannot ask them anything.
-        let effective = vetoed(state)
-        // A CHANGED STATE IS LOGGED, AND AN UNCHANGED ONE IS NOT. The console is the only
-        // place an operator can see why nothing is being approved, so a silent state change
-        // is a defect; a state that repeats every two seconds is noise that hides the one
-        // line that matters.
-        if effective != serviceState {
-            logger.info(
-                "Console state is now \(String(describing: effective), privacy: .public)",
-            )
-        }
-        if effective != state {
-            // Logged as a VETO rather than as a state change, because the underlying state
-            // genuinely is running and the only thing wrong is this process's ability to
-            // show a window. Silently rewriting it would make a launch-time misclassification
-            // indistinguishable from a connectivity fault in the log forever after.
-            logger.notice(
-                "Refusing to report \(String(describing: state), privacy: .public): this process cannot present a consent prompt (\(self.presentation.summary, privacy: .public))",
-            )
-        }
-        serviceState = effective
-        switch effective {
-        case .unreachable:
-            failClosed = (
-                "Denied until ExactMac can ask you",
-                "Every request that needs consent is being denied, because nothing can put "
-                    + "the question in front of you. Nothing ran and no grant was created.",
-            )
-        case .degraded:
-            failClosed = (
-                "The service is not answering",
-                "No request can be made or answered. Nothing on this Mac is being "
-                    + "automated while this is the case.",
-            )
-        case .reduced:
-            failClosed = (
-                "Running without approvals",
-                "This server is listening on TCP, where there is no owning user to "
-                    + "authenticate. Process verification and approvals are unavailable, so "
-                    + "every consent-requiring capability is denied.",
-            )
-        case .stopped:
-            // IT DOES NOT SAY "YOU TURNED IT OFF". It used to, and the state is reached when
-            // this process's own server failed to start — so an operator who had touched
-            // nothing would have been told they had. Naming the state rather than the cause
-            // is also the honest answer: the cause is the log line, and the operator's next
-            // move is the same either way.
-            failClosed = (
-                "ExactMac is not serving",
-                "Nothing is being served and nothing is exposed. Quitting and opening "
-                    + "ExactMac again will not help on its own — the reason is in the log.",
-            )
-        case .running, .pending:
-            failClosed = nil
-        }
-    }
-}
-
-/// A request waiting on the operator, carrying the whole disclosure.
-struct PendingRequest: Equatable {
-    let requestID: String
-    /// The pid the kernel named for the connection. Carried because the tree's first row IS
-    /// this process and a tree that could not name it would be asking the operator to trust
-    /// a row with no identity in it.
-    let processIdentifier: Int32
-    let nonce: String
-    let requestDigest: String
-    let rpcName: String
-    let capability: String
-    /// What the capability would take, in words. This is the prompt's title, because
-    /// "observation.ax" is a token and what the operator has to picture is the consequence.
-    let consequence: String
-    let scopeDescription: String
-    let argumentSummary: String
-    let agentReason: String?
-    let executablePath: String
-    let bundleIdentifier: String?
-    let signature: SignatureBadge.State
-    let isFullyResolved: Bool
-    let ancestors: [Ancestor]
-    let isAncestryTruncated: Bool
-    /// The engine's own risk class, which is what the design's chip shows. `basis` says WHY a
-    /// decision was reached and is not a risk level; the prompt was showing it as one, which
-    /// put an enum rawValue in the operator's face.
-    let riskClass: CapabilityRisk
-    /// What the grant silently includes, beyond the capability being asked for. The design
-    /// draws this as the implication, and it was being sent and then dropped.
-    let impliedCapabilities: [String]
-    let requiresBiometric: Bool
-    let biometricReason: String?
-    /// The options the server offered, each with ITS OWN SCOPE.
-    ///
-    /// It was `[OptionRow.Kind]`, which kept the kind and threw the scope away, and the
-    /// prompt then named the options by `OptionRow.Kind.title` — a STATIC string that reads
-    /// "Allow for TextEdit" whatever the target is. In the render it promised "Allow for
-    /// TextEdit" directly under a scope line reading "every application". The scope is the
-    /// whole of what distinguishes one option from another, so it is kept.
-    let offered: [Offered]
-
-    struct Offered: Equatable {
-        let kind: OptionRow.Kind
-        /// The server's own description of what this option would permit, e.g. "this exact
-        /// request", "one application", "every app this agent touches".
-        let scope: String
-        /// How long THIS option's grant lasts, in seconds, or nil for a one-shot. Carried
-        /// from the server's `GrantDuration` rather than re-derived, so the envelope review
-        /// states the option's real ceiling instead of a number the console invented.
-        let durationSeconds: Int?
-        /// Whether agreeing to THIS option costs a fingerprint, carried per option because
-        /// the server attaches the requirement to the option and not to the request. THE
-        /// FOCUSED OPTION'S REQUIREMENT IS `requiresBiometric` above; this is the one the
-        /// operator actually selects. Dropping it is what made a broad option unapprovable:
-        /// the console ran no ceremony for it (its gate read the focused option's bar) and
-        /// the server always refused an answer that skipped the selected option's own.
-        let requiresBiometric: Bool
-        /// Whether the server marked this option as the default focus. Exactly one offered
-        /// option carries this flag; the console uses it for the collapsed primary button
-        /// and the expanded "default" badge. Previously the console picked the first array
-        /// element, which diverged from the engine when high-risk requests shifted the
-        /// default to a narrower scope.
-        let isDefault: Bool
-
-        /// The row the operator reads under the option's title: the server's scope string
-        /// plus the option's real duration. Composed from the carried values rather than a
-        /// static vocabulary, so a grant configured for 20 minutes cannot read "for 8
-        /// hours". Deny creates no grant and says so; a once grant expires when the
-        /// request completes.
-        var scopeLine: String {
-            if kind == .deny {
-                return "no grant is created"
-            }
-            let durationText = durationSeconds.map { "for \(PendingRequest.humanDuration($0))" }
-                ?? "expires when it completes"
-            return "\(scope)  ·  \(durationText)"
-        }
-    }
-
-    /// The options, as kinds, for the call sites that only need to choose one.
-    var offeredKinds: [OptionRow.Kind] {
-        offered.map(\.kind)
-    }
-
-    /// How long the operator has. The design draws a countdown, and the prompt was passing
-    /// nil, so nothing on screen said the request would expire.
-    let consentTimeoutSeconds: Int
-    /// Whether this is the revoke-everything decision, which is the one request whose
-    /// consequence is not a capability at all.
-    let isRevokeAll: Bool
-
-    struct Ancestor: Equatable {
-        let processIdentifier: Int32
-        let executablePath: String
-        let signature: SignatureBadge.State
-        let isFullyResolved: Bool
-    }
-
-    /// BUILDS THE DISCLOSURE FROM THE SERVER'S OWN TYPES, and reads them rather than
-    /// re-deriving anything. The request, the identity and the decision were all produced by
-    /// the server from the request bytes; the one thing that did not come across the wire as a
-    /// field is the request's own id, which is here because the continuation is keyed by it.
-    init(
-        request: AuthorizationRequest,
-        identity: CallerIdentity,
-        decision: AuthorizationDecision,
-    ) {
-        // THE ID DOES THREE JOBS HERE, and it is worth being explicit about why that is not
-        // a shortcut. The wire protocol had a separate per-decision nonce and a request
-        // digest because a frame could be replayed: a second copy of the same decision had to
-        // be refused. There is no frame any more — the server calls a closure in this
-        // process, holding this very request value — so the binding is the VALUE, and the
-        // continuation below is consumed exactly once, which is what the nonce was for. A
-        // replay is not representable, so a separate nonce would be a value nothing checked.
-        requestID = request.id.rawValue
-        processIdentifier = identity.processIdentifier
-        nonce = decision.ceremonyNonce ?? request.id.rawValue
-        requestDigest = request.id.rawValue
-        rpcName = request.rpcName
-        capability = request.capability.rawValue
-        consequence = request.capability.consequence
-        scopeDescription = ScopeDescription.describe(request.scope)
-        argumentSummary = request.argumentSummary
-        agentReason = request.agentReason
-        executablePath = identity.code.executablePath
-        bundleIdentifier = identity.code.bundleIdentifier
-        signature = SignatureBadge.State(serverValue: identity.code.signature.rawValue)
-        isFullyResolved = identity.isFullyResolved
-        ancestors = identity.ancestors.map {
-            Ancestor(
-                processIdentifier: $0.processIdentifier,
-                executablePath: $0.code.executablePath,
-                signature: SignatureBadge.State(serverValue: $0.code.signature.rawValue),
-                isFullyResolved: $0.isFullyResolved,
-            )
-        }
-        isAncestryTruncated = identity.isAncestryTruncated
-        riskClass = CapabilityRisk(serverValue: decision.riskClass.rawValue)
-        // SORTED, because the engine's implied set is a `Set` and `Set` iteration order is
-        // not stable between launches. Composed straight from it, the same request produced
-        // "Also permits taking a screenshot of the screen and reading the clipboard" on one
-        // launch and the two clauses the other way round on the next — an operator-facing
-        // sentence that reorders itself is one nobody learns to read quickly, and it makes
-        // the prompt untestable. The order is the engine's own spelling, sorted, so it is
-        // stable and still derived rather than invented.
-        impliedCapabilities = decision.effectiveCapabilities
-            .filter { $0 != request.capability }
-            .map(\.rawValue)
-            .sorted()
-        requiresBiometric = decision.biometric.reason != nil
-        biometricReason = decision.biometric.reason
-        // THE SERVER'S ENV VAR NAME, verbatim. The console used to read a differently
-        // named variable than the server, so setting one changed the server's timeout
-        // while the console kept counting the default — and the countdown a request
-        // showed was a lie about when it would actually expire.
-        let envTimeout = ProcessInfo.processInfo.environment["EXACTMAC_CONSENT_TIMEOUT_SECONDS"].flatMap(Int.init)
-        consentTimeoutSeconds = (envTimeout != nil && envTimeout! > 0) ? envTimeout! : ServerConfig.defaultConsentTimeoutSeconds
-        isRevokeAll = false
-        offered = decision.offeredDecisions.map { option in
-            Offered(
-                kind: OptionRow.Kind(serverValue: option.kind.rawValue),
-                scope: ScopeDescription.describe(option.scope),
-                durationSeconds: option.duration.seconds,
-                requiresBiometric: option.biometric.isRequired,
-                isDefault: option.isDefault,
-            )
-        }
-    }
-
-    /// The ceremony requirement OF THE OPTION THE OPERATOR SELECTED, falling back to the
-    /// focused one for an option the prompt did not offer — the same floor the server
-    /// applies, so the console never runs a cheaper ceremony than the server would have
-    /// accepted. `.deny` never costs a fingerprint, here as on the server.
-    func requiresBiometric(for kind: OptionRow.Kind) -> Bool {
-        if kind == .deny {
-            return false
-        }
-        if let selected = offered.first(where: { $0.kind == kind }) {
-            return selected.requiresBiometric
-        }
-        return requiresBiometric
-    }
-
-    /// The caller tree, in the order the design draws it: nearest ancestor first and the
-    /// requester last, because the requester is the row that matters and the tree is read
-    /// downward into it.
-    var treeRows: [CallerTree.Row] {
-        ancestors.enumerated().map { index, ancestor in
-            CallerTree.Row(
-                id: ancestor.processIdentifier,
-                name: URL(fileURLWithPath: ancestor.executablePath).lastPathComponent,
-                role: "ancestor",
-                depth: index + 1,
-                signature: ancestor.signature,
-                isRequester: false,
-            )
-        } + [
-            CallerTree.Row(
-                id: 0,
-                name: URL(fileURLWithPath: executablePath).lastPathComponent,
-                role: "requesting",
-                depth: ancestors.count + 1,
-                signature: signature,
-                isRequester: true,
-            ),
-        ]
-    }
-
-    /// The prompt's TITLE, and the single most important line on the surface.
-    ///
-    /// IT WAS `"\(capability) · \(rpcName)"` — two identifiers concatenated, so the heading
-    /// read "observation.ax · AXUIElementCopyAttributeValue", which is the shape of a log line
-    /// and not of something an operator can consent to. It is now the consequence the engine
-    /// holds, because that is what the decision is actually about: the design's own example
-    /// is "Read the clipboard in TextEdit".
-    var promptTitle: String {
-        isRevokeAll ? "Revoke every grant" : consequence
-    }
-
-    /// The line under the title, naming what the grant is bounded to.
-    ///
-    /// IT NAMED THE CAPABILITY TOKEN TOO, and that is a standing invariant broken: the title
-    /// directly above already says what the capability IS in words -- "Read the accessibility
-    /// tree of an app" -- so the token under it restates the same fact in a form the operator
-    /// cannot act on. The design had it, with the reasoning that the token is what makes the
-    /// scope mean something; the token is gone from the design for the same reason, and the
-    /// scope stands on its own. The scope is the half that is new information here: the title
-    /// says what, this says how wide.
-    var promptScopeLine: String {
-        scopeDescription
-    }
-
-    /// What the grant would also permit, in the operator's words.
-    ///
-    /// NIL when the capability implies nothing beyond itself, which is the common case and is
-    /// why the design's block is absent from most prompts rather than present and empty. The
-    /// capability being asked for is removed from the list at the wire boundary, so this
-    /// cannot read "this also permits clipboard.read" under a clipboard.read request.
-    var implicationText: String? {
-        guard !impliedCapabilities.isEmpty else { return nil }
-        let named = impliedCapabilities.compactMap(CapabilityRisk.consequence(of:))
-        guard !named.isEmpty else { return nil }
-        return "Also permits " + Self.proseList(named)
-    }
-
-    /// An English list, NOT the design's `  ·  ` metadata delimiter.
-    ///
-    /// That delimiter is for SCOPE AND CAPABILITY LINES — it is a field separator, and the
-    /// design uses it everywhere a row names its parts. The implication is a sentence, and
-    /// the design's own example reads "Also permits screen capture and reading the focused
-    /// window's text", joined with "and". One, two, then the Oxford form.
-    private static func proseList(_ items: [String]) -> String {
-        switch items.count {
-        case 1:
-            items[0]
-        case 2:
-            "\(items[0]) and \(items[1])"
-        default:
-            items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
-        }
-    }
-
-    /// How long the operator has, or nil when there is no timeout to count down. The design
-    /// draws a countdown and the prompt was passing nil, so nothing on screen said the
-    /// request would expire — and a request that expires silently is one the operator can
-    /// walk away from without knowing it.
-    ///
-    /// FORMATTED AS M:SS rather than raw seconds, because "decides in 90s" is a number an
-    /// operator has to convert and "decides in 1:30" is one they can read.
-    var clockText: String? {
-        guard consentTimeoutSeconds > 0 else { return nil }
-        return "decides in \(Self.clockLabel(consentTimeoutSeconds))"
-    }
-
-    /// A duration in M:SS, for every operator-facing place a timeout is stated. One
-    /// formatter so the countdown, the expired line and the envelope duration cannot
-    /// disagree about what the same number of seconds looks like.
-    static func clockLabel(_ seconds: Int) -> String {
-        let minutes = seconds / 60
-        let remainder = seconds % 60
-        return "\(minutes):" + String(format: "%02d", remainder)
-    }
-
-    /// The biometric sentence, and what it says when no ceremony is required.
-    ///
-    /// THE FALLBACK WAS "No ceremony is required for this option", which is engine vocabulary
-    /// and reads as a missing feature. An approval that needs no sensor is a fact about how
-    /// little this one costs, and it is stated as the absence of a cost.
-    var biometricLine: String {
-        if let biometricReason, !biometricReason.isEmpty {
-            return biometricReason
-        }
-        return requiresBiometric
-            ? "\(BiometricCeremony.biometricType) will confirm this decision."
-            : "Nothing else is asked of you. This one needs no fingerprint."
-    }
-
-    /// The collapsed disclosure of the wider option set, and what it says rather than "More
-    /// choices", which named no number and no breadth.
-    ///
-    /// The names are the options' own SCOPES — the thing an operator is choosing between —
-    /// and the count is the real one from the server's offer, so a request that arrived
-    /// offering only Deny says nothing here at all.
-    var moreChoicesText: String? {
-        let alternatives = offered.filter { $0.kind != .deny }
-        guard alternatives.count > 1 else { return nil }
-        // THE SCOPES THE SERVER SENT, NOT `OptionRow.Kind.title`. The static title reads
-        // "Allow for TextEdit" for the target-scoped option, which is a LIE whenever the
-        // target is not TextEdit — and in the render it was not: the scope line said "every
-        // application" directly above a disclosure promising "Allow for TextEdit". The
-        // primary phrase is the SERVER-MARKED default's scope — not the first array
-        // element's — because the default moves to the narrower target option under a
-        // high-risk request.
-        let primaryOption = alternatives.first(where: \.isDefault) ?? alternatives[0]
-        let others = alternatives.filter { $0.kind != primaryOption.kind }
-        return "\(alternatives.count) more choices — \(primaryOption.scope), or "
-            + Self.proseList(others.map(\.scope))
-    }
-
-    /// The body text shown on the popover's pending notice card, matching Figma node 0:1326.
-    ///
-    /// Forms a human-readable sentence: "<caller> wants to <action> in <target>".
-    var popoverNoticeBody: String {
-        let caller = !executablePath.isEmpty
-            ? URL(fileURLWithPath: executablePath).lastPathComponent
-            : (bundleIdentifier ?? "An application")
-        var action = consequence.prefix(1).lowercased() + consequence.dropFirst()
-        if action.hasSuffix(" and its history") {
-            action = String(action.dropLast(" and its history".count))
-        }
-        if scopeDescription.hasPrefix("in ") {
-            return "\(caller) wants to \(action) \(scopeDescription)"
-        } else if scopeDescription != "any application", !scopeDescription.isEmpty {
-            return "\(caller) wants to \(action) in \(scopeDescription)"
-        } else {
-            return "\(caller) wants to \(action)"
-        }
-    }
-
-    // MARK: The envelope review's disclosure, derived from the server's own offer
-
-    /// Who is asking for the pre-authorization: the caller's executable name, which is the
-    /// identity the operator is judging. Never invented.
-    var envelopeRequester: String {
-        !executablePath.isEmpty
-            ? URL(fileURLWithPath: executablePath).lastPathComponent
-            : (bundleIdentifier ?? "An application")
-    }
-
-    /// What the envelope would permit, one row per capability. The requested capability
-    /// leads, then everything it transitively implies — the same set the prompt's
-    /// implication line names, so the review and the prompt cannot disagree about breadth.
-    var envelopeCapabilities: [EnvelopeReview.Capability] {
-        var rows: [EnvelopeReview.Capability] = []
-        if let consequence = CapabilityRisk.consequence(of: capability) {
-            rows.append(.init(
-                id: capability,
-                consequence: consequence,
-                breadth: scopeDescription,
-                risk: riskClass,
-            ))
-        }
-        for implied in impliedCapabilities {
-            guard let consequence = CapabilityRisk.consequence(of: implied) else { continue }
-            rows.append(.init(
-                id: implied,
-                consequence: consequence,
-                breadth: scopeDescription,
-                risk: riskClass,
-            ))
-        }
-        return rows
-    }
-
-    /// How long the envelope lasts, in the operator's words, from the offered option's own
-    /// duration — never a hardcoded number.
-    var envelopeDurationLabel: String {
-        guard let seconds = offered.first(where: { $0.kind == .envelope })?.durationSeconds,
-              seconds > 0
-        else { return "this session" }
-        return Self.humanDuration(seconds)
-    }
-
-    /// Seconds in the operator's words: the largest true unit, so 7200 reads "2 hours" and
-    /// 900 reads "15 minutes", not "7200 seconds".
-    ///
-    /// INTERNAL rather than private because the sentence beside the sensor must state the
-    /// same durations the prompt does, and both are derived from the offer rather than
-    /// from remembered constants.
-    static func humanDuration(_ seconds: Int) -> String {
-        if seconds >= 3600, seconds % 3600 == 0 {
-            let hours = seconds / 3600
-            return hours == 1 ? "1 hour" : "\(hours) hours"
-        }
-        if seconds >= 60, seconds % 60 == 0 {
-            let minutes = seconds / 60
-            return minutes == 1 ? "1 minute" : "\(minutes) minutes"
-        }
-        return seconds == 1 ? "1 second" : "\(seconds) seconds"
     }
 }

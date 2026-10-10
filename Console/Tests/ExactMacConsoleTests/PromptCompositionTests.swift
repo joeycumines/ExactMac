@@ -297,7 +297,7 @@ struct PromptCompositionTests {
             offerWithTargetFocus.first(where: { $0.kind == .allowOnce }),
             offerWithTargetFocus.first(where: { $0.kind == .allowTargetApplication }),
             offerWithTargetFocus.first(where: { $0.kind == .deny }),
-        ].compactMap { $0 }
+        ].compactMap(\.self)
         let pending = PendingRequest(
             request: req,
             identity: identity,
@@ -603,7 +603,58 @@ struct PromptCompositionTests {
         // One caption: the note is sent with whichever decision the operator makes, and
         // the field cannot know which one is coming. The old denial variant was driven by
         // a "selected option" that was never selectable.
-        #expect(NoteField.caption == "NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION")
+        #expect(NoteField.caption == "NOTE FOR AUDIT LOG — RECORDED WITH DECISION")
+    }
+
+    /// A prompt composed exactly like the model composes one, for queue-indicator
+    /// assertions: the gating logic is a property of the prompt, so the prompt is the
+    /// unit that gets tested.
+    private static func promptWithQueue(
+        state: ApprovalPrompt.State,
+        queuedCount: Int,
+    ) -> ApprovalPrompt {
+        let pending = Self.request()
+        return ApprovalPrompt(
+            state: state,
+            title: pending.promptTitle,
+            capabilityLine: pending.promptScopeLine,
+            risk: pending.riskClass.label,
+            riskDot: pending.riskClass.dot,
+            reason: pending.agentReason,
+            tree: CallerTree.rows(for: pending),
+            payload: pending.argumentSummary,
+            biometricLine: pending.biometricLine,
+            biometricDot: pending.riskClass.dot,
+            offeredOptions: pending.offered,
+            queuedCount: queuedCount,
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
+        )
+    }
+
+    @Test
+    func `The queue indicator shows if and only if requests wait on an undecided prompt`() {
+        // THE RULE the design states: the indicator appears when requests are waiting,
+        // and hides once the options are expanded or the prompt settles.
+        #expect(
+            Self.promptWithQueue(state: .pending, queuedCount: 2).showsQueueIndicator,
+            "requests waiting on a pending prompt: the operator must see it",
+        )
+        #expect(
+            !Self.promptWithQueue(state: .pending, queuedCount: 0).showsQueueIndicator,
+            "no queue, no indicator",
+        )
+        #expect(
+            !Self.promptWithQueue(state: .expanded, queuedCount: 3).showsQueueIndicator,
+            "mid-choice: the expanded options own the footer",
+        )
+        for settled in [ApprovalPrompt.State.denied, .expired, .consoleUnreachable] {
+            #expect(
+                !Self.promptWithQueue(state: settled, queuedCount: 2).showsQueueIndicator,
+                "a settled prompt shows its outcome, not a queue",
+            )
+        }
     }
 }
 
@@ -649,5 +700,78 @@ struct TimeoutLabelTests {
         #expect(PendingRequest.clockLabel(45) == "0:45")
         #expect(PendingRequest.clockLabel(600) == "10:00")
         #expect(PendingRequest.clockLabel(59) == "0:59")
+    }
+}
+
+@Suite("Keyboard shortcuts and prompt ergonomics")
+@MainActor
+struct KeyboardShortcutsAndNavigationTests {
+    @Test
+    func `ConsoleButton binds default and cancel keyboard shortcuts`() {
+        var cancelTriggered = false
+        var defaultTriggered = false
+
+        let denyButton = ConsoleButton(title: "Deny", kind: .deny, shortcut: .cancelAction) {
+            cancelTriggered = true
+        }
+        #expect(denyButton.shortcut == .cancelAction)
+
+        let allowButton = ConsoleButton(title: "Allow once", kind: .primary, shortcut: .defaultAction) {
+            defaultTriggered = true
+        }
+        #expect(allowButton.shortcut == .defaultAction)
+
+        let quietButton = ConsoleButton(title: "Quiet", kind: .quiet) {}
+        #expect(quietButton.shortcut == nil)
+
+        denyButton.action()
+        #expect(cancelTriggered)
+
+        allowButton.action()
+        #expect(defaultTriggered)
+    }
+
+    @Test
+    func `OptionRow binds default action keyboard shortcut`() {
+        var selected = false
+        let row = OptionRow(
+            kind: .once,
+            scopeLine: "this exact request",
+            isDefault: true,
+            shortcut: .defaultAction,
+        ) {
+            selected = true
+        }
+        #expect(row.shortcut == .defaultAction)
+        #expect(row.isDefault)
+        row.onSelect()
+        #expect(selected)
+    }
+
+    @Test
+    func `ApprovalPrompt initializes with live createdAt timestamp`() {
+        let (req, identity, decision) = ServerFixture.request()
+        let pending = PendingRequest(request: req, identity: identity, decision: decision)
+        let prompt = ApprovalPrompt(
+            state: .pending,
+            title: pending.promptTitle,
+            capabilityLine: pending.promptScopeLine,
+            risk: pending.riskClass.label,
+            riskDot: pending.riskClass.dot,
+            clock: pending.clockText,
+            consentTimeoutSeconds: pending.consentTimeoutSeconds,
+            createdAt: pending.createdAt,
+            tree: CallerTree.rows(for: pending),
+            payload: pending.argumentSummary,
+            biometricLine: pending.biometricLine,
+            biometricDot: pending.riskClass.dot,
+            offeredOptions: pending.offered,
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
+        )
+        #expect(prompt.createdAt <= Date())
+        #expect(prompt.consentTimeoutSeconds == 90)
+        #expect(prompt.focusedKind == .once)
     }
 }

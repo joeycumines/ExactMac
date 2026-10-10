@@ -15,7 +15,7 @@ import Testing
 ///
 /// THE STATE ENVIRONMENT IS A TEMPORARY DIRECTORY, and the seam exists because the model
 /// drives the REAL persist path: without it, any test that writes a posture would rewrite
-/// the operator's actual `~/.exactmac/posture.json` on every run — a state-corrupting
+/// the operator's actual PreferencesStore on every run — a state-corrupting
 /// test that never fails, because persist failures are swallowed. Every model the suite
 /// builds goes through this helper, so every persist lands here or nowhere.
 /// The options a standard consent request arrives with, for render fixtures that draw the
@@ -796,6 +796,84 @@ struct RemainingRenderTests {
                 size: CGSize(width: 420, height: 617),
                 appearance: mode,
                 to: RenderHarness.outputDirectory + "envelope\(mode.suffix)",
+            )
+        }
+    }
+
+    @Test
+    func `the queue review and queue indicator render in both schemes`() throws {
+        // THE QUEUE ARTEFACTS: the review sheet and the indicator that leads to it. Both
+        // are built from values shaped like the model builds them — real consequence
+        // titles and server-default scope lines — so the artefact shows what the operator
+        // gets rather than a hand-drawn approximation.
+        let review = QueueReview(
+            items: [
+                .init(
+                    id: "q1",
+                    title: "Read the clipboard and its history",
+                    scopeLine: "this exact request  ·  expires when it completes",
+                ),
+                .init(
+                    id: "q2",
+                    title: "Read the accessibility tree of an app",
+                    scopeLine: "one application  ·  for 15 minutes",
+                ),
+                .init(
+                    id: "q3",
+                    title: "Take a screenshot of the screen",
+                    scopeLine: "one application  ·  for 8 hours",
+                ),
+            ],
+            onDecide: { _ in },
+            onDenyAll: { _ in },
+            onBack: {},
+        )
+        let height = RenderHarness.fittedHeight(of: review, width: Design.Layout.promptWidth)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                review,
+                size: CGSize(width: Design.Layout.promptWidth, height: height),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "queue-review\(mode.suffix)",
+            )
+        }
+
+        // THE INDICATOR, as the composed prompt renders it: one of the render fixtures
+        // carries a waiting count so the prompt-with-queue state is drawn too.
+        let (request, identity, decision) = ServerFixture.request(requestID: "r-queued")
+        let pending = PendingRequest(request: request, identity: identity, decision: decision)
+        let prompt = ApprovalPrompt(
+            state: .pending,
+            title: pending.promptTitle,
+            capabilityLine: pending.promptScopeLine,
+            risk: pending.riskClass.label,
+            riskDot: pending.riskClass.dot,
+            clock: pending.clockText,
+            reason: pending.agentReason,
+            implication: pending.implicationText,
+            tree: CallerTree.rows(for: pending),
+            target: nil,
+            payload: pending.argumentSummary,
+            biometricLine: pending.biometricLine,
+            biometricDot: pending.requiresBiometric ? pending.riskClass.dot : Design.Ink.success,
+            moreChoicesLabel: pending.moreChoicesText,
+            showOptionsLabel: "Show options",
+            offeredOptions: pending.offered,
+            queuedCount: 2,
+            // Render fixture: drawn, never clicked. The review link exists here because
+            // the model wires one whenever a queue exists.
+            onReviewQueue: {},
+            onDecision: { _, _ in },
+            onCopyPayload: {},
+            onShowOptions: {},
+        )
+        let promptHeight = RenderHarness.fittedHeight(of: prompt, width: Design.Layout.promptWidth)
+        for mode in RenderHarness.AppearanceMode.allCases {
+            try RenderHarness.png(
+                prompt,
+                size: CGSize(width: Design.Layout.promptWidth, height: promptHeight),
+                appearance: mode,
+                to: RenderHarness.outputDirectory + "prompt-queued\(mode.suffix)",
             )
         }
     }

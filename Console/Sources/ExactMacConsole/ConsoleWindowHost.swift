@@ -16,14 +16,12 @@ protocol ConsoleApplication: AnyObject {
     /// for "is the operator already looking at us", which decides whether a new request
     /// needs to ask for attention at all.
     var isActive: Bool { get }
-    func becomeRegular()
-    func becomeAccessory()
     func activate()
     /// Asks the system to draw the operator's attention to the console.
     func requestUserAttention()
 }
 
-/// The live application.
+/// The live application. Permanent accessory activation policy with zero Dock icon flicker.
 @MainActor
 final class LiveConsoleApplication: ConsoleApplication {
     private let application: NSApplication
@@ -36,14 +34,6 @@ final class LiveConsoleApplication: ConsoleApplication {
 
     var isRegular: Bool {
         application.activationPolicy() == .regular
-    }
-
-    func becomeRegular() {
-        application.setActivationPolicy(.regular)
-    }
-
-    func becomeAccessory() {
-        application.setActivationPolicy(.accessory)
     }
 
     func activate() {
@@ -59,22 +49,32 @@ final class LiveConsoleApplication: ConsoleApplication {
     }
 }
 
-/// The console's windows, which the app did not have.
-///
-/// EVERY DESIGNED SURFACE WAS UNREACHABLE. `ApprovalPrompt`, `GrantsManager`,
-/// `ActivityTimeline`, `SettingsWindow` and `EnvelopeReview` are all built, and nothing
-/// ever put one on screen: the popover's menu rows are `Button`s whose action is the default
-/// no-op, and the pending notice is a `VStack` of `Text`. So the console could receive a
-/// consent request, display that one was waiting, and offer the operator no way to answer —
-/// which is the whole function of the program.
-///
-/// ACTIVATION IS NOT COSMETIC HERE, and that is why this is not a plain `NSWindow`. The
-/// ceremony in `BiometricCeremony` refuses unless the console is FRONTMOST — a biometric
-/// performed against a hidden window proves nothing and is indistinguishable from one the
-/// operator never intended — and an `LSUIElement` accessory is not frontmost when nothing
-/// of it is on screen. So presenting a window makes the app `regular`, and closing the last
-/// one puts it back to `accessory`: the Dock icon exists exactly while a window needs it and
-/// the menu bar item is never replaced by it.
+/// Floating utility panel for the approval prompt that stays permanently accessory.
+final class ConsoleFloatingPanel: NSPanel {
+    init(contentRect: NSRect) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.titled, .nonactivatingPanel, .utilityWindow, .fullSizeContentView],
+            backing: .buffered,
+            defer: false,
+        )
+        level = .floating
+        isFloatingPanel = true
+        becomesKeyOnlyIfNeeded = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        isReleasedWhenClosed = false
+    }
+
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        true
+    }
+}
+
+/// The console's windows. Permanent accessory activation policy without Dock thrashing.
 @MainActor
 final class ConsoleWindowHost {
     /// The surfaces, named rather than identified by view type, so presenting the same one
@@ -146,7 +146,7 @@ final class ConsoleWindowHost {
             requestAttentionIfNeeded()
         }
         if activates {
-            becomeActiveApplication()
+            application.activate()
         }
 
         if windows[surface] != nil {
@@ -168,52 +168,52 @@ final class ConsoleWindowHost {
             max(fitted.height, 1),
             Self.maximumWindowHeight,
         )
-        let isSettings = (surface == .settings)
-        var styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
-        if isSettings {
-            styleMask.insert(.resizable)
-        }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: styleMask,
-            backing: .buffered,
-            defer: false,
-        )
-        window.title = title
-        window.contentView = hosting
-        if isSettings {
-            // The settings window can be resized by dragging its corner, within limits that
-            // keep it usable — a minimum that shows the primary action and a maximum bounded
-            // by the display it is on rather than by the content's natural height.
-            let screenHeight = window.screen?.visibleFrame.height
-                ?? NSScreen.main?.visibleFrame.height
-                ?? Self.maximumWindowHeight
-            let maxHeight = max(screenHeight, height)
-            window.minSize = NSSize(width: width, height: Self.minimumSettingsWindowHeight)
-            window.maxSize = NSSize(width: width, height: maxHeight)
-        } else {
-            // A console window is not resizable by dragging, because the design measures every
-            // surface and a resized one is a surface the design does not describe. Equal minimum
-            // and maximum is the honest way to say fixed — and it is set AFTER the fitted height,
-            // because pinning the size before measuring is what produced the clipped settings
-            // window. No frame autosave: autosaving a size the design does not have is the same
-            // mistake one layer down.
-            window.minSize = window.frame.size
-            window.maxSize = window.frame.size
-        }
-        window.isReleasedWhenClosed = false
-        window.delegate = windowDelegate
+
+        let window: NSWindow
         if surface == .approval {
-            // THE APPROVAL WINDOW PERSISTS IN THE FOREGROUND. A consent request expires,
-            // and one that sinks behind the operator's other windows becomes a denial they
-            // never saw. Floating keeps it above normal windows without becoming key, so
-            // the keyboard stays where the operator left it; the collection behavior keeps
-            // it visible across Spaces and beside a full-screen app, which is what
-            // "cannot be required to go looking for it" actually demands.
-            window.level = .floating
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            let panel = ConsoleFloatingPanel(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            )
+            panel.title = title
+            panel.contentView = hosting
+            panel.minSize = panel.frame.size
+            panel.maxSize = panel.frame.size
+            panel.delegate = windowDelegate
+            panel.center()
+            window = panel
+        } else {
+            let isSettings = (surface == .settings)
+            var styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
+            if isSettings {
+                styleMask.insert(.resizable)
+            }
+            let standardWindow = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                styleMask: styleMask,
+                backing: .buffered,
+                defer: false,
+            )
+            standardWindow.title = title
+            standardWindow.contentView = hosting
+            if isSettings {
+                // The settings window can be resized by dragging its corner, within limits that
+                // keep it usable — a minimum that shows the primary action and a maximum bounded
+                // by the display it is on rather than by the content's natural height.
+                let screenHeight = standardWindow.screen?.visibleFrame.height
+                    ?? NSScreen.main?.visibleFrame.height
+                    ?? Self.maximumWindowHeight
+                let maxHeight = max(screenHeight, height)
+                standardWindow.minSize = NSSize(width: width, height: Self.minimumSettingsWindowHeight)
+                standardWindow.maxSize = NSSize(width: width, height: maxHeight)
+            } else {
+                standardWindow.minSize = standardWindow.frame.size
+                standardWindow.maxSize = standardWindow.frame.size
+            }
+            standardWindow.isReleasedWhenClosed = false
+            standardWindow.delegate = windowDelegate
+            standardWindow.center()
+            window = standardWindow
         }
-        window.center()
         windows[surface] = window
         bringToFront(surface, activates: activates)
     }
@@ -273,7 +273,6 @@ final class ConsoleWindowHost {
             window.close()
         }
         windows.removeAll()
-        restoreRestingPolicy()
     }
 
     /// - Parameter activates: whether the APPLICATION comes forward with the window. When it
@@ -293,11 +292,7 @@ final class ConsoleWindowHost {
     }
 
     /// Brings the application forward for a ceremony, and is a no-op when it is already.
-    /// /// Called at the moment the operator commits to an option that needs a sensor, not when
-    /// the request arrives: activation is the price of the ceremony and is not paid until the
-    /// ceremony is about to happen.
     func activateForCeremony() {
-        becomeActiveApplication()
         application.activate()
     }
 
@@ -312,19 +307,6 @@ final class ConsoleWindowHost {
     private func windowClosed(_ closingWindow: NSWindow) {
         guard let surface = windows.first(where: { $0.value === closingWindow })?.key else { return }
         windows.removeValue(forKey: surface)
-        if windows.isEmpty {
-            restoreRestingPolicy()
-        }
-    }
-
-    private func becomeActiveApplication() {
-        guard !application.isRegular else { return }
-        application.becomeRegular()
-    }
-
-    private func restoreRestingPolicy() {
-        guard application.isRegular else { return }
-        application.becomeAccessory()
     }
 }
 

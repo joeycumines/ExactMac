@@ -62,8 +62,10 @@ struct SettingRow: View {
                     // which is the defect the explicit wiring exists to end.
                     ConsoleButton(title: actionTitle, kind: .deny, action: onAction)
                         .frame(width: 138)
+                } else if setting.isLocked {
+                    PolicyCallout(isOn: setting.isOn)
                 } else {
-                    Track(isOn: setting.isOn, isLocked: setting.isLocked, onToggle: onToggle)
+                    Track(isOn: setting.isOn, onToggle: onToggle)
                 }
             }
             Text(setting.detail)
@@ -94,42 +96,45 @@ struct SettingRow: View {
     }
 }
 
-/// The 38x22 switch track, shared with the popover's service control so the two cannot
-/// drift apart.
-///
-/// A LOCKED track is drawn EXACTLY as an unlocked one, and that is not an oversight: the
-/// design has no disabled state anywhere, and greying it would be inventing chrome it
-/// explicitly rejected — the same class of mistake as painting an amber band it rejected.
-/// The refusal is stated in WORDS beside the control ("Required — this cannot be turned
-/// off") and enforced by the code refusing the change, and a switch that looks inert is
-/// worse than one that looks live and is explained.
+/// An informative status callout badge for locked server policy rows.
+struct PolicyCallout: View {
+    let isOn: Bool
+
+    var body: some View {
+        HStack(spacing: Design.Space.leading) {
+            StatusDot(isOn ? Design.Ink.accent : Design.Ink.textSecondary, diameter: 6)
+            Text(isOn ? "Enforced" : "Exempt")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isOn ? Design.Ink.textPrimary : Design.Ink.textSecondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, Design.Space.tight)
+        .background(
+            Capsule().fill(Design.Ink.surfaceRaised),
+        )
+        .overlay(
+            Capsule().strokeBorder(Design.Ink.controlBorder, lineWidth: 1),
+        )
+    }
+}
+
+/// Native macOS toggle switch for operable settings.
 struct Track: View {
     let isOn: Bool
-    var isLocked = false
     var onToggle: (() -> Void)?
 
     var body: some View {
-        let shape = ZStack(alignment: isOn ? .trailing : .leading) {
-            Capsule()
-                .fill(isOn ? Design.Ink.accent : Design.Ink.surfaceSunken)
-                .overlay(
-                    Capsule().strokeBorder(
-                        isOn ? .clear : Design.Ink.controlBorder,
-                        lineWidth: 1,
-                    ),
-                )
-            Circle()
-                .fill(isOn ? Design.Ink.onAccent : Design.Ink.controlBorder)
-                .frame(width: 18, height: 18)
-                .padding(.horizontal, 2)
-        }
-        .frame(width: 38, height: 22)
-
-        if let onToggle, !isLocked {
-            Button(action: onToggle) { shape }.buttonStyle(.plain)
-        } else {
-            shape
-        }
+        Toggle("", isOn: Binding(
+            get: { isOn },
+            set: { _ in
+                if let onToggle {
+                    onToggle()
+                }
+            },
+        ))
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .disabled(onToggle == nil)
     }
 }
 
@@ -226,39 +231,18 @@ struct PostureControl: View {
     unowned let model: ConsoleModel
 
     var body: some View {
-        HStack(spacing: Design.Space.tight) {
+        Picker("Posture", selection: Binding(
+            get: { selection },
+            set: { newChoice in
+                model.setPosture(newChoice.posture)
+            },
+        )) {
             ForEach(Choice.allCases, id: \.self) { choice in
-                let isChosen = choice == selection
-                Button {
-                    model.setPosture(choice.posture)
-                } label: {
-                    Text(choice.label)
-                        .font(.system(size: 11, weight: isChosen ? .semibold : .regular))
-                        .foregroundStyle(isChosen ? Design.Ink.textPrimary : Design.Ink.textSecondary)
-                        .padding(.horizontal, Design.Space.chip)
-                        .frame(height: 26)
-                        .background(
-                            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                                .fill(isChosen ? Design.Ink.surface : Design.Ink.surfaceSunken),
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                                .strokeBorder(
-                                    isChosen ? Design.Ink.controlBorder : .clear,
-                                    lineWidth: 1,
-                                ),
-                        )
-                }
-                .buttonStyle(.plain)
+                Text(choice.label).tag(choice)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, Design.Space.tight)
-        .padding(.vertical, Design.Space.tight)
-        .background(
-            RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                .fill(Design.Ink.surfaceSunken),
-        )
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 
@@ -360,9 +344,9 @@ struct SettingsWindow: View {
             ),
             .init(
                 id: "global",
-                title: "Grant every application, indefinitely",
-                detail: "The broadest grant ExactMac can issue. It stays in force until you "
-                    + "revoke it, so approving it proves you are you.",
+                title: "Grant every application, until ExactMac quits (up to 8 hours)",
+                detail: "The broadest grant ExactMac can issue. It exists only in memory and "
+                    + "expires when ExactMac quits (or after 8 hours), so approving it proves you are you.",
                 isOn: true,
                 isLocked: true,
             ),
