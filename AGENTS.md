@@ -14,23 +14,9 @@ ExactMac is a macOS accessibility automation framework consisting of:
 
 `gmake help` is the authoritative catalog of available targets and their behavior. A bare `gmake` selects `check`: the complete `all` build/check path followed by permission-dependent macOS integration tests. Read the help output before choosing specialized targets; do not duplicate its recipes here.
 
-## Key Directories
+## Codebase Stewardship
 
-- `Server/` - Swift gRPC server with Accessibility API integration
-- `Sources/` - Swift SDK
-- `internal/` - Go modules for config, server, transport
-- `proto/` - Protocol buffer definitions (must mirror package structure)
-- `integration/` - Integration tests (target Calculator, TextEdit, Finder)
-- `make/` - Make build system modules
-- `docs/` - Documentation
-
-## Important Files
-
-- `WIP.md` - Interruption guard and current execution state
-- `CONTRIBUTING.md` - Development guidelines
-- `Makefile` - Build orchestration
-- `config.mk` - Custom build targets (create your own here)
-- `docs/window-state-management.md` - Window state architecture (living document)
+Explore the repository to discover existing structure rather than relying on curated lists, and act as a good citizen by actively coalescing related content into dedicated, authoritative single sources of truth (e.g. consolidating how to build and run the system into `DEPLOYMENT.md`) to leave the codebase better than you found it.
 
 ## Testing Philosophy
 
@@ -52,6 +38,9 @@ ExactMac is a macOS accessibility automation framework consisting of:
 
 ### Strict Mandates
 
+- NEVER commit unnecessary binary files, generated raster images, or transient test screenshots (e.g. `docs/render/`); these are ephemeral test outputs, not repository assets.
+- Design-first is mandatory: `docs/design.fig` must always be updated first, and the implementation must be kept strictly in sync with the design at all times.
+- Prefer integration with an open OpenPencil session via the available `open-pencil` MCP server to inspect, modify, and manage `docs/design.fig`; similarly, the `openpencil` CLI targets the active session when no file is specified.
 - AVOID and REPLACE ad-hoc `fputs` or unannotated `print` with `Logger` and `OSLogPrivacy` for any message emitted from Swift server components or SDK helpers in `Server/Sources/ExactMacServer` and `Sources/ExactMac`.
 - `fputs` is forbidden in these server/SDK directories for diagnostic logs — it bypasses OS unified logging and cannot mark privacy. Use `Logger` with explicit `privacy` annotations for every interpolated value. For user-facing CLI help text (static strings) `print` is allowed only outside `Server/Sources/ExactMacServer` and `Sources/ExactMac`.
 
@@ -74,7 +63,7 @@ These properties must hold across all changes to `Server/Sources/ExactMacServer`
 13. A prompt never truncates a command, script, path, or argument. It wraps and scrolls.
 14. Text the caller supplied is visually distinguished in the prompt from text the system derived.
 15. Payloads, command text, and target paths never appear in a notification.
-16. No UI change lands before the corresponding design exists in `docs/design.fig`.
+16. No UI change lands before the corresponding design exists in `docs/design.fig`, and the implementation must remain strictly in sync with the design at all times.
 17. No operator-facing string exposes an internal identifier — a capability token, an enum `rawValue`, or an RPC name — and none states an opinion the operator cannot check.
 
 ### Core Directives
@@ -140,6 +129,7 @@ Previously violated requirements (now corrected):
 **MUST BE KEPT UP TO DATE.** Must be analytical, terse, and precise.
 
 - [docs/window-state-management.md](docs/window-state-management.md)
+- `docs/design.fig` (living visual design authority; modify via `open-pencil` MCP with the app open, or `openpencil` CLI targeting the active session)
 
 ### MCP Specification References
 
