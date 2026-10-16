@@ -183,18 +183,15 @@ struct PostureControl: View {
         var explanation: String {
             switch self {
             case .strict:
-                "Every request that needs approval prompts, even one a saved grant already "
-                    + "covers. Grants are kept but never let a request skip a question. When "
-                    + "you approve, the only options are this once or never — nothing is "
-                    + "offered that would outlive the request."
+                "Every request prompts for approval, even when covered by an existing grant. "
+                    + "Grants are preserved but do not bypass prompts. "
+                    + "Approvals apply only to the single request."
             case .balanced:
-                "If a saved grant covers the request it is answered without a prompt. "
-                    + "Otherwise you are asked. What you are offered scales with breadth: "
-                    + "a narrow one-shot approval for a narrow request, broader standing "
-                    + "approvals for broader ones, and the broadest need your fingerprint."
+                "Requests covered by an active grant are approved automatically. "
+                    + "Other requests prompt for approval. "
+                    + "High-consequence requests require Touch ID."
             case .lockedDown:
-                "Nothing asks you anything, because every request that would prompt is "
-                    + "refused outright."
+                "All requests requiring approval are denied automatically without prompting."
             }
         }
     }
@@ -261,7 +258,7 @@ struct SettingsWindow: View {
     var body: some View {
         ConsoleWindow(
             title: "Settings",
-            subtitle: "Owner-private · stored under your own account",
+            subtitle: "Local Preferences",
             footer: Color.clear.frame(height: 0),
         ) {
             // SCROLLS, because this surface is taller than a screen-sized window and the
@@ -299,10 +296,8 @@ struct SettingsWindow: View {
                     SettingRow(setting: SettingRow.Model(
                         id: "console",
                         title: "Require Touch ID to open the console",
-                        detail: "Opening Grants or Activity reveals what is permitted and "
-                            + "what was asked. Without this, anyone at the keyboard can "
-                            + "read both. Turning it off — and back on — costs a "
-                            + "fingerprint, and the attempt is recorded either way.",
+                        detail: "Require Touch ID to view active grants and activity history. "
+                            + "Changing this setting requires biometric confirmation.",
                         isOn: model.displayedBiometricGate,
                     ), onToggle: {
                         model.setBiometricGate(!model.displayedBiometricGate)
@@ -312,8 +307,8 @@ struct SettingsWindow: View {
                     SettingRow(setting: SettingRow.Model(
                         id: "reset",
                         title: "Reset everything",
-                        detail: "Revoke every grant and restore the default posture. "
-                            + "The decision log is append-only and is not erased.",
+                        detail: "Revoke all active grants and restore default settings. "
+                            + "The append-only audit log is preserved.",
                         isOn: false,
                         isDestructive: true,
                         actionTitle: "Reset ExactMac",
@@ -337,8 +332,8 @@ struct SettingsWindow: View {
             .init(
                 id: "script",
                 title: "Run a shell, AppleScript or JavaScript",
-                detail: "A shell can read the screen, the clipboard and the interface, so no "
-                    + "script runs without a fingerprint.",
+                detail: "A shell can read the screen, the clipboard, and the interface, "
+                    + "requiring biometric confirmation to execute.",
                 isOn: true,
                 isLocked: true,
             ),
@@ -346,7 +341,7 @@ struct SettingsWindow: View {
                 id: "global",
                 title: "Grant every application, until ExactMac quits (up to 8 hours)",
                 detail: "The broadest grant ExactMac can issue. It exists only in memory and "
-                    + "expires when ExactMac quits (or after 8 hours), so approving it proves you are you.",
+                    + "expires when ExactMac quits (or after 8 hours), requiring biometric confirmation.",
                 isOn: true,
                 isLocked: true,
             ),
@@ -361,18 +356,15 @@ struct SettingsWindow: View {
             .init(
                 id: "revokeAll",
                 title: "Revoke every grant at once",
-                detail: "If someone else has your session, this is the first control they "
-                    + "would use.",
+                detail: "Revokes all active grants across all sessions, requiring biometric confirmation.",
                 isOn: true,
                 isLocked: true,
             ),
             .init(
                 id: "allowOnce",
                 title: "Allow once — this exact request",
-                detail: "A narrow one-shot ask is where friction is deliberately not spent. "
-                    + "The bar is set by what each request actually is — a routine read "
-                    + "costs nothing, a script or an unsigned caller always costs a "
-                    + "fingerprint.",
+                detail: "Routine requests do not require biometric confirmation. "
+                    + "High-consequence requests and unsigned callers always require Touch ID.",
                 isOn: false,
                 isLocked: true,
                 lockedCaption: "Fixed — the bar is set by what each request is, not by a "

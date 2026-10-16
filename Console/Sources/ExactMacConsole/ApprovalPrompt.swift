@@ -134,7 +134,7 @@ struct PayloadBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.leading) {
             VStack(alignment: .leading, spacing: Design.Space.two) {
-                Text("EXACT REQUEST — NOTHING IS TRUNCATED")
+                Text("Request Details")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Design.Ink.textSecondary)
                 HStack(alignment: .top, spacing: Design.Space.leading) {
@@ -144,9 +144,7 @@ struct PayloadBlock: View {
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Design.Ink.accentText)
-                        // The copy lands on the SHARED clipboard, and saying so is part of
-                        // offering it.
-                        Text("lands on the shared clipboard")
+                        Text("Copies to clipboard")
                             .font(.system(size: 9))
                             .foregroundStyle(Design.Ink.textTertiary)
                     }
@@ -411,10 +409,10 @@ struct ApprovalPrompt: View {
                 .fill(Design.Rule.unknown)
                 .frame(width: 3, height: 24)
             VStack(alignment: .leading, spacing: Design.Space.hair) {
-                Text("THE AGENT GAVE NO REASON")
+                Text("No reason provided by caller")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Design.Ink.textPrimary)
-                Text("Decline, or allow only for this exact request.")
+                Text("Deny, or allow only for this single request.")
                     .font(.system(size: 11))
                     .foregroundStyle(Design.Ink.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -692,7 +690,7 @@ struct ApprovalPrompt: View {
 struct NoteField: View {
     @Binding var text: String
 
-    static let caption = "NOTE FOR AUDIT LOG — RECORDED WITH DECISION"
+    static let caption = "Note for audit log (recorded with decision)"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {

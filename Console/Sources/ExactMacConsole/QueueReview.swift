@@ -31,7 +31,7 @@ struct QueueReview: View {
             // The band, with the way back. The review replaces the prompt's decision
             // surface, so the band carries the only exit from it.
             HStack(spacing: 0) {
-                Text("QUEUED REQUESTS")
+                Text("Queued Requests")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Design.Ink.textPrimary)
                 Spacer(minLength: 0)

@@ -203,8 +203,8 @@ struct UntrustedField: View {
 
         var text: String {
             switch self {
-            case .caller: "FROM THE CALLER — NOT VERIFIED"
-            case .agentReason: "REASON GIVEN BY THE AGENT — NOT VERIFIED"
+            case .caller: "From caller (unverified)"
+            case .agentReason: "Reason provided by caller (unverified)"
             }
         }
     }
@@ -277,9 +277,9 @@ struct SystemField: View {
 
         var text: String {
             switch self {
-            case .target: "TARGET — RESOLVED BY THE SYSTEM"
-            case .operatorNote: "YOUR NOTE WENT BACK TO THE AGENT"
-            case .payload: "EXACT REQUEST — NOTHING IS TRUNCATED"
+            case .target: "Target"
+            case .operatorNote: "Operator note"
+            case .payload: "Request details"
             }
         }
     }

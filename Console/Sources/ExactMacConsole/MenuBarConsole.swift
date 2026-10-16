@@ -122,12 +122,12 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
 
     var headline: String {
         switch self {
-        case .running: "Balanced — friction scales with what a grant would permit"
-        case .pending: "Balanced — one request is waiting for you"
-        case .unreachable: "Every request that needs consent is being denied"
-        case .degraded: "Nothing can be requested while the service is down"
+        case .running: "Balanced — prompts when requests require authorization"
+        case .pending: "Balanced — 1 request waiting for review"
+        case .unreachable: "Every request that requires consent is denied"
+        case .degraded: "Requests cannot be processed while the service is down"
         case .reduced: "TCP listener: no approvals and no identity"
-        case .stopped: "The service is off, so nothing is served"
+        case .stopped: "ExactMac service is stopped"
         }
     }
 
@@ -138,21 +138,13 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
         }
     }
 
-    /// The security footnote. The TCP card is the only one that abandons the
-    /// `Unix socket · owner-only` shape, and that is the point: it is the one state
-    /// where the system is exposed to a network.
-    /// /// The strings are the design's, corrected in `docs/design.fig` first. They said
-    /// "launchd-managed", which stopped being true when the server began binding its own
-    /// socket and holding the pathname under a lock the kernel releases when it dies;
-    /// launchd supervises the process and nothing else. `owner-only` is what the operator
-    /// actually relies on, and it is still exactly true.
     var transport: String {
         switch self {
-        case .running, .pending: "Unix socket · owner-only · no network listener"
-        case .unreachable: "Unix socket · owner-only · no window to ask through"
-        case .degraded: "Unix socket · owner-only · the service is not answering"
-        case .reduced: "TCP listener · no owning user to authenticate"
-        case .stopped: "Unix socket · owner-only · disabled"
+        case .running, .pending: "Local Unix socket · owner-only (no network listener)"
+        case .unreachable: "Local Unix socket · console window unavailable"
+        case .degraded: "Local Unix socket · service not responding"
+        case .reduced: "TCP listener · unauthenticated"
+        case .stopped: "Local Unix socket · disabled"
         }
     }
 }
@@ -224,9 +216,6 @@ struct MenuBarPopover: View {
                 FailClosedBand(title: band.title, text: band.body)
             }
             ServiceToggle(isOn: model.isServiceRunning) { model.toggleService() }
-            Text("Turning it back on does not restore grants you revoked.")
-                .font(.system(size: 10))
-                .foregroundStyle(Design.Ink.textTertiary)
             Rectangle().fill(Design.Ink.separator).frame(height: 1)
             menu
             Rectangle().fill(Design.Ink.separator).frame(height: 1)
@@ -400,8 +389,8 @@ private struct ServiceToggle: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Design.Ink.textPrimary)
                 Text(isOn
-                    ? "Running on a Unix socket. This survives a restart."
-                    : "Stopped and disabled. It will not come back on its own.")
+                    ? "Running on local Unix socket. Preserved across restarts."
+                    : "Stopped and disabled. Service will not start automatically.")
                     .font(.system(size: 11))
                     .foregroundStyle(Design.Ink.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

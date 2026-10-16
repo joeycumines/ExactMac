@@ -3,6 +3,10 @@ package integration
 import (
 	"context"
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,114 +69,56 @@ func TestWindowMetadataPreservation(t *testing.T) {
 	defer conn.Close()
 
 	client := pb.NewExactMacClient(conn)
-	// 2. Open TextEdit
-	t.Log("Opening TextEdit...")
-	app := openTextEdit(t, ctx, client)
+	// 2. Open TextEdit with an owned fixture file to ensure deterministic window creation
+	// without modal dialogs or AppleScript races.
+	t.Log("Opening TextEdit with owned fixture file...")
+	killTextEdit(t)
+
+	fileName := "window_metadata_fixture.txt"
+	filePath := filepath.Join(t.TempDir(), fileName)
+	if err := os.WriteFile(filePath, []byte("Window metadata test fixture"), 0o600); err != nil {
+		t.Fatalf("create owned TextEdit file: %v", err)
+	}
+	openCommand := exec.Command("open", "-a", "TextEdit", filePath)
+	if output, err := openCommand.CombinedOutput(); err != nil {
+		t.Fatalf("open owned TextEdit file: %v output=%q", err, output)
+	}
+
+	app := OpenApplicationObserved(t, ctx, client, "com.apple.TextEdit")
 	defer cleanupApplication(t, ctx, client, app)
 
-	// 2.5. Dismiss file picker dialog and create a new document
-	t.Log("Dismissing file picker and creating new document...")
-	// Close the initial file picker window (Cancel button)
-	var err error
-	err = PollUntilContext(ctx, 100*time.Millisecond, func() (bool, error) {
-		resp, err := client.ListWindows(ctx, &pb.ListWindowsRequest{
-			Parent: app.Name,
-		})
-		if err != nil {
-			return false, err
-		}
-		// Find and close the file picker
-		// CRITICAL FIX: Standard NSOpenPanel is ~800x600, not < 200px
-		// Use a more realistic constraint that covers standard dialogs
-		for _, window := range resp.Windows {
-			if window.Bounds != nil && window.Bounds.Width < 1200 {
-				// This is likely the file picker - close it
-				_, err := client.CloseWindow(ctx, &pb.CloseWindowRequest{
-					Name: window.Name,
-				})
-				return err == nil, err
-			}
-		}
-		return true, nil // No file picker found, proceed
-	})
-	if err != nil {
-		t.Logf("Warning: failed to close file picker: %v", err)
-	}
-
-	// Snapshot the windows that already exist so the selection below only
-	// considers the document this test creates. TextEdit restores previous
-	// sessions — including documents left dirty by a prior run's SIGKILL —
-	// and a restored unsaved document cannot be closed via AX without
-	// answering a save dialog.
-	preExistingWindows := map[string]struct{}{}
-	if resp, err := client.ListWindows(ctx, &pb.ListWindowsRequest{
-		Parent: app.Name,
-	}); err == nil {
-		for _, window := range resp.Windows {
-			preExistingWindows[window.Name] = struct{}{}
-		}
-	}
-
-	// Create a new document using Cmd+N
-	t.Log("Creating new document with Cmd+N...")
-	createCompletedInput(
-		t,
-		ctx,
-		client,
-		newIntegrationInputRequest(
-			t,
-			app.GetName(),
-			applicationInputTarget(app.GetName()),
-			&pb.InputAction{
-				InputType: &pb.InputAction_KeyPress{
-					KeyPress: &pb.KeyPress{
-						Key:       "n",
-						Modifiers: []pb.KeyPress_Modifier{pb.KeyPress_MODIFIER_COMMAND},
-					},
-				},
-			},
-		),
-		2,
-		"create TextEdit document with Cmd+N",
-	)
-
-	// 3. Wait for document window to appear and get initial window
-	t.Log("Waiting for TextEdit document window to appear...")
+	// 3. Resolve the exact fixture document window
+	t.Log("Waiting for TextEdit fixture window to appear...")
+	windowCtx, cancelWindow := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelWindow()
 	var initialWindow *pb.Window
-	err = PollUntilContext(ctx, 100*time.Millisecond, func() (bool, error) {
-		resp, err := client.ListWindows(ctx, &pb.ListWindowsRequest{
+	if err := PollUntilContext(windowCtx, 100*time.Millisecond, func() (bool, error) {
+		resp, err := client.ListWindows(windowCtx, &pb.ListWindowsRequest{
 			Parent: app.Name,
 		})
 		if err != nil {
-			return false, err
+			return false, nil
 		}
-		// Find a suitable document window (reasonable dimensions, minimizable)
 		for _, window := range resp.Windows {
-			if _, exists := preExistingWindows[window.Name]; exists {
-				// Restored from a previous session — not the window this test created.
-				continue
-			}
-			if window.Bounds != nil &&
-				window.Bounds.Width >= 200 && window.Bounds.Height >= 200 {
-				// Verify it's minimizable using GetWindowState
-				stateName := window.Name + "/state"
-				windowState, err := client.GetWindowState(ctx, &pb.GetWindowStateRequest{
-					Name: stateName,
-				})
-				if err != nil {
-					continue
-				}
-				if windowState.Minimizable {
-					initialWindow = window
-					return true, nil
-				}
+			if window != nil && window.Bounds != nil &&
+				strings.Contains(window.Title, fileName) &&
+				window.Bounds.Width > 0 && window.Bounds.Height > 100 {
+				initialWindow = window
+				return true, nil
 			}
 		}
 		return false, nil
+	}); err != nil {
+		t.Fatalf("owned TextEdit window %q never appeared: %v", fileName, err)
+	}
+
+	focusedWindow, err := client.FocusWindow(ctx, &pb.FocusWindowRequest{
+		Name: initialWindow.Name,
 	})
 	if err != nil {
-		t.Fatalf("TextEdit document window never appeared: %v", err)
+		t.Fatalf("focus owned TextEdit window: %v", err)
 	}
+	initialWindow = focusedWindow
 	t.Logf("Initial window found: %s", initialWindow.Name)
 
 	// 4. Verify initial window metadata is populated

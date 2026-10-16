@@ -603,7 +603,7 @@ struct PromptCompositionTests {
         // One caption: the note is sent with whichever decision the operator makes, and
         // the field cannot know which one is coming. The old denial variant was driven by
         // a "selected option" that was never selectable.
-        #expect(NoteField.caption == "NOTE FOR AUDIT LOG — RECORDED WITH DECISION")
+        #expect(NoteField.caption == "Note for audit log (recorded with decision)")
     }
 
     /// A prompt composed exactly like the model composes one, for queue-indicator

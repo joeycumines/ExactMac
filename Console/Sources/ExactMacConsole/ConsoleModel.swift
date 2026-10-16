@@ -379,7 +379,7 @@ final class ConsoleModel {
             maximumDuration: request.envelopeDurationLabel,
             biometricLine: request.requiresBiometric(for: .envelope)
                 ? "\(BiometricCeremony.biometricType) will confirm this pre-authorization"
-                : "Nothing else is asked of you. This one needs no fingerprint.",
+                : "This request requires no fingerprint confirmation.",
             onApprove: { note in
                 self.approvalViewModel.dismissSheet()
                 Task { await self.answer(.envelope, for: request, note: note) }

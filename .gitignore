@@ -25,3 +25,4 @@ coverage.lcov
 /.claude/skills/
 /.agents/skills/
 /docs/render/
+/hack/threat-model-validator/threat-model-validator

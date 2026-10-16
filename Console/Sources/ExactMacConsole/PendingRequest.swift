@@ -274,7 +274,7 @@ struct PendingRequest: Equatable {
         }
         return requiresBiometric
             ? "\(BiometricCeremony.biometricType) will confirm this decision."
-            : "Nothing else is asked of you. This one needs no fingerprint."
+            : "This request requires no fingerprint confirmation."
     }
 
     /// The collapsed disclosure of the wider option set.

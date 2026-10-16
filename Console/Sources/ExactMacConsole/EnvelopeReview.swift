@@ -117,7 +117,7 @@ struct EnvelopeReview: View {
             // The band. A pre-authorization is not a request, and the band is the first
             // thing that says so.
             HStack(spacing: 0) {
-                Text("PRE-AUTHORIZATION ENVELOPE")
+                Text("Pre-authorization Envelope")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Design.Ink.textPrimary)
                 Spacer(minLength: 0)
@@ -214,23 +214,20 @@ struct EnvelopeReview: View {
                         .fill(Design.Ink.surfaceSunken),
                 )
 
-                HStack {
-                    Spacer(minLength: 0)
-                    ConsoleButton(title: "Approve for \(duration)", kind: .primary) {
-                        onApprove(operatorNote)
-                    }
-                    .frame(width: 158)
-                }
-
                 EnvelopeNoteField(text: $operatorNote)
 
-                Rectangle().fill(Design.Ink.separator).frame(height: 1)
-                HStack {
-                    ConsoleButton(title: "Deny", kind: .deny) {
+                HStack(alignment: .center, spacing: Design.Space.chip) {
+                    ConsoleButton(title: "Deny", kind: .deny, shortcut: .cancelAction) {
                         onDeny(operatorNote)
                     }
                     .frame(width: 96)
+
                     Spacer(minLength: 0)
+
+                    ConsoleButton(title: "Approve for \(duration)", kind: .primary, shortcut: .defaultAction) {
+                        onApprove(operatorNote)
+                    }
+                    .frame(minWidth: 158)
                 }
 
                 // The invariant the whole surface exists to state, in the product's own
@@ -264,22 +261,23 @@ struct EnvelopeNoteField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
-            Text("NOTE TO THE AGENT — SENT BACK WITH YOUR DECISION")
+            Text("Note for audit log (recorded with decision)")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Design.Ink.textSecondary)
             TextField(
-                "Why are you deciding this way? The agent sees this.",
+                "Reason for audit log (optional)",
                 text: $text,
                 axis: .vertical,
             )
             .textFieldStyle(.plain)
             .font(.system(size: 12))
-            .foregroundStyle(Design.Ink.textTertiary)
+            .foregroundStyle(Design.Ink.textPrimary)
+            .lineLimit(2 ... 4)
         }
         .padding(Design.Space.three)
         .background(
             RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
-                .fill(Design.Ink.surface),
+                .fill(Design.Ink.surfaceSunken),
         )
         .overlay(
             RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)

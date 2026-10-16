@@ -2,6 +2,9 @@ package integration
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -199,25 +202,23 @@ func TestListApplicationsPagination(t *testing.T) {
 	}
 }
 
-// openTextEdit opens TextEdit application with a new empty document for testing.
-// Uses OpenApplication followed by AppleScript to create a new document, avoiding the file picker.
+// openTextEdit opens TextEdit application with an owned empty document for testing,
+// avoiding modal file pickers and AppleScript timeout races.
 func openTextEdit(t *testing.T, ctx context.Context, client pb.ExactMacClient) *pb.Application {
 	t.Helper()
 
-	// Robustly kill TextEdit, clear saved state, and disable modal dialogs
 	killTextEdit(t)
 
-	app := OpenApplicationObserved(t, ctx, client, "com.apple.TextEdit")
-
-	// Use AppleScript to create a new document, bypassing the file picker
-	_, err := client.ExecuteAppleScript(ctx, &pb.ExecuteAppleScriptRequest{
-		Script: `tell application "TextEdit" to make new document`,
-	})
-	if err != nil {
-		t.Logf("Warning: Failed to create new TextEdit document via AppleScript: %v", err)
-		// Continue anyway - TextEdit may already have a document
+	filePath := filepath.Join(t.TempDir(), "textedit_fixture.txt")
+	if err := os.WriteFile(filePath, []byte("TextEdit fixture"), 0o600); err != nil {
+		t.Fatalf("create fixture file: %v", err)
+	}
+	openCommand := exec.Command("open", "-a", "TextEdit", filePath)
+	if output, err := openCommand.CombinedOutput(); err != nil {
+		t.Fatalf("open TextEdit fixture: %v output=%q", err, output)
 	}
 
+	app := OpenApplicationObserved(t, ctx, client, "com.apple.TextEdit")
 	t.Logf("TextEdit opened successfully: %s", app.Name)
 	return app
 }
