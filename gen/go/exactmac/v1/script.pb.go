@@ -233,18 +233,18 @@ var File_exactmac_v1_script_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_script_proto_rawDesc = "" +
 	"\n" +
-	"\x18exactmac/v1/script.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"\xff\x01\n" +
-	"\x1aScriptingDictionaryCatalog\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12I\n" +
-	"\fdictionaries\x18\x02 \x03(\v2 .exactmac.v1.ScriptingDictionaryB\x03\xe0A\x03R\fdictionaries:}\xeaAz\n" +
-	"#exactmac/ScriptingDictionaryCatalog\x12\x1ascriptingDictionaryCatalog*\x1bscriptingDictionaryCatalogs2\x1ascriptingDictionaryCatalog\"\xfe\x01\n" +
-	"\x13ScriptingDictionary\x12%\n" +
-	"\vapplication\x18\x01 \x01(\tB\x03\xe0A\x03R\vapplication\x12 \n" +
-	"\tbundle_id\x18\x02 \x01(\tB\x03\xe0A\x03R\bbundleId\x126\n" +
-	"\x14supports_applescript\x18\x03 \x01(\bB\x03\xe0A\x03R\x13supportsApplescript\x12&\n" +
-	"\fsupports_jxa\x18\x04 \x01(\bB\x03\xe0A\x03R\vsupportsJxa\x12\x1f\n" +
-	"\bcommands\x18\x05 \x03(\tB\x03\xe0A\x03R\bcommands\x12\x1d\n" +
-	"\aclasses\x18\x06 \x03(\tB\x03\xe0A\x03R\aclasses*r\n" +
+	"\x18exactmac/v1/script.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"\x81\x02\n" +
+	"\x1aScriptingDictionaryCatalog\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12J\n" +
+	"\fdictionaries\x18\x02 \x03(\v2 .exactmac.v1.ScriptingDictionaryB\x04\xe2A\x01\x03R\fdictionaries:}\xeaAz\n" +
+	"#exactmac/ScriptingDictionaryCatalog\x12\x1ascriptingDictionaryCatalog*\x1bscriptingDictionaryCatalogs2\x1ascriptingDictionaryCatalog\"\x84\x02\n" +
+	"\x13ScriptingDictionary\x12&\n" +
+	"\vapplication\x18\x01 \x01(\tB\x04\xe2A\x01\x03R\vapplication\x12!\n" +
+	"\tbundle_id\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\bbundleId\x127\n" +
+	"\x14supports_applescript\x18\x03 \x01(\bB\x04\xe2A\x01\x03R\x13supportsApplescript\x12'\n" +
+	"\fsupports_jxa\x18\x04 \x01(\bB\x04\xe2A\x01\x03R\vsupportsJxa\x12 \n" +
+	"\bcommands\x18\x05 \x03(\tB\x04\xe2A\x01\x03R\bcommands\x12\x1e\n" +
+	"\aclasses\x18\x06 \x03(\tB\x04\xe2A\x01\x03R\aclasses*r\n" +
 	"\n" +
 	"ScriptType\x12\x1b\n" +
 	"\x17SCRIPT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +

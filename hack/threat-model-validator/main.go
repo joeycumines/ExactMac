@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,17 +32,17 @@ var (
 	}
 
 	typeReferenceToCollection = map[string]string{
-		"trust-zone":      "trust_zones",
-		"trust-boundary":  "trust_boundaries",
-		"actor":           "actors",
-		"component":       "components",
-		"data-store":      "data_stores",
-		"data-set":        "data_sets",
-		"data-flow":       "data_flows",
-		"threat-persona":  "threat_personas",
-		"threat":          "threats",
-		"control":         "controls",
-		"risk":            "risks",
+		"trust-zone":     "trust_zones",
+		"trust-boundary": "trust_boundaries",
+		"actor":          "actors",
+		"component":      "components",
+		"data-store":     "data_stores",
+		"data-set":       "data_sets",
+		"data-flow":      "data_flows",
+		"threat-persona": "threat_personas",
+		"threat":         "threats",
+		"control":        "controls",
+		"risk":           "risks",
 	}
 
 	collectionsWithSymbolicNames = []string{
@@ -528,12 +529,7 @@ func validateRiskRegister(models []map[string]any, registerPath string) []string
 }
 
 func contains(slice []string, val string) bool {
-	for _, s := range slice {
-		if s == val {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, val)
 }
 
 func main() {

@@ -966,19 +966,19 @@ var File_exactmac_v1_observation_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_observation_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexactmac/v1/observation.proto\x12\vexactmac.v1\x1a\x19exactmac/v1/element.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa6\x05\n" +
-	"\vObservation\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x125\n" +
-	"\x04type\x18\x02 \x01(\x0e2\x1c.exactmac.v1.ObservationTypeB\x03\xe0A\x02R\x04type\x129\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1e.exactmac.v1.Observation.StateB\x03\xe0A\x03R\x05state\x12@\n" +
-	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"createTime\x12>\n" +
+	"\x1dexactmac/v1/observation.proto\x12\vexactmac.v1\x1a\x19exactmac/v1/element.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xae\x05\n" +
+	"\vObservation\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x126\n" +
+	"\x04type\x18\x02 \x01(\x0e2\x1c.exactmac.v1.ObservationTypeB\x04\xe2A\x01\x02R\x04type\x12:\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x1e.exactmac.v1.Observation.StateB\x04\xe2A\x01\x03R\x05state\x12A\n" +
+	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"createTime\x12?\n" +
 	"\n" +
-	"start_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\tstartTime\x12:\n" +
-	"\bend_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\aendTime\x12;\n" +
-	"\x06filter\x18\a \x01(\v2\x1e.exactmac.v1.ObservationFilterB\x03\xe0A\x01R\x06filter\x12#\n" +
+	"start_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\tstartTime\x12;\n" +
+	"\bend_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\aendTime\x12<\n" +
+	"\x06filter\x18\a \x01(\v2\x1e.exactmac.v1.ObservationFilterB\x04\xe2A\x01\x01R\x06filter\x12$\n" +
 	"\n" +
-	"activation\x18\b \x01(\bB\x03\xe0A\x01R\n" +
+	"activation\x18\b \x01(\bB\x04\xe2A\x01\x01R\n" +
 	"activation\"\x7f\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x11\n" +
@@ -987,50 +987,50 @@ const file_exactmac_v1_observation_proto_rawDesc = "" +
 	"\x0fSTATE_COMPLETED\x10\x03\x12\x13\n" +
 	"\x0fSTATE_CANCELLED\x10\x04\x12\x10\n" +
 	"\fSTATE_FAILED\x10\x05:k\xeaAh\n" +
-	"\x14exactmac/Observation\x125applications/{application}/observations/{observation}*\fobservations2\vobservation\"\x8f\x02\n" +
-	"\x11ObservationFilter\x12(\n" +
-	"\rpoll_interval\x18\x01 \x01(\x01B\x03\xe0A\x01R\fpollInterval\x12&\n" +
-	"\fvisible_only\x18\x02 \x01(\bB\x03\xe0A\x01R\vvisibleOnly\x12\x19\n" +
-	"\x05roles\x18\x03 \x03(\tB\x03\xe0A\x01R\x05roles\x12#\n" +
+	"\x14exactmac/Observation\x125applications/{application}/observations/{observation}*\fobservations2\vobservation\"\x96\x02\n" +
+	"\x11ObservationFilter\x12)\n" +
+	"\rpoll_interval\x18\x01 \x01(\x01B\x04\xe2A\x01\x01R\fpollInterval\x12'\n" +
+	"\fvisible_only\x18\x02 \x01(\bB\x04\xe2A\x01\x01R\vvisibleOnly\x12\x1a\n" +
+	"\x05roles\x18\x03 \x03(\tB\x04\xe2A\x01\x01R\x05roles\x12$\n" +
 	"\n" +
-	"attributes\x18\x04 \x03(\tB\x03\xe0A\x01R\n" +
-	"attributes\x12\"\n" +
+	"attributes\x18\x04 \x03(\tB\x04\xe2A\x01\x01R\n" +
+	"attributes\x12#\n" +
 	"\n" +
-	"focus_only\x18\x05 \x01(\bB\x03\xe0A\x01R\tfocusOnly\x12\x1f\n" +
-	"\bgeometry\x18\x06 \x01(\bB\x03\xe0A\x01R\bgeometry\x12#\n" +
+	"focus_only\x18\x05 \x01(\bB\x04\xe2A\x01\x01R\tfocusOnly\x12 \n" +
+	"\bgeometry\x18\x06 \x01(\bB\x04\xe2A\x01\x01R\bgeometry\x12$\n" +
 	"\n" +
-	"activation\x18\a \x01(\bB\x03\xe0A\x01R\n" +
-	"activation\"\xaf\x04\n" +
-	"\x10ObservationEvent\x12>\n" +
-	"\vobservation\x18\x01 \x01(\tB\x1c\xe0A\x03\xfaA\x16\n" +
-	"\x14exactmac/ObservationR\vobservation\x12>\n" +
+	"activation\x18\a \x01(\bB\x04\xe2A\x01\x01R\n" +
+	"activation\"\xb2\x04\n" +
+	"\x10ObservationEvent\x12?\n" +
+	"\vobservation\x18\x01 \x01(\tB\x1d\xe2A\x01\x03\xfaA\x16\n" +
+	"\x14exactmac/ObservationR\vobservation\x12?\n" +
 	"\n" +
-	"event_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\teventTime\x12\x1f\n" +
-	"\bsequence\x18\x03 \x01(\x03B\x03\xe0A\x03R\bsequence\x12F\n" +
+	"event_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\teventTime\x12 \n" +
+	"\bsequence\x18\x03 \x01(\x03B\x04\xe2A\x01\x03R\bsequence\x12F\n" +
 	"\x10element_addition\x18\x04 \x01(\v2\x19.exactmac.v1.ElementEventH\x00R\x0felementAddition\x12D\n" +
 	"\x0felement_removal\x18\x05 \x01(\v2\x19.exactmac.v1.ElementEventH\x00R\x0eelementRemoval\x12Q\n" +
 	"\x14element_modification\x18\x06 \x01(\v2\x1c.exactmac.v1.ElementModifiedH\x00R\x13elementModification\x12=\n" +
 	"\fwindow_event\x18\a \x01(\v2\x18.exactmac.v1.WindowEventH\x00R\vwindowEvent\x12L\n" +
 	"\x11application_event\x18\b \x01(\v2\x1d.exactmac.v1.ApplicationEventH\x00R\x10applicationEventB\f\n" +
 	"\n" +
-	"event_type\"C\n" +
-	"\fElementEvent\x123\n" +
-	"\aelement\x18\x01 \x01(\v2\x14.exactmac.v1.ElementB\x03\xe0A\x03R\aelement\"\xc6\x01\n" +
-	"\x0fElementModified\x12:\n" +
-	"\vold_element\x18\x01 \x01(\v2\x14.exactmac.v1.ElementB\x03\xe0A\x03R\n" +
-	"oldElement\x12:\n" +
-	"\vnew_element\x18\x02 \x01(\v2\x14.exactmac.v1.ElementB\x03\xe0A\x03R\n" +
-	"newElement\x12;\n" +
-	"\achanges\x18\x03 \x03(\v2\x1c.exactmac.v1.AttributeChangeB\x03\xe0A\x03R\achanges\"x\n" +
-	"\x0fAttributeChange\x12!\n" +
-	"\tattribute\x18\x01 \x01(\tB\x03\xe0A\x03R\tattribute\x12 \n" +
-	"\told_value\x18\x02 \x01(\tB\x03\xe0A\x03R\boldValue\x12 \n" +
-	"\tnew_value\x18\x03 \x01(\tB\x03\xe0A\x03R\bnewValue\"\xe6\x03\n" +
-	"\vWindowEvent\x12L\n" +
+	"event_type\"D\n" +
+	"\fElementEvent\x124\n" +
+	"\aelement\x18\x01 \x01(\v2\x14.exactmac.v1.ElementB\x04\xe2A\x01\x03R\aelement\"\xc9\x01\n" +
+	"\x0fElementModified\x12;\n" +
+	"\vold_element\x18\x01 \x01(\v2\x14.exactmac.v1.ElementB\x04\xe2A\x01\x03R\n" +
+	"oldElement\x12;\n" +
+	"\vnew_element\x18\x02 \x01(\v2\x14.exactmac.v1.ElementB\x04\xe2A\x01\x03R\n" +
+	"newElement\x12<\n" +
+	"\achanges\x18\x03 \x03(\v2\x1c.exactmac.v1.AttributeChangeB\x04\xe2A\x01\x03R\achanges\"{\n" +
+	"\x0fAttributeChange\x12\"\n" +
+	"\tattribute\x18\x01 \x01(\tB\x04\xe2A\x01\x03R\tattribute\x12!\n" +
+	"\told_value\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\boldValue\x12!\n" +
+	"\tnew_value\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\bnewValue\"\xe9\x03\n" +
+	"\vWindowEvent\x12M\n" +
 	"\n" +
-	"event_type\x18\x01 \x01(\x0e2(.exactmac.v1.WindowEvent.WindowEventTypeB\x03\xe0A\x03R\teventType\x12 \n" +
-	"\twindow_id\x18\x02 \x01(\tB\x03\xe0A\x03R\bwindowId\x12\x19\n" +
-	"\x05title\x18\x03 \x01(\tB\x03\xe0A\x03R\x05title\"\xcb\x02\n" +
+	"event_type\x18\x01 \x01(\x0e2(.exactmac.v1.WindowEvent.WindowEventTypeB\x04\xe2A\x01\x03R\teventType\x12!\n" +
+	"\twindow_id\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\bwindowId\x12\x1a\n" +
+	"\x05title\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\x05title\"\xcb\x02\n" +
 	"\x0fWindowEventType\x12!\n" +
 	"\x1dWINDOW_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19WINDOW_EVENT_TYPE_CREATED\x10\x01\x12\x1f\n" +
@@ -1041,10 +1041,10 @@ const file_exactmac_v1_observation_proto_rawDesc = "" +
 	"\x1aWINDOW_EVENT_TYPE_RESTORED\x10\x06\x12\x1d\n" +
 	"\x19WINDOW_EVENT_TYPE_FOCUSED\x10\a\x12\x1c\n" +
 	"\x18WINDOW_EVENT_TYPE_HIDDEN\x10\b\x12\x1b\n" +
-	"\x17WINDOW_EVENT_TYPE_SHOWN\x10\t\"\xc5\x02\n" +
-	"\x10ApplicationEvent\x12V\n" +
+	"\x17WINDOW_EVENT_TYPE_SHOWN\x10\t\"\xc6\x02\n" +
+	"\x10ApplicationEvent\x12W\n" +
 	"\n" +
-	"event_type\x18\x01 \x01(\x0e22.exactmac.v1.ApplicationEvent.ApplicationEventTypeB\x03\xe0A\x03R\teventType\"\xd8\x01\n" +
+	"event_type\x18\x01 \x01(\x0e22.exactmac.v1.ApplicationEvent.ApplicationEventTypeB\x04\xe2A\x01\x03R\teventType\"\xd8\x01\n" +
 	"\x14ApplicationEventType\x12&\n" +
 	"\"APPLICATION_EVENT_TYPE_UNSPECIFIED\x10\x00\x12$\n" +
 	" APPLICATION_EVENT_TYPE_ACTIVATED\x10\x01\x12&\n" +

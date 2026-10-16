@@ -502,23 +502,23 @@ const file_exactmac_type_selector_proto_rawDesc = "" +
 	"attributes\x12=\n" +
 	"\bcompound\x18\a \x01(\v2\x1f.exactmac.type.CompoundSelectorH\x00R\bcompoundB\n" +
 	"\n" +
-	"\bcriteria\"q\n" +
-	"\x10PositionSelector\x12\x16\n" +
-	"\x01x\x18\x01 \x01(\x01B\x03\xe0A\x02H\x00R\x01x\x88\x01\x01\x12\x16\n" +
-	"\x01y\x18\x02 \x01(\x01B\x03\xe0A\x02H\x01R\x01y\x88\x01\x01\x12!\n" +
-	"\ttolerance\x18\x03 \x01(\x01B\x03\xe0A\x01R\ttoleranceB\x04\n" +
+	"\bcriteria\"t\n" +
+	"\x10PositionSelector\x12\x17\n" +
+	"\x01x\x18\x01 \x01(\x01B\x04\xe2A\x01\x02H\x00R\x01x\x88\x01\x01\x12\x17\n" +
+	"\x01y\x18\x02 \x01(\x01B\x04\xe2A\x01\x02H\x01R\x01y\x88\x01\x01\x12\"\n" +
+	"\ttolerance\x18\x03 \x01(\x01B\x04\xe2A\x01\x01R\ttoleranceB\x04\n" +
 	"\x02_xB\x04\n" +
-	"\x02_y\"\xa9\x01\n" +
-	"\x11AttributeSelector\x12U\n" +
+	"\x02_y\"\xaa\x01\n" +
+	"\x11AttributeSelector\x12V\n" +
 	"\n" +
-	"attributes\x18\x01 \x03(\v20.exactmac.type.AttributeSelector.AttributesEntryB\x03\xe0A\x02R\n" +
+	"attributes\x18\x01 \x03(\v20.exactmac.type.AttributeSelector.AttributesEntryB\x04\xe2A\x01\x02R\n" +
 	"attributes\x1a=\n" +
 	"\x0fAttributesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8a\x02\n" +
-	"\x10CompoundSelector\x12X\n" +
-	"\x10logical_operator\x18\x01 \x01(\x0e2(.exactmac.type.CompoundSelector.OperatorB\x03\xe0A\x02R\x0flogicalOperator\x12A\n" +
-	"\tselectors\x18\x02 \x03(\v2\x1e.exactmac.type.ElementSelectorB\x03\xe0A\x02R\tselectors\"Y\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x02\n" +
+	"\x10CompoundSelector\x12Y\n" +
+	"\x10logical_operator\x18\x01 \x01(\x0e2(.exactmac.type.CompoundSelector.OperatorB\x04\xe2A\x01\x02R\x0flogicalOperator\x12B\n" +
+	"\tselectors\x18\x02 \x03(\v2\x1e.exactmac.type.ElementSelectorB\x04\xe2A\x01\x02R\tselectors\"Y\n" +
 	"\bOperator\x12\x18\n" +
 	"\x14OPERATOR_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fOPERATOR_AND\x10\x01\x12\x0f\n" +

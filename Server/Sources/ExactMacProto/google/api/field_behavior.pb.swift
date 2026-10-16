@@ -204,7 +204,7 @@ public nonisolated let Google_Api_FieldBehavior_Extensions: SwiftProtobuf.Simple
 ///   google.protobuf.Timestamp expire_time = 1
 ///     [(google.api.field_behavior) = OUTPUT_ONLY,
 ///      (google.api.field_behavior) = IMMUTABLE];
-public nonisolated let Google_Api_Extensions_field_behavior = SwiftProtobuf.MessageExtension<SwiftProtobuf.RepeatedEnumExtensionField<Google_Api_FieldBehavior>, SwiftProtobuf.Google_Protobuf_FieldOptions>(
+public nonisolated let Google_Api_Extensions_field_behavior = SwiftProtobuf.MessageExtension<SwiftProtobuf.PackedEnumExtensionField<Google_Api_FieldBehavior>, SwiftProtobuf.Google_Protobuf_FieldOptions>(
   _protobuf_fieldNumber: 1052,
   fieldName: "google.api.field_behavior"
 )

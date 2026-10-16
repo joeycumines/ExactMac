@@ -524,18 +524,18 @@ var File_exactmac_v1_session_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_session_proto_rawDesc = "" +
 	"\n" +
-	"\x19exactmac/v1/session.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc4\x05\n" +
-	"\aSession\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12&\n" +
-	"\fdisplay_name\x18\x02 \x01(\tB\x03\xe0A\x01R\vdisplayName\x125\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1a.exactmac.v1.Session.StateB\x03\xe0A\x03R\x05state\x12@\n" +
-	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"createTime\x12I\n" +
-	"\x10last_access_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\x0elastAccessTime\x12@\n" +
-	"\vexpire_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"expireTime\x12*\n" +
-	"\x0etransaction_id\x18\a \x01(\tB\x03\xe0A\x03R\rtransactionId\x12C\n" +
-	"\bmetadata\x18\b \x03(\v2\".exactmac.v1.Session.MetadataEntryB\x03\xe0A\x01R\bmetadata\x1a;\n" +
+	"\x19exactmac/v1/session.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcc\x05\n" +
+	"\aSession\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12'\n" +
+	"\fdisplay_name\x18\x02 \x01(\tB\x04\xe2A\x01\x01R\vdisplayName\x126\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x1a.exactmac.v1.Session.StateB\x04\xe2A\x01\x03R\x05state\x12A\n" +
+	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"createTime\x12J\n" +
+	"\x10last_access_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\x0elastAccessTime\x12A\n" +
+	"\vexpire_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"expireTime\x12+\n" +
+	"\x0etransaction_id\x18\a \x01(\tB\x04\xe2A\x01\x03R\rtransactionId\x12D\n" +
+	"\bmetadata\x18\b \x03(\v2\".exactmac.v1.Session.MetadataEntryB\x04\xe2A\x01\x01R\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\x01\n" +
@@ -546,34 +546,34 @@ const file_exactmac_v1_session_proto_rawDesc = "" +
 	"\x10STATE_TERMINATED\x10\x03\x12\x11\n" +
 	"\rSTATE_EXPIRED\x10\x04\x12\x10\n" +
 	"\fSTATE_FAILED\x10\x05:<\xeaA9\n" +
-	"\x10exactmac/Session\x12\x12sessions/{session}*\bsessions2\asession\"\xcc\x03\n" +
-	"\vTransaction\x12*\n" +
-	"\x0etransaction_id\x18\x01 \x01(\tB\x03\xe0A\x03R\rtransactionId\x122\n" +
-	"\asession\x18\x02 \x01(\tB\x18\xe0A\x03\xfaA\x12\n" +
-	"\x10exactmac/SessionR\asession\x129\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1e.exactmac.v1.Transaction.StateB\x03\xe0A\x03R\x05state\x12>\n" +
+	"\x10exactmac/Session\x12\x12sessions/{session}*\bsessions2\asession\"\xd2\x03\n" +
+	"\vTransaction\x12+\n" +
+	"\x0etransaction_id\x18\x01 \x01(\tB\x04\xe2A\x01\x03R\rtransactionId\x123\n" +
+	"\asession\x18\x02 \x01(\tB\x19\xe2A\x01\x03\xfaA\x12\n" +
+	"\x10exactmac/SessionR\asession\x12:\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x1e.exactmac.v1.Transaction.StateB\x04\xe2A\x01\x03R\x05state\x12?\n" +
 	"\n" +
-	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\tstartTime\x12.\n" +
-	"\x10operations_count\x18\x05 \x01(\x05B\x03\xe0A\x03R\x0foperationsCount\x12B\n" +
-	"\x0fupdated_session\x18\x06 \x01(\v2\x14.exactmac.v1.SessionB\x03\xe0A\x03R\x0eupdatedSession\"n\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\tstartTime\x12/\n" +
+	"\x10operations_count\x18\x05 \x01(\x05B\x04\xe2A\x01\x03R\x0foperationsCount\x12C\n" +
+	"\x0fupdated_session\x18\x06 \x01(\v2\x14.exactmac.v1.SessionB\x04\xe2A\x01\x03R\x0eupdatedSession\"n\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fSTATE_ACTIVE\x10\x01\x12\x13\n" +
 	"\x0fSTATE_COMMITTED\x10\x02\x12\x15\n" +
 	"\x11STATE_ROLLED_BACK\x10\x03\x12\x10\n" +
-	"\fSTATE_FAILED\x10\x04\"\xe8\x01\n" +
-	"\x0fSessionSnapshot\x123\n" +
-	"\asession\x18\x01 \x01(\v2\x14.exactmac.v1.SessionB\x03\xe0A\x03R\asession\x12'\n" +
-	"\fapplications\x18\x02 \x03(\tB\x03\xe0A\x03R\fapplications\x12'\n" +
-	"\fobservations\x18\x03 \x03(\tB\x03\xe0A\x03R\fobservations\x12N\n" +
-	"\x11operation_records\x18\x04 \x03(\v2\x1c.exactmac.v1.OperationRecordB\x03\xe0A\x03R\x10operationRecords\"\x8c\x02\n" +
-	"\x0fOperationRecord\x12F\n" +
-	"\x0eoperation_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\roperationTime\x12*\n" +
-	"\x0eoperation_type\x18\x02 \x01(\tB\x03\xe0A\x03R\roperationType\x12\x1f\n" +
-	"\bresource\x18\x03 \x01(\tB\x03\xe0A\x03R\bresource\x12\x1d\n" +
-	"\asuccess\x18\x04 \x01(\bB\x03\xe0A\x03R\asuccess\x12\x19\n" +
-	"\x05error\x18\x05 \x01(\tB\x03\xe0A\x03R\x05error\x12*\n" +
-	"\x0etransaction_id\x18\x06 \x01(\tB\x03\xe0A\x03R\rtransactionIdBr\n" +
+	"\fSTATE_FAILED\x10\x04\"\xec\x01\n" +
+	"\x0fSessionSnapshot\x124\n" +
+	"\asession\x18\x01 \x01(\v2\x14.exactmac.v1.SessionB\x04\xe2A\x01\x03R\asession\x12(\n" +
+	"\fapplications\x18\x02 \x03(\tB\x04\xe2A\x01\x03R\fapplications\x12(\n" +
+	"\fobservations\x18\x03 \x03(\tB\x04\xe2A\x01\x03R\fobservations\x12O\n" +
+	"\x11operation_records\x18\x04 \x03(\v2\x1c.exactmac.v1.OperationRecordB\x04\xe2A\x01\x03R\x10operationRecords\"\x92\x02\n" +
+	"\x0fOperationRecord\x12G\n" +
+	"\x0eoperation_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\roperationTime\x12+\n" +
+	"\x0eoperation_type\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\roperationType\x12 \n" +
+	"\bresource\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\bresource\x12\x1e\n" +
+	"\asuccess\x18\x04 \x01(\bB\x04\xe2A\x01\x03R\asuccess\x12\x1a\n" +
+	"\x05error\x18\x05 \x01(\tB\x04\xe2A\x01\x03R\x05error\x12+\n" +
+	"\x0etransaction_id\x18\x06 \x01(\tB\x04\xe2A\x01\x03R\rtransactionIdBr\n" +
 	"!io.github.joeycumines.exactmac.v1B\fSessionProtoP\x01Z=github.com/joeycumines/ExactMac/gen/go/exactmac/v1;exactmacpbb\x06proto3"
 
 var (

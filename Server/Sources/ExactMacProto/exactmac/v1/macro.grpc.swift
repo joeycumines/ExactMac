@@ -10,6 +10,6 @@
 // Source: exactmac/v1/macro.proto
 //
 // For information on using the generated types, please see the documentation:
-//   https://github.com/grpc/grpc-swift
+//   https://github.com/grpc/grpc-swift-2
 
 // This file contained no services.

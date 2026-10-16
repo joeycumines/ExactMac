@@ -85,10 +85,10 @@ var File_exactmac_v1_condition_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_condition_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexactmac/v1/condition.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\"R\n" +
-	"\x12AttributeCondition\x12!\n" +
-	"\tattribute\x18\x01 \x01(\tB\x03\xe0A\x02R\tattribute\x12\x19\n" +
-	"\x05value\x18\x02 \x01(\tB\x03\xe0A\x02R\x05valueBt\n" +
+	"\x1bexactmac/v1/condition.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\"T\n" +
+	"\x12AttributeCondition\x12\"\n" +
+	"\tattribute\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\tattribute\x12\x1a\n" +
+	"\x05value\x18\x02 \x01(\tB\x04\xe2A\x01\x02R\x05valueBt\n" +
 	"!io.github.joeycumines.exactmac.v1B\x0eConditionProtoP\x01Z=github.com/joeycumines/ExactMac/gen/go/exactmac/v1;exactmacpbb\x06proto3"
 
 var (

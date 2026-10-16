@@ -139,16 +139,16 @@ var File_exactmac_type_traversal_proto protoreflect.FileDescriptor
 
 const file_exactmac_type_traversal_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexactmac/type/traversal.proto\x12\rexactmac.type\x1a\x1fgoogle/api/field_behavior.proto\"\x87\x04\n" +
-	"\x0eTraversalStats\x12\x19\n" +
-	"\x05count\x18\x01 \x01(\x05B\x03\xe0A\x03R\x05count\x12*\n" +
-	"\x0eexcluded_count\x18\x02 \x01(\x05B\x03\xe0A\x03R\rexcludedCount\x12?\n" +
-	"\x19excluded_non_interactable\x18\x03 \x01(\x05B\x03\xe0A\x03R\x17excludedNonInteractable\x12-\n" +
-	"\x10excluded_no_text\x18\x04 \x01(\x05B\x03\xe0A\x03R\x0eexcludedNoText\x123\n" +
-	"\x13text_elements_count\x18\x05 \x01(\x05B\x03\xe0A\x03R\x11textElementsCount\x12:\n" +
-	"\x17non_text_elements_count\x18\x06 \x01(\x05B\x03\xe0A\x03R\x14nonTextElementsCount\x129\n" +
-	"\x16visible_elements_count\x18\a \x01(\x05B\x03\xe0A\x03R\x14visibleElementsCount\x12S\n" +
-	"\vrole_counts\x18\b \x03(\v2-.exactmac.type.TraversalStats.RoleCountsEntryB\x03\xe0A\x03R\n" +
+	"\x1dexactmac/type/traversal.proto\x12\rexactmac.type\x1a\x1fgoogle/api/field_behavior.proto\"\x8f\x04\n" +
+	"\x0eTraversalStats\x12\x1a\n" +
+	"\x05count\x18\x01 \x01(\x05B\x04\xe2A\x01\x03R\x05count\x12+\n" +
+	"\x0eexcluded_count\x18\x02 \x01(\x05B\x04\xe2A\x01\x03R\rexcludedCount\x12@\n" +
+	"\x19excluded_non_interactable\x18\x03 \x01(\x05B\x04\xe2A\x01\x03R\x17excludedNonInteractable\x12.\n" +
+	"\x10excluded_no_text\x18\x04 \x01(\x05B\x04\xe2A\x01\x03R\x0eexcludedNoText\x124\n" +
+	"\x13text_elements_count\x18\x05 \x01(\x05B\x04\xe2A\x01\x03R\x11textElementsCount\x12;\n" +
+	"\x17non_text_elements_count\x18\x06 \x01(\x05B\x04\xe2A\x01\x03R\x14nonTextElementsCount\x12:\n" +
+	"\x16visible_elements_count\x18\a \x01(\x05B\x04\xe2A\x01\x03R\x14visibleElementsCount\x12T\n" +
+	"\vrole_counts\x18\b \x03(\v2-.exactmac.type.TraversalStats.RoleCountsEntryB\x04\xe2A\x01\x03R\n" +
 	"roleCounts\x1a=\n" +
 	"\x0fRoleCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

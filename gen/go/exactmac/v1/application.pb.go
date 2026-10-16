@@ -274,24 +274,24 @@ var File_exactmac_v1_application_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_application_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexactmac/v1/application.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaa\x02\n" +
-	"\x11ApplicationBundle\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12&\n" +
-	"\fdisplay_name\x18\x02 \x01(\tB\x03\xe0A\x03R\vdisplayName\x12 \n" +
-	"\tbundle_id\x18\x03 \x01(\tB\x03\xe0A\x03R\bbundleId\x12\"\n" +
+	"\x1dexactmac/v1/application.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x02\n" +
+	"\x11ApplicationBundle\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12'\n" +
+	"\fdisplay_name\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\vdisplayName\x12!\n" +
+	"\tbundle_id\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\bbundleId\x12#\n" +
 	"\n" +
-	"bundle_url\x18\x04 \x01(\tB\x03\xe0A\x03R\tbundleUrl\x12\x1d\n" +
-	"\aversion\x18\x05 \x01(\tB\x03\xe0A\x03R\aversion:o\xeaAl\n" +
-	"\x1aexactmac/ApplicationBundle\x12'applicationBundles/{application_bundle}*\x12applicationBundles2\x11applicationBundle\"\x98\x03\n" +
-	"\vApplication\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x15\n" +
-	"\x03pid\x18\x02 \x01(\x05B\x03\xe0A\x03R\x03pid\x12&\n" +
-	"\fdisplay_name\x18\x03 \x01(\tB\x03\xe0A\x03R\vdisplayName\x12Q\n" +
-	"\x12application_bundle\x18\x04 \x01(\tB\"\xe0A\x03\xfaA\x1c\n" +
-	"\x1aexactmac/ApplicationBundleR\x11applicationBundle\x12 \n" +
-	"\tbundle_id\x18\x05 \x01(\tB\x03\xe0A\x03R\bbundleId\x12\x1b\n" +
-	"\x06active\x18\x06 \x01(\bB\x03\xe0A\x03R\x06active\x12M\n" +
-	"\x12process_start_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\x10processStartTime:P\xeaAM\n" +
+	"bundle_url\x18\x04 \x01(\tB\x04\xe2A\x01\x03R\tbundleUrl\x12\x1e\n" +
+	"\aversion\x18\x05 \x01(\tB\x04\xe2A\x01\x03R\aversion:o\xeaAl\n" +
+	"\x1aexactmac/ApplicationBundle\x12'applicationBundles/{application_bundle}*\x12applicationBundles2\x11applicationBundle\"\x9f\x03\n" +
+	"\vApplication\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12\x16\n" +
+	"\x03pid\x18\x02 \x01(\x05B\x04\xe2A\x01\x03R\x03pid\x12'\n" +
+	"\fdisplay_name\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\vdisplayName\x12R\n" +
+	"\x12application_bundle\x18\x04 \x01(\tB#\xe2A\x01\x03\xfaA\x1c\n" +
+	"\x1aexactmac/ApplicationBundleR\x11applicationBundle\x12!\n" +
+	"\tbundle_id\x18\x05 \x01(\tB\x04\xe2A\x01\x03R\bbundleId\x12\x1c\n" +
+	"\x06active\x18\x06 \x01(\bB\x04\xe2A\x01\x03R\x06active\x12N\n" +
+	"\x12process_start_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\x10processStartTime:P\xeaAM\n" +
 	"\x14exactmac/Application\x12\x1aapplications/{application}*\fapplications2\vapplication*j\n" +
 	"\x0fApplicationView\x12 \n" +
 	"\x1cAPPLICATION_VIEW_UNSPECIFIED\x10\x00\x12\x1a\n" +

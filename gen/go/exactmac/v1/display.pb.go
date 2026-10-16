@@ -399,32 +399,32 @@ var File_exactmac_v1_display_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_display_proto_rawDesc = "" +
 	"\n" +
-	"\x19exactmac/v1/display.proto\x12\vexactmac.v1\x1a\x1cexactmac/type/geometry.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"\xab\x02\n" +
-	"\aDisplay\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\"\n" +
+	"\x19exactmac/v1/display.proto\x12\vexactmac.v1\x1a\x1cexactmac/type/geometry.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"\xb1\x02\n" +
+	"\aDisplay\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12#\n" +
 	"\n" +
-	"display_id\x18\x02 \x01(\x03B\x03\xe0A\x03R\tdisplayId\x120\n" +
-	"\x05frame\x18\x03 \x01(\v2\x15.exactmac.type.RegionB\x03\xe0A\x03R\x05frame\x12?\n" +
-	"\rvisible_frame\x18\x04 \x01(\v2\x15.exactmac.type.RegionB\x03\xe0A\x03R\fvisibleFrame\x12\x17\n" +
-	"\x04main\x18\x05 \x01(\bB\x03\xe0A\x03R\x04main\x12\x19\n" +
-	"\x05scale\x18\x06 \x01(\x01B\x03\xe0A\x03R\x05scale:<\xeaA9\n" +
-	"\x10exactmac/Display\x12\x12displays/{display}*\bdisplays2\adisplay\"t\n" +
-	"\x13ListDisplaysRequest\x12 \n" +
-	"\tpage_size\x18\x01 \x01(\x05B\x03\xe0A\x01R\bpageSize\x12\"\n" +
+	"display_id\x18\x02 \x01(\x03B\x04\xe2A\x01\x03R\tdisplayId\x121\n" +
+	"\x05frame\x18\x03 \x01(\v2\x15.exactmac.type.RegionB\x04\xe2A\x01\x03R\x05frame\x12@\n" +
+	"\rvisible_frame\x18\x04 \x01(\v2\x15.exactmac.type.RegionB\x04\xe2A\x01\x03R\fvisibleFrame\x12\x18\n" +
+	"\x04main\x18\x05 \x01(\bB\x04\xe2A\x01\x03R\x04main\x12\x1a\n" +
+	"\x05scale\x18\x06 \x01(\x01B\x04\xe2A\x01\x03R\x05scale:<\xeaA9\n" +
+	"\x10exactmac/Display\x12\x12displays/{display}*\bdisplays2\adisplay\"w\n" +
+	"\x13ListDisplaysRequest\x12!\n" +
+	"\tpage_size\x18\x01 \x01(\x05B\x04\xe2A\x01\x01R\bpageSize\x12#\n" +
 	"\n" +
-	"page_token\x18\x02 \x01(\tB\x03\xe0A\x01R\tpageToken\x12\x17\n" +
-	"\x04skip\x18\x03 \x01(\x05B\x03\xe0A\x01R\x04skip\"A\n" +
-	"\x11GetDisplayRequest\x12,\n" +
-	"\x04name\x18\x01 \x01(\tB\x18\xe0A\x02\xfaA\x12\n" +
-	"\x10exactmac/DisplayR\x04name\"z\n" +
-	"\x14ListDisplaysResponse\x125\n" +
-	"\bdisplays\x18\x01 \x03(\v2\x14.exactmac.v1.DisplayB\x03\xe0A\x03R\bdisplays\x12+\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tB\x03\xe0A\x03R\rnextPageToken\"\x1e\n" +
-	"\x1cCaptureCursorPositionRequest\"y\n" +
-	"\x1dCaptureCursorPositionResponse\x12\x11\n" +
-	"\x01x\x18\x01 \x01(\x01B\x03\xe0A\x03R\x01x\x12\x11\n" +
-	"\x01y\x18\x02 \x01(\x01B\x03\xe0A\x03R\x01y\x122\n" +
-	"\adisplay\x18\x03 \x01(\tB\x18\xe0A\x03\xfaA\x12\n" +
+	"page_token\x18\x02 \x01(\tB\x04\xe2A\x01\x01R\tpageToken\x12\x18\n" +
+	"\x04skip\x18\x03 \x01(\x05B\x04\xe2A\x01\x01R\x04skip\"B\n" +
+	"\x11GetDisplayRequest\x12-\n" +
+	"\x04name\x18\x01 \x01(\tB\x19\xe2A\x01\x02\xfaA\x12\n" +
+	"\x10exactmac/DisplayR\x04name\"|\n" +
+	"\x14ListDisplaysResponse\x126\n" +
+	"\bdisplays\x18\x01 \x03(\v2\x14.exactmac.v1.DisplayB\x04\xe2A\x01\x03R\bdisplays\x12,\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tB\x04\xe2A\x01\x03R\rnextPageToken\"\x1e\n" +
+	"\x1cCaptureCursorPositionRequest\"|\n" +
+	"\x1dCaptureCursorPositionResponse\x12\x12\n" +
+	"\x01x\x18\x01 \x01(\x01B\x04\xe2A\x01\x03R\x01x\x12\x12\n" +
+	"\x01y\x18\x02 \x01(\x01B\x04\xe2A\x01\x03R\x01y\x123\n" +
+	"\adisplay\x18\x03 \x01(\tB\x19\xe2A\x01\x03\xfaA\x12\n" +
 	"\x10exactmac/DisplayR\adisplayBr\n" +
 	"!io.github.joeycumines.exactmac.v1B\fDisplayProtoP\x01Z=github.com/joeycumines/ExactMac/gen/go/exactmac/v1;exactmacpbb\x06proto3"
 

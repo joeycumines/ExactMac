@@ -493,15 +493,15 @@ var File_exactmac_v1_clipboard_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_clipboard_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexactmac/v1/clipboard.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe5\x01\n" +
-	"\tClipboard\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12<\n" +
-	"\acontent\x18\x02 \x01(\v2\x1d.exactmac.v1.ClipboardContentB\x03\xe0A\x03R\acontent\x12F\n" +
-	"\x0favailable_types\x18\x03 \x03(\x0e2\x18.exactmac.v1.ContentTypeB\x03\xe0A\x03R\x0eavailableTypes:9\xeaA6\n" +
+	"\x1bexactmac/v1/clipboard.proto\x12\vexactmac.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe8\x01\n" +
+	"\tClipboard\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12=\n" +
+	"\acontent\x18\x02 \x01(\v2\x1d.exactmac.v1.ClipboardContentB\x04\xe2A\x01\x03R\acontent\x12G\n" +
+	"\x0favailable_types\x18\x03 \x03(\x0e2\x18.exactmac.v1.ContentTypeB\x04\xe2A\x01\x03R\x0eavailableTypes:9\xeaA6\n" +
 	"\x12exactmac/Clipboard\x12\tclipboard*\n" +
-	"clipboards2\tclipboard\"\xfa\x01\n" +
-	"\x10ClipboardContent\x126\n" +
-	"\x04type\x18\x01 \x01(\x0e2\x18.exactmac.v1.ContentTypeB\x03\xe0A\x02H\x01R\x04type\x88\x01\x01\x12\x14\n" +
+	"clipboards2\tclipboard\"\xfb\x01\n" +
+	"\x10ClipboardContent\x127\n" +
+	"\x04type\x18\x01 \x01(\x0e2\x18.exactmac.v1.ContentTypeB\x04\xe2A\x01\x02H\x01R\x04type\x88\x01\x01\x12\x14\n" +
 	"\x04text\x18\x02 \x01(\tH\x00R\x04text\x12\x12\n" +
 	"\x03rtf\x18\x03 \x01(\fH\x00R\x03rtf\x12\x14\n" +
 	"\x04html\x18\x04 \x01(\tH\x00R\x04html\x12\x16\n" +
@@ -509,18 +509,18 @@ const file_exactmac_v1_clipboard_proto_rawDesc = "" +
 	"\x05files\x18\x06 \x01(\v2\x16.exactmac.v1.FilePathsH\x00R\x05files\x12\x12\n" +
 	"\x03url\x18\a \x01(\tH\x00R\x03urlB\t\n" +
 	"\acontentB\a\n" +
-	"\x05_type\"&\n" +
-	"\tFilePaths\x12\x19\n" +
-	"\x05paths\x18\x01 \x03(\tB\x03\xe0A\x02R\x05paths\"\xc6\x01\n" +
-	"\x10ClipboardHistory\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12A\n" +
-	"\aentries\x18\x02 \x03(\v2\".exactmac.v1.ClipboardHistoryEntryB\x03\xe0A\x03R\aentries:V\xeaAS\n" +
-	"\x19exactmac/ClipboardHistory\x12\x10clipboardHistory*\x12clipboardHistories2\x10clipboardHistory\"\xcb\x01\n" +
-	"\x15ClipboardHistoryEntry\x12@\n" +
-	"\vcopied_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"copiedTime\x12<\n" +
-	"\acontent\x18\x02 \x01(\v2\x1d.exactmac.v1.ClipboardContentB\x03\xe0A\x03R\acontent\x122\n" +
-	"\x12source_application\x18\x03 \x01(\tB\x03\xe0A\x03R\x11sourceApplication*\xb5\x01\n" +
+	"\x05_type\"'\n" +
+	"\tFilePaths\x12\x1a\n" +
+	"\x05paths\x18\x01 \x03(\tB\x04\xe2A\x01\x02R\x05paths\"\xc8\x01\n" +
+	"\x10ClipboardHistory\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12B\n" +
+	"\aentries\x18\x02 \x03(\v2\".exactmac.v1.ClipboardHistoryEntryB\x04\xe2A\x01\x03R\aentries:V\xeaAS\n" +
+	"\x19exactmac/ClipboardHistory\x12\x10clipboardHistory*\x12clipboardHistories2\x10clipboardHistory\"\xce\x01\n" +
+	"\x15ClipboardHistoryEntry\x12A\n" +
+	"\vcopied_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"copiedTime\x12=\n" +
+	"\acontent\x18\x02 \x01(\v2\x1d.exactmac.v1.ClipboardContentB\x04\xe2A\x01\x03R\acontent\x123\n" +
+	"\x12source_application\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\x11sourceApplication*\xb5\x01\n" +
 	"\vContentType\x12\x1c\n" +
 	"\x18CONTENT_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11CONTENT_TYPE_TEXT\x10\x01\x12\x14\n" +

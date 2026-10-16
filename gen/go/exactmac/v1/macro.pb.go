@@ -1557,29 +1557,29 @@ var File_exactmac_v1_macro_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_macro_proto_rawDesc = "" +
 	"\n" +
-	"\x17exactmac/v1/macro.proto\x12\vexactmac.v1\x1a\x17exactmac/v1/input.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x03\n" +
-	"\x05Macro\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12&\n" +
-	"\fdisplay_name\x18\x02 \x01(\tB\x03\xe0A\x02R\vdisplayName\x12%\n" +
-	"\vdescription\x18\x03 \x01(\tB\x03\xe0A\x01R\vdescription\x127\n" +
-	"\aactions\x18\x04 \x03(\v2\x18.exactmac.v1.MacroActionB\x03\xe0A\x02R\aactions\x12@\n" +
+	"\x17exactmac/v1/macro.proto\x12\vexactmac.v1\x1a\x17exactmac/v1/input.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf2\x03\n" +
+	"\x05Macro\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x12'\n" +
+	"\fdisplay_name\x18\x02 \x01(\tB\x04\xe2A\x01\x02R\vdisplayName\x12&\n" +
+	"\vdescription\x18\x03 \x01(\tB\x04\xe2A\x01\x01R\vdescription\x128\n" +
+	"\aactions\x18\x04 \x03(\v2\x18.exactmac.v1.MacroActionB\x04\xe2A\x01\x02R\aactions\x12A\n" +
 	"\n" +
-	"parameters\x18\x05 \x03(\v2\x1b.exactmac.v1.MacroParameterB\x03\xe0A\x01R\n" +
-	"parameters\x12@\n" +
-	"\vcreate_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"createTime\x12@\n" +
-	"\vupdate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"updateTime\x12,\n" +
-	"\x0fexecution_count\x18\b \x01(\x03B\x03\xe0A\x03R\x0eexecutionCount\x12\x17\n" +
-	"\x04tags\x18\t \x03(\tB\x03\xe0A\x01R\x04tags:2\xeaA/\n" +
-	"\x0eexactmac/Macro\x12\x0emacros/{macro}*\x06macros2\x05macro\"\x85\x02\n" +
-	"\x11ExecutionLogEntry\x12F\n" +
-	"\x0eexecution_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\rexecutionTime\x12&\n" +
-	"\faction_index\x18\x02 \x01(\x05B\x03\xe0A\x03R\vactionIndex\x12%\n" +
-	"\vdescription\x18\x03 \x01(\tB\x03\xe0A\x03R\vdescription\x12\x1d\n" +
-	"\asuccess\x18\x04 \x01(\bB\x03\xe0A\x03R\asuccess\x12\x19\n" +
-	"\x05error\x18\x05 \x01(\tB\x03\xe0A\x03R\x05error\x12\x1f\n" +
-	"\bduration\x18\x06 \x01(\x01B\x03\xe0A\x03R\bduration\"\x8b\x03\n" +
+	"parameters\x18\x05 \x03(\v2\x1b.exactmac.v1.MacroParameterB\x04\xe2A\x01\x01R\n" +
+	"parameters\x12A\n" +
+	"\vcreate_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"createTime\x12A\n" +
+	"\vupdate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"updateTime\x12-\n" +
+	"\x0fexecution_count\x18\b \x01(\x03B\x04\xe2A\x01\x03R\x0eexecutionCount\x12\x18\n" +
+	"\x04tags\x18\t \x03(\tB\x04\xe2A\x01\x01R\x04tags:2\xeaA/\n" +
+	"\x0eexactmac/Macro\x12\x0emacros/{macro}*\x06macros2\x05macro\"\x8b\x02\n" +
+	"\x11ExecutionLogEntry\x12G\n" +
+	"\x0eexecution_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\rexecutionTime\x12'\n" +
+	"\faction_index\x18\x02 \x01(\x05B\x04\xe2A\x01\x03R\vactionIndex\x12&\n" +
+	"\vdescription\x18\x03 \x01(\tB\x04\xe2A\x01\x03R\vdescription\x12\x1e\n" +
+	"\asuccess\x18\x04 \x01(\bB\x04\xe2A\x01\x03R\asuccess\x12\x1a\n" +
+	"\x05error\x18\x05 \x01(\tB\x04\xe2A\x01\x03R\x05error\x12 \n" +
+	"\bduration\x18\x06 \x01(\x01B\x04\xe2A\x01\x03R\bduration\"\x8c\x03\n" +
 	"\vMacroAction\x120\n" +
 	"\x05input\x18\x01 \x01(\v2\x18.exactmac.v1.InputActionH\x00R\x05input\x12-\n" +
 	"\x04wait\x18\x02 \x01(\v2\x17.exactmac.v1.WaitActionH\x00R\x04wait\x12B\n" +
@@ -1589,82 +1589,82 @@ const file_exactmac_v1_macro_proto_rawDesc = "" +
 	"assignment\x18\x05 \x01(\v2\x19.exactmac.v1.AssignActionH\x00R\n" +
 	"assignment\x12:\n" +
 	"\vmethod_call\x18\x06 \x01(\v2\x17.exactmac.v1.MethodCallH\x00R\n" +
-	"methodCall\x12%\n" +
-	"\vdescription\x18\a \x01(\tB\x03\xe0A\x01R\vdescriptionB\b\n" +
-	"\x06action\"l\n" +
+	"methodCall\x12&\n" +
+	"\vdescription\x18\a \x01(\tB\x04\xe2A\x01\x01R\vdescriptionB\b\n" +
+	"\x06action\"n\n" +
 	"\n" +
-	"WaitAction\x12\x1f\n" +
-	"\bduration\x18\x01 \x01(\x01B\x03\xe0A\x02R\bduration\x12=\n" +
-	"\tcondition\x18\x02 \x01(\v2\x1a.exactmac.v1.WaitConditionB\x03\xe0A\x01R\tcondition\"\xb1\x01\n" +
+	"WaitAction\x12 \n" +
+	"\bduration\x18\x01 \x01(\x01B\x04\xe2A\x01\x02R\bduration\x12>\n" +
+	"\tcondition\x18\x02 \x01(\v2\x1a.exactmac.v1.WaitConditionB\x04\xe2A\x01\x01R\tcondition\"\xb2\x01\n" +
 	"\rWaitCondition\x12+\n" +
 	"\x10element_selector\x18\x01 \x01(\tH\x00R\x0felementSelector\x12#\n" +
 	"\fwindow_title\x18\x02 \x01(\tH\x00R\vwindowTitle\x12\"\n" +
-	"\vapplication\x18\x03 \x01(\tH\x00R\vapplication\x12\x1d\n" +
-	"\atimeout\x18\x04 \x01(\x01B\x03\xe0A\x01R\atimeoutB\v\n" +
-	"\tcondition\"\xd7\x01\n" +
-	"\x11ConditionalAction\x12>\n" +
-	"\tcondition\x18\x01 \x01(\v2\x1b.exactmac.v1.MacroConditionB\x03\xe0A\x02R\tcondition\x12@\n" +
-	"\fthen_actions\x18\x02 \x03(\v2\x18.exactmac.v1.MacroActionB\x03\xe0A\x02R\vthenActions\x12@\n" +
-	"\felse_actions\x18\x03 \x03(\v2\x18.exactmac.v1.MacroActionB\x03\xe0A\x01R\velseActions\"\xc3\x02\n" +
+	"\vapplication\x18\x03 \x01(\tH\x00R\vapplication\x12\x1e\n" +
+	"\atimeout\x18\x04 \x01(\x01B\x04\xe2A\x01\x01R\atimeoutB\v\n" +
+	"\tcondition\"\xda\x01\n" +
+	"\x11ConditionalAction\x12?\n" +
+	"\tcondition\x18\x01 \x01(\v2\x1b.exactmac.v1.MacroConditionB\x04\xe2A\x01\x02R\tcondition\x12A\n" +
+	"\fthen_actions\x18\x02 \x03(\v2\x18.exactmac.v1.MacroActionB\x04\xe2A\x01\x02R\vthenActions\x12A\n" +
+	"\felse_actions\x18\x03 \x03(\v2\x18.exactmac.v1.MacroActionB\x04\xe2A\x01\x01R\velseActions\"\xc3\x02\n" +
 	"\x0eMacroCondition\x12+\n" +
 	"\x10element_selector\x18\x01 \x01(\tH\x00R\x0felementSelector\x12#\n" +
 	"\fwindow_title\x18\x02 \x01(\tH\x00R\vwindowTitle\x12C\n" +
 	"\x1drunning_application_bundle_id\x18\x03 \x01(\tH\x00R\x1arunningApplicationBundleId\x12O\n" +
 	"\x12variable_condition\x18\x04 \x01(\v2\x1e.exactmac.v1.VariableConditionH\x00R\x11variableCondition\x12<\n" +
 	"\bcompound\x18\x05 \x01(\v2\x1e.exactmac.v1.CompoundConditionH\x00R\bcompoundB\v\n" +
-	"\tcondition\"O\n" +
-	"\x11VariableCondition\x12\x1f\n" +
-	"\bvariable\x18\x01 \x01(\tB\x03\xe0A\x02R\bvariable\x12\x19\n" +
-	"\x05value\x18\x02 \x01(\tB\x03\xe0A\x02R\x05value\"\x89\x02\n" +
-	"\x11CompoundCondition\x12W\n" +
-	"\x10logical_operator\x18\x01 \x01(\x0e2'.exactmac.v1.CompoundCondition.OperatorB\x03\xe0A\x02R\x0flogicalOperator\x12@\n" +
+	"\tcondition\"Q\n" +
+	"\x11VariableCondition\x12 \n" +
+	"\bvariable\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\bvariable\x12\x1a\n" +
+	"\x05value\x18\x02 \x01(\tB\x04\xe2A\x01\x02R\x05value\"\x8b\x02\n" +
+	"\x11CompoundCondition\x12X\n" +
+	"\x10logical_operator\x18\x01 \x01(\x0e2'.exactmac.v1.CompoundCondition.OperatorB\x04\xe2A\x01\x02R\x0flogicalOperator\x12A\n" +
 	"\n" +
-	"conditions\x18\x02 \x03(\v2\x1b.exactmac.v1.MacroConditionB\x03\xe0A\x02R\n" +
+	"conditions\x18\x02 \x03(\v2\x1b.exactmac.v1.MacroConditionB\x04\xe2A\x01\x02R\n" +
 	"conditions\"Y\n" +
 	"\bOperator\x12\x18\n" +
 	"\x14OPERATOR_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fOPERATOR_AND\x10\x01\x12\x0f\n" +
 	"\vOPERATOR_OR\x10\x02\x12\x10\n" +
-	"\fOPERATOR_NOT\x10\x03\"\xf4\x01\n" +
+	"\fOPERATOR_NOT\x10\x03\"\xf5\x01\n" +
 	"\n" +
 	"LoopAction\x12\x16\n" +
 	"\x05count\x18\x01 \x01(\x05H\x00R\x05count\x12F\n" +
 	"\x0fwhile_condition\x18\x02 \x01(\v2\x1b.exactmac.v1.MacroConditionH\x00R\x0ewhileCondition\x12@\n" +
-	"\x0eeach_item_loop\x18\x03 \x01(\v2\x18.exactmac.v1.ForEachLoopH\x00R\feachItemLoop\x127\n" +
-	"\aactions\x18\x04 \x03(\v2\x18.exactmac.v1.MacroActionB\x03\xe0A\x02R\aactionsB\v\n" +
-	"\tloop_type\"\xb5\x01\n" +
+	"\x0eeach_item_loop\x18\x03 \x01(\v2\x18.exactmac.v1.ForEachLoopH\x00R\feachItemLoop\x128\n" +
+	"\aactions\x18\x04 \x03(\v2\x18.exactmac.v1.MacroActionB\x04\xe2A\x01\x02R\aactionsB\v\n" +
+	"\tloop_type\"\xb6\x01\n" +
 	"\vForEachLoop\x12+\n" +
 	"\x10element_selector\x18\x01 \x01(\tH\x00R\x0felementSelector\x12'\n" +
 	"\x0ewindow_pattern\x18\x02 \x01(\tH\x00R\rwindowPattern\x12\x18\n" +
-	"\x06values\x18\x03 \x01(\tH\x00R\x06values\x12(\n" +
-	"\ritem_variable\x18\x04 \x01(\tB\x03\xe0A\x02R\fitemVariableB\f\n" +
+	"\x06values\x18\x03 \x01(\tH\x00R\x06values\x12)\n" +
+	"\ritem_variable\x18\x04 \x01(\tB\x04\xe2A\x01\x02R\fitemVariableB\f\n" +
 	"\n" +
-	"collection\"\xe9\x01\n" +
-	"\fAssignAction\x12\x1f\n" +
-	"\bvariable\x18\x01 \x01(\tB\x03\xe0A\x02R\bvariable\x12\x1a\n" +
+	"collection\"\xea\x01\n" +
+	"\fAssignAction\x12 \n" +
+	"\bvariable\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\bvariable\x12\x1a\n" +
 	"\aliteral\x18\x02 \x01(\tH\x00R\aliteral\x12Q\n" +
 	"\x11element_attribute\x18\x03 \x01(\v2\".exactmac.v1.ElementAttributeValueH\x00R\x10elementAttribute\x12\x1e\n" +
 	"\tparameter\x18\x04 \x01(\tH\x00R\tparameter\x12 \n" +
 	"\n" +
 	"expression\x18\x05 \x01(\tH\x00R\n" +
 	"expressionB\a\n" +
-	"\x05value\"j\n" +
-	"\x15ElementAttributeValue\x12.\n" +
-	"\x10element_selector\x18\x01 \x01(\tB\x03\xe0A\x02R\x0felementSelector\x12!\n" +
-	"\tattribute\x18\x02 \x01(\tB\x03\xe0A\x02R\tattribute\"\x9e\x01\n" +
+	"\x05value\"l\n" +
+	"\x15ElementAttributeValue\x12/\n" +
+	"\x10element_selector\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\x0felementSelector\x12\"\n" +
+	"\tattribute\x18\x02 \x01(\tB\x04\xe2A\x01\x02R\tattribute\"\xa0\x01\n" +
 	"\n" +
-	"MethodCall\x12\x1b\n" +
-	"\x06method\x18\x01 \x01(\tB\x03\xe0A\x02R\x06method\x12:\n" +
-	"\x04args\x18\x02 \x03(\v2!.exactmac.v1.MethodCall.ArgsEntryB\x03\xe0A\x01R\x04args\x1a7\n" +
+	"MethodCall\x12\x1c\n" +
+	"\x06method\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\x06method\x12;\n" +
+	"\x04args\x18\x02 \x03(\v2!.exactmac.v1.MethodCall.ArgsEntryB\x04\xe2A\x01\x01R\x04args\x1a7\n" +
 	"\tArgsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaa\x03\n" +
-	"\x0eMacroParameter\x12\x15\n" +
-	"\x03key\x18\x01 \x01(\tB\x03\xe0A\x02R\x03key\x12B\n" +
-	"\x04type\x18\x02 \x01(\x0e2).exactmac.v1.MacroParameter.ParameterTypeB\x03\xe0A\x02R\x04type\x12(\n" +
-	"\rdefault_value\x18\x03 \x01(\tB\x03\xe0A\x01R\fdefaultValue\x12%\n" +
-	"\vdescription\x18\x04 \x01(\tB\x03\xe0A\x01R\vdescription\x12$\n" +
-	"\brequired\x18\x05 \x01(\bB\x03\xe0A\x02H\x00R\brequired\x88\x01\x01\"\xb8\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaf\x03\n" +
+	"\x0eMacroParameter\x12\x16\n" +
+	"\x03key\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\x03key\x12C\n" +
+	"\x04type\x18\x02 \x01(\x0e2).exactmac.v1.MacroParameter.ParameterTypeB\x04\xe2A\x01\x02R\x04type\x12)\n" +
+	"\rdefault_value\x18\x03 \x01(\tB\x04\xe2A\x01\x01R\fdefaultValue\x12&\n" +
+	"\vdescription\x18\x04 \x01(\tB\x04\xe2A\x01\x01R\vdescription\x12%\n" +
+	"\brequired\x18\x05 \x01(\bB\x04\xe2A\x01\x02H\x00R\brequired\x88\x01\x01\"\xb8\x01\n" +
 	"\rParameterType\x12\x1e\n" +
 	"\x1aPARAMETER_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PARAMETER_TYPE_STRING\x10\x01\x12\x1a\n" +

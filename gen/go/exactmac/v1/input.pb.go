@@ -1275,17 +1275,17 @@ var File_exactmac_v1_input_proto protoreflect.FileDescriptor
 
 const file_exactmac_v1_input_proto_rawDesc = "" +
 	"\n" +
-	"\x17exactmac/v1/input.proto\x12\vexactmac.v1\x1a\x1cexactmac/type/geometry.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x05\n" +
-	"\x05Input\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x125\n" +
-	"\x06action\x18\x02 \x01(\v2\x18.exactmac.v1.InputActionB\x03\xe0A\x02R\x06action\x123\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x18.exactmac.v1.Input.StateB\x03\xe0A\x03R\x05state\x12@\n" +
-	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"createTime\x12D\n" +
-	"\rcomplete_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\fcompleteTime\x12\x19\n" +
-	"\x05error\x18\x06 \x01(\tB\x03\xe0A\x03R\x05error\x125\n" +
-	"\x06target\x18\a \x01(\v2\x18.exactmac.v1.InputTargetB\x03\xe0A\x02R\x06target\x12N\n" +
-	"\x0fdelivery_result\x18\b \x01(\v2 .exactmac.v1.InputDeliveryResultB\x03\xe0A\x03R\x0edeliveryResult\"\x82\x01\n" +
+	"\x17exactmac/v1/input.proto\x12\vexactmac.v1\x1a\x1cexactmac/type/geometry.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x92\x05\n" +
+	"\x05Input\x12\x18\n" +
+	"\x04name\x18\x01 \x01(\tB\x04\xe2A\x01\bR\x04name\x126\n" +
+	"\x06action\x18\x02 \x01(\v2\x18.exactmac.v1.InputActionB\x04\xe2A\x01\x02R\x06action\x124\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x18.exactmac.v1.Input.StateB\x04\xe2A\x01\x03R\x05state\x12A\n" +
+	"\vcreate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\n" +
+	"createTime\x12E\n" +
+	"\rcomplete_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x03R\fcompleteTime\x12\x1a\n" +
+	"\x05error\x18\x06 \x01(\tB\x04\xe2A\x01\x03R\x05error\x126\n" +
+	"\x06target\x18\a \x01(\v2\x18.exactmac.v1.InputTargetB\x04\xe2A\x01\x02R\x06target\x12O\n" +
+	"\x0fdelivery_result\x18\b \x01(\v2 .exactmac.v1.InputDeliveryResultB\x04\xe2A\x01\x03R\x0edeliveryResult\"\x82\x01\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTATE_PENDING\x10\x01\x12\x13\n" +
@@ -1302,22 +1302,22 @@ const file_exactmac_v1_input_proto_rawDesc = "" +
 	"\adisplay\x18\x03 \x01(\tB\x15\xfaA\x12\n" +
 	"\x10exactmac/DisplayH\x00R\adisplay\x12\x1a\n" +
 	"\adesktop\x18\x04 \x01(\bH\x00R\adesktopB\r\n" +
-	"\vdestination\"\xe7\x02\n" +
-	"\x13InputDeliveryResult\x12P\n" +
+	"\vdestination\"\xea\x02\n" +
+	"\x13InputDeliveryResult\x12Q\n" +
 	"\n" +
-	"commitment\x18\x01 \x01(\x0e2+.exactmac.v1.InputDeliveryResult.CommitmentB\x03\xe0A\x03R\n" +
-	"commitment\x121\n" +
-	"\x12posted_event_count\x18\x02 \x01(\x05B\x03\xe0A\x03R\x10postedEventCount\x12=\n" +
-	"\x18routed_delivery_observed\x18\x03 \x01(\bB\x03\xe0A\x03R\x16routedDeliveryObserved\"\x8b\x01\n" +
+	"commitment\x18\x01 \x01(\x0e2+.exactmac.v1.InputDeliveryResult.CommitmentB\x04\xe2A\x01\x03R\n" +
+	"commitment\x122\n" +
+	"\x12posted_event_count\x18\x02 \x01(\x05B\x04\xe2A\x01\x03R\x10postedEventCount\x12>\n" +
+	"\x18routed_delivery_observed\x18\x03 \x01(\bB\x04\xe2A\x01\x03R\x16routedDeliveryObserved\"\x8b\x01\n" +
 	"\n" +
 	"Commitment\x12\x1a\n" +
 	"\x16COMMITMENT_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14COMMITMENT_NO_EFFECT\x10\x01\x12!\n" +
 	"\x1dCOMMITMENT_POSSIBLY_COMMITTED\x10\x02\x12$\n" +
-	" COMMITMENT_COMMITTED_AND_SETTLED\x10\x03\"\x8f\x04\n" +
-	"\vInputAction\x12,\n" +
-	"\x0fvisual_feedback\x18\x01 \x01(\bB\x03\xe0A\x01R\x0evisualFeedback\x122\n" +
-	"\x12animation_duration\x18\x02 \x01(\x01B\x03\xe0A\x01R\x11animationDuration\x12:\n" +
+	" COMMITMENT_COMMITTED_AND_SETTLED\x10\x03\"\x91\x04\n" +
+	"\vInputAction\x12-\n" +
+	"\x0fvisual_feedback\x18\x01 \x01(\bB\x04\xe2A\x01\x01R\x0evisualFeedback\x123\n" +
+	"\x12animation_duration\x18\x02 \x01(\x01B\x04\xe2A\x01\x01R\x11animationDuration\x12:\n" +
 	"\vmouse_click\x18\x03 \x01(\v2\x17.exactmac.v1.MouseClickH\x00R\n" +
 	"mouseClick\x127\n" +
 	"\n" +
@@ -1330,30 +1330,30 @@ const file_exactmac_v1_input_proto_rawDesc = "" +
 	"\rscroll_action\x18\b \x01(\v2\x13.exactmac.v1.ScrollH\x00R\fscrollAction\x127\n" +
 	"\fhover_action\x18\t \x01(\v2\x12.exactmac.v1.HoverH\x00R\vhoverActionB\f\n" +
 	"\n" +
-	"input_type\"\x87\x03\n" +
+	"input_type\"\x8b\x03\n" +
 	"\n" +
-	"MouseClick\x125\n" +
-	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x02R\bposition\x12J\n" +
+	"MouseClick\x126\n" +
+	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x02R\bposition\x12K\n" +
 	"\n" +
-	"click_type\x18\x02 \x01(\x0e2!.exactmac.v1.MouseClick.ClickTypeB\x03\xe0A\x01H\x00R\tclickType\x88\x01\x01\x12)\n" +
-	"\vclick_count\x18\x03 \x01(\x05B\x03\xe0A\x01H\x01R\n" +
-	"clickCount\x88\x01\x01\x12A\n" +
-	"\tmodifiers\x18\x04 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x03\xe0A\x01R\tmodifiers\"i\n" +
+	"click_type\x18\x02 \x01(\x0e2!.exactmac.v1.MouseClick.ClickTypeB\x04\xe2A\x01\x01H\x00R\tclickType\x88\x01\x01\x12*\n" +
+	"\vclick_count\x18\x03 \x01(\x05B\x04\xe2A\x01\x01H\x01R\n" +
+	"clickCount\x88\x01\x01\x12B\n" +
+	"\tmodifiers\x18\x04 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x04\xe2A\x01\x01R\tmodifiers\"i\n" +
 	"\tClickType\x12\x1a\n" +
 	"\x16CLICK_TYPE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fCLICK_TYPE_LEFT\x10\x01\x12\x14\n" +
 	"\x10CLICK_TYPE_RIGHT\x10\x02\x12\x15\n" +
 	"\x11CLICK_TYPE_MIDDLE\x10\x03B\r\n" +
 	"\v_click_typeB\x0e\n" +
-	"\f_click_count\"H\n" +
-	"\tTextInput\x12\x17\n" +
-	"\x04text\x18\x01 \x01(\tB\x03\xe0A\x02R\x04text\x12\"\n" +
+	"\f_click_count\"J\n" +
+	"\tTextInput\x12\x18\n" +
+	"\x04text\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\x04text\x12#\n" +
 	"\n" +
-	"char_delay\x18\x02 \x01(\x01B\x03\xe0A\x01R\tcharDelay\"\xb9\x02\n" +
-	"\bKeyPress\x12\x15\n" +
-	"\x03key\x18\x01 \x01(\tB\x03\xe0A\x02R\x03key\x12A\n" +
-	"\tmodifiers\x18\x02 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x03\xe0A\x01R\tmodifiers\x12(\n" +
-	"\rhold_duration\x18\x03 \x01(\x01B\x03\xe0A\x01R\fholdDuration\"\xa8\x01\n" +
+	"char_delay\x18\x02 \x01(\x01B\x04\xe2A\x01\x01R\tcharDelay\"\xbc\x02\n" +
+	"\bKeyPress\x12\x16\n" +
+	"\x03key\x18\x01 \x01(\tB\x04\xe2A\x01\x02R\x03key\x12B\n" +
+	"\tmodifiers\x18\x02 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x04\xe2A\x01\x01R\tmodifiers\x12)\n" +
+	"\rhold_duration\x18\x03 \x01(\x01B\x04\xe2A\x01\x01R\fholdDuration\"\xa8\x01\n" +
 	"\bModifier\x12\x18\n" +
 	"\x14MODIFIER_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10MODIFIER_COMMAND\x10\x01\x12\x13\n" +
@@ -1361,30 +1361,30 @@ const file_exactmac_v1_input_proto_rawDesc = "" +
 	"\x10MODIFIER_CONTROL\x10\x03\x12\x12\n" +
 	"\x0eMODIFIER_SHIFT\x10\x04\x12\x15\n" +
 	"\x11MODIFIER_FUNCTION\x10\x05\x12\x16\n" +
-	"\x12MODIFIER_CAPS_LOCK\x10\x06\"\xa6\x01\n" +
-	"\tMouseMove\x125\n" +
-	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x02R\bposition\x12\x1f\n" +
-	"\bduration\x18\x02 \x01(\x01B\x03\xe0A\x01R\bduration\x12A\n" +
-	"\tmodifiers\x18\x03 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x03\xe0A\x01R\tmodifiers\"\xf8\x02\n" +
-	"\tMouseDrag\x12@\n" +
-	"\x0estart_position\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x02R\rstartPosition\x12<\n" +
-	"\fend_position\x18\x02 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x02R\vendPosition\x12\x1f\n" +
-	"\bduration\x18\x03 \x01(\x01B\x03\xe0A\x01R\bduration\x12C\n" +
-	"\x06button\x18\x04 \x01(\x0e2!.exactmac.v1.MouseClick.ClickTypeB\x03\xe0A\x01H\x00R\x06button\x88\x01\x01\x12A\n" +
-	"\tmodifiers\x18\x05 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x03\xe0A\x01R\tmodifiers\x127\n" +
-	"\twaypoints\x18\x06 \x03(\v2\x14.exactmac.type.PointB\x03\xe0A\x01R\twaypointsB\t\n" +
-	"\a_button\"\xe9\x01\n" +
-	"\x06Scroll\x125\n" +
-	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x01R\bposition\x12#\n" +
+	"\x12MODIFIER_CAPS_LOCK\x10\x06\"\xa9\x01\n" +
+	"\tMouseMove\x126\n" +
+	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x02R\bposition\x12 \n" +
+	"\bduration\x18\x02 \x01(\x01B\x04\xe2A\x01\x01R\bduration\x12B\n" +
+	"\tmodifiers\x18\x03 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x04\xe2A\x01\x01R\tmodifiers\"\xfe\x02\n" +
+	"\tMouseDrag\x12A\n" +
+	"\x0estart_position\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x02R\rstartPosition\x12=\n" +
+	"\fend_position\x18\x02 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x02R\vendPosition\x12 \n" +
+	"\bduration\x18\x03 \x01(\x01B\x04\xe2A\x01\x01R\bduration\x12D\n" +
+	"\x06button\x18\x04 \x01(\x0e2!.exactmac.v1.MouseClick.ClickTypeB\x04\xe2A\x01\x01H\x00R\x06button\x88\x01\x01\x12B\n" +
+	"\tmodifiers\x18\x05 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x04\xe2A\x01\x01R\tmodifiers\x128\n" +
+	"\twaypoints\x18\x06 \x03(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x01R\twaypointsB\t\n" +
+	"\a_button\"\xee\x01\n" +
+	"\x06Scroll\x126\n" +
+	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x01R\bposition\x12$\n" +
 	"\n" +
-	"horizontal\x18\x02 \x01(\x01B\x03\xe0A\x01R\n" +
-	"horizontal\x12\x1f\n" +
-	"\bvertical\x18\x03 \x01(\x01B\x03\xe0A\x01R\bvertical\x12\x1f\n" +
-	"\bduration\x18\x04 \x01(\x01B\x03\xe0A\x01R\bduration\x12A\n" +
-	"\tmodifiers\x18\x05 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x03\xe0A\x01R\tmodifiers\"_\n" +
-	"\x05Hover\x125\n" +
-	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x03\xe0A\x02R\bposition\x12\x1f\n" +
-	"\bduration\x18\x02 \x01(\x01B\x03\xe0A\x02R\bdurationBp\n" +
+	"horizontal\x18\x02 \x01(\x01B\x04\xe2A\x01\x01R\n" +
+	"horizontal\x12 \n" +
+	"\bvertical\x18\x03 \x01(\x01B\x04\xe2A\x01\x01R\bvertical\x12 \n" +
+	"\bduration\x18\x04 \x01(\x01B\x04\xe2A\x01\x01R\bduration\x12B\n" +
+	"\tmodifiers\x18\x05 \x03(\x0e2\x1e.exactmac.v1.KeyPress.ModifierB\x04\xe2A\x01\x01R\tmodifiers\"a\n" +
+	"\x05Hover\x126\n" +
+	"\bposition\x18\x01 \x01(\v2\x14.exactmac.type.PointB\x04\xe2A\x01\x02R\bposition\x12 \n" +
+	"\bduration\x18\x02 \x01(\x01B\x04\xe2A\x01\x02R\bdurationBp\n" +
 	"!io.github.joeycumines.exactmac.v1B\n" +
 	"InputProtoP\x01Z=github.com/joeycumines/ExactMac/gen/go/exactmac/v1;exactmacpbb\x06proto3"
 
