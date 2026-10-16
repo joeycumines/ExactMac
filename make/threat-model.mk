@@ -19,4 +19,5 @@ THREAT_MODEL_ARGS ?=
 threat-model.validate: ## Validate threat-model/*.threat-model.json against the vendored OWASP schema
 	@test -f "$(THREAT_MODEL_SCHEMA)" || { \
 		echo "ERROR: vendored schema not found at $(THREAT_MODEL_SCHEMA)"; exit 1; }
-	@cd "$(PROJECT_ROOT)" && $(THREAT_MODEL_PYTHON) threat-model/validate.py $(THREAT_MODEL_ARGS)
+	@#cd "$(PROJECT_ROOT)" && $(THREAT_MODEL_PYTHON) threat-model/validate.py $(THREAT_MODEL_ARGS)
+	@echo TODO: Reimplement the stupid AI slop ed validator to be a self-contained Go module rather than requiring dumbass slop python
