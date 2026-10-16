@@ -911,6 +911,7 @@ exactmac.console-register: ## Register the signed console .app with LaunchServic
 
 ##@ [Console] LaunchAgent
 
+.NOTPARALLEL: exactmac.console-install
 .PHONY: exactmac.console-install
 exactmac.console-install: ## Build, sign, install and register the app, then retire the superseded LaunchAgents.
 	@# ONE ACTION, BECAUSE AN UPGRADE THAT NEEDS A SECOND COMMAND IS AN UPGRADE SOMEONE DOES
@@ -1132,6 +1133,7 @@ exactmac.restore-launchagents: ## Retired: superseded LaunchAgents are deleted d
 console-build:    exactmac.console-build
 console-app:      exactmac.console-app
 console-sign:     exactmac.console-sign
+.NOTPARALLEL: console-install
 console-install:  exactmac.console-install
 console-uninstall: exactmac.console-uninstall
 console-start:    exactmac.console-start

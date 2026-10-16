@@ -199,8 +199,9 @@ macos.build: macos.require-tools ## Build the release product the bundle is asse
 
 ##@ [macOS] Bundle Targets
 
+.NOTPARALLEL: macos.all
 .PHONY: macos.all
-macos.all: macos.build macos.bundle macos.sign macos.verify ## Assemble, sign, then verify the .app (the three phases, in order).
+macos.all: ## Assemble, sign, then verify the .app (the three phases, in order).
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.bundle
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.sign
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.verify
