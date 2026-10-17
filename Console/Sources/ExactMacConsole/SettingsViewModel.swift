@@ -4,6 +4,23 @@ import Foundation
 import os
 import SwiftUI
 
+/// The 4 operable Touch ID rules displayed in Settings.
+enum TouchIDRuleKind: String, CaseIterable, Sendable {
+    case scriptsAndTerminal
+    case broadApprovals
+    case unsignedCallers
+    case consoleOpen
+
+    var displayName: String {
+        switch self {
+        case .scriptsAndTerminal: "Run scripts and shell commands"
+        case .broadApprovals: "Broad and long-lasting approvals"
+        case .unsignedCallers: "Unsigned callers"
+        case .consoleOpen: "Open grants, activity, and settings"
+        }
+    }
+}
+
 /// Observable view model managing posture, biometric gate, login-item, and service settings.
 @MainActor
 @Observable
@@ -26,10 +43,15 @@ final class SettingsViewModel {
 
     private(set) var postureHandle: HostedPostureHandle?
     private(set) var displayedPosture: Posture = .strict
+    private(set) var displayedDefaultAccess: DefaultAccessPolicy = .standard
+    private(set) var displayedTouchIDRules: TouchIDRules = .standard
+    private(set) var displayedConsentTimeoutSeconds: Int = ServerConfig.defaultConsentTimeoutSeconds
 
     private(set) var biometricGateHandle: HostedBiometricGateHandle?
     private(set) var displayedBiometricGate: Bool = true
     private var isPerformingBiometricGateChange: Bool = false
+    private var isPerformingTouchIDRuleChange: Bool = false
+    private var isPerformingAllowAllChange: Bool = false
 
     let startAtLogin: StartAtLogin
     let presentation: OperatorInterface
@@ -61,6 +83,9 @@ final class SettingsViewModel {
     func adoptPostureHandle(_ handle: HostedPostureHandle) {
         postureHandle = handle
         displayedPosture = handle.current
+        displayedDefaultAccess = handle.defaultAccess
+        displayedTouchIDRules = handle.touchIDRules
+        displayedConsentTimeoutSeconds = handle.consentTimeoutSeconds
     }
 
     func setPosture(_ posture: Posture) {
@@ -70,6 +95,145 @@ final class SettingsViewModel {
         }
         postureHandle.setStoredPreference(posture, environment: stateEnvironment)
         displayedPosture = postureHandle.current
+    }
+
+    // MARK: - Default Access Management
+
+    func setDefaultAccess(level: AccessLevel, for group: CapabilityGroup) {
+        displayedDefaultAccess.setAccessLevel(level, for: group)
+        guard let postureHandle else {
+            logger.notice("Cannot set default access: server handle is not ready")
+            return
+        }
+        postureHandle.setDefaultAccessPreference(displayedDefaultAccess, environment: stateEnvironment)
+        logger.info("Default access for \(group.rawValue, privacy: .public) set to \(level.rawValue, privacy: .public)")
+    }
+
+    func allowAll() {
+        Task { @MainActor in
+            await performAllowAll()
+        }
+    }
+
+    func performAllowAll() async {
+        guard !isPerformingAllowAllChange else { return }
+        isPerformingAllowAllChange = true
+        defer { isPerformingAllowAllChange = false }
+
+        // If broad approvals rule is active, require Touch ID ceremony
+        if displayedTouchIDRules.broadApprovals {
+            guard let ceremony else {
+                logger.error("Cannot allow all: biometric ceremony required but not installed")
+                pendingNotice = "Allow all requires Touch ID confirmation, but no ceremony is installed."
+                return
+            }
+            windows.activateForCeremony()
+            let outcome = await ceremony.perform(
+                nonce: UUID().uuidString,
+                reason: "ExactMac asks before allowing all capability groups by default",
+            )
+            guard case .performed = outcome else {
+                logger.notice("Allow all was declined or cancelled by the operator")
+                return
+            }
+        }
+
+        var policy = DefaultAccessPolicy()
+        for group in CapabilityGroup.allCases {
+            policy.setAccessLevel(.allow, for: group)
+        }
+        displayedDefaultAccess = policy
+        postureHandle?.setDefaultAccessPreference(policy, environment: stateEnvironment)
+        _ = ServerInspectionService.recordOperatorAction(
+            action: "operator allowed all capability groups by default",
+            approved: true,
+            biometricObtained: displayedTouchIDRules.broadApprovals,
+            refusalReason: nil,
+            environment: stateEnvironment,
+        )
+        logger.info("All capability groups set to Allow")
+    }
+
+    func resetDefaults() {
+        displayedDefaultAccess = .standard
+        postureHandle?.setDefaultAccessPreference(.standard, environment: stateEnvironment)
+        _ = ServerInspectionService.recordOperatorAction(
+            action: "operator reset default access to standard defaults",
+            approved: true,
+            biometricObtained: false,
+            refusalReason: nil,
+            environment: stateEnvironment,
+        )
+        logger.info("Default access reset to standard defaults")
+    }
+
+    // MARK: - Touch ID Rules Management
+
+    func setTouchIDRule(_ rule: TouchIDRuleKind, enabled: Bool) {
+        Task { @MainActor in
+            await performTouchIDRuleChange(rule, enabled: enabled)
+        }
+    }
+
+    func performTouchIDRuleChange(_ rule: TouchIDRuleKind, enabled: Bool) async {
+        guard !isPerformingTouchIDRuleChange else { return }
+        isPerformingTouchIDRuleChange = true
+        defer { isPerformingTouchIDRuleChange = false }
+
+        let action = enabled
+            ? "Touch ID rule '\(rule.displayName)' was turned on"
+            : "Touch ID rule '\(rule.displayName)' was turned off"
+
+        if !enabled {
+            // Turning off any Touch ID rule requires biometric ceremony!
+            guard let ceremony else {
+                logger.error("Cannot disable Touch ID rule: no ceremony is installed")
+                pendingNotice = "Turning off Touch ID rules requires Touch ID confirmation, but no ceremony is installed."
+                return
+            }
+            windows.activateForCeremony()
+            let outcome = await ceremony.perform(
+                nonce: UUID().uuidString,
+                reason: "ExactMac asks before turning off Touch ID protection for \(rule.displayName)",
+            )
+            guard case .performed = outcome else {
+                logger.notice("Disabling Touch ID rule was cancelled or declined")
+                return
+            }
+        }
+
+        var rules = displayedTouchIDRules
+        switch rule {
+        case .scriptsAndTerminal: rules.scriptsAndTerminal = enabled
+        case .broadApprovals: rules.broadApprovals = enabled
+        case .unsignedCallers: rules.unsignedCallers = enabled
+        case .consoleOpen: rules.consoleOpen = enabled
+        }
+        displayedTouchIDRules = rules
+        postureHandle?.setTouchIDRulesPreference(rules, environment: stateEnvironment)
+
+        // Also sync consoleOpen with biometricGateHandle if available
+        if rule == .consoleOpen, let biometricGateHandle {
+            biometricGateHandle.setCeremonyRequired(enabled, environment: stateEnvironment)
+            displayedBiometricGate = enabled
+        }
+
+        _ = ServerInspectionService.recordOperatorAction(
+            action: action,
+            approved: true,
+            biometricObtained: !enabled,
+            refusalReason: nil,
+            environment: stateEnvironment,
+        )
+        logger.info("Touch ID rule \(rule.rawValue, privacy: .public) set to \(enabled, privacy: .public)")
+    }
+
+    // MARK: - Consent Timeout Management
+
+    func setConsentTimeoutSeconds(_ seconds: Int) {
+        displayedConsentTimeoutSeconds = seconds
+        postureHandle?.setConsentTimeoutSecondsPreference(seconds, environment: stateEnvironment)
+        logger.info("Consent timeout set to \(seconds) seconds")
     }
 
     /// Confirms a stored non-strict posture (.balanced) via interactive operator Touch ID.
@@ -233,10 +397,24 @@ final class SettingsViewModel {
             pendingNotice = "The reset did not complete: grants could not be revoked. Nothing else was changed."
             return
         }
-        postureHandle?.setStoredPreference(.strict, environment: stateEnvironment)
+        postureHandle?.resetToDefaults(environment: stateEnvironment)
         if let postureHandle {
             displayedPosture = postureHandle.current
+            displayedDefaultAccess = postureHandle.defaultAccess
+            displayedTouchIDRules = postureHandle.touchIDRules
+            displayedConsentTimeoutSeconds = postureHandle.consentTimeoutSeconds
+        } else {
+            displayedDefaultAccess = .standard
+            displayedTouchIDRules = .standard
+            displayedConsentTimeoutSeconds = ServerConfig.defaultConsentTimeoutSeconds
         }
+        _ = ServerInspectionService.recordOperatorAction(
+            action: "operator reset all settings and revoked all grants",
+            approved: true,
+            biometricObtained: true,
+            refusalReason: nil,
+            environment: stateEnvironment,
+        )
         onGrantsRevoked?()
     }
 

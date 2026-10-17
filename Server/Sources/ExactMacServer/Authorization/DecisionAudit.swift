@@ -375,7 +375,7 @@ final class DecisionAudit: @unchecked Sendable {
                 entry.grantIdentifier = identifier
             case let .envelope(identifier):
                 entry.envelopeIdentifier = identifier
-            case .noConsentRequired, .promptRequired, .denied:
+            case .noConsentRequired, .defaultAccess, .promptRequired, .denied:
                 break
             }
             entry.hash = entry.recomputedHash(previous: previous)
@@ -497,6 +497,7 @@ final class DecisionAudit: @unchecked Sendable {
     static func describe(_ basis: DecisionBasis) -> String {
         switch basis {
         case .noConsentRequired: "noConsentRequired"
+        case let .defaultAccess(group): "defaultAccess:\(group.rawValue)"
         case let .grant(identifier): "grant:\(identifier)"
         case let .envelope(identifier): "envelope:\(identifier)"
         case .promptRequired: "promptRequired"

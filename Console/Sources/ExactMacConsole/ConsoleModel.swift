@@ -81,6 +81,18 @@ final class ConsoleModel {
         settingsViewModel.displayedPosture
     }
 
+    var defaultAccess: DefaultAccessPolicy {
+        settingsViewModel.displayedDefaultAccess
+    }
+
+    var touchIDRules: TouchIDRules {
+        settingsViewModel.displayedTouchIDRules
+    }
+
+    var consentTimeoutSeconds: Int {
+        settingsViewModel.displayedConsentTimeoutSeconds
+    }
+
     var biometricGateHandle: HostedBiometricGateHandle? {
         settingsViewModel.biometricGateHandle
     }
@@ -113,6 +125,31 @@ final class ConsoleModel {
             ceremony: ceremony,
             stateEnvironment: stateEnvironment,
         )
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleScreenLocked()
+            }
+        }
+    }
+
+    /// When the screen is locked, deny any pending prompts fail-closed.
+    func handleScreenLocked() {
+        logger.info("Screen was locked: denying pending prompts fail-closed")
+        if let active = pendingPrompt {
+            Task {
+                await self.answer(.deny, for: active, note: "screen locked")
+            }
+        }
+        let cancelled = queueManager.cancelAllWaiting()
+        for waiting in cancelled {
+            waiting.continuation.resume(returning: nil)
+        }
+        windows.close(.approval)
     }
 
     // MARK: - Request Answering Flow
@@ -130,6 +167,7 @@ final class ConsoleModel {
             request: request,
             identity: identity,
             decision: decision,
+            timeoutSeconds: settingsViewModel.displayedConsentTimeoutSeconds,
         )
 
         if pendingPrompt == nil {
@@ -213,7 +251,7 @@ final class ConsoleModel {
         finish(requestID, with: nil)
     }
 
-    // MARK: - Posture & Biometric Gate Forwarding
+    // MARK: - Posture & Settings Forwarding
 
     func adoptPostureHandle(_ handle: HostedPostureHandle) {
         settingsViewModel.adoptPostureHandle(handle)
@@ -221,6 +259,26 @@ final class ConsoleModel {
 
     func setPosture(_ posture: Posture) {
         settingsViewModel.setPosture(posture)
+    }
+
+    func setDefaultAccess(level: AccessLevel, for group: CapabilityGroup) {
+        settingsViewModel.setDefaultAccess(level: level, for: group)
+    }
+
+    func allowAll() {
+        settingsViewModel.allowAll()
+    }
+
+    func resetDefaults() {
+        settingsViewModel.resetDefaults()
+    }
+
+    func setTouchIDRule(_ rule: TouchIDRuleKind, enabled: Bool) {
+        settingsViewModel.setTouchIDRule(rule, enabled: enabled)
+    }
+
+    func setConsentTimeoutSeconds(_ seconds: Int) {
+        settingsViewModel.setConsentTimeoutSeconds(seconds)
     }
 
     func adoptBiometricGateHandle(_ handle: HostedBiometricGateHandle) {
@@ -402,11 +460,15 @@ final class ConsoleModel {
                 QueueReview.Item(
                     id: $0.requestID,
                     title: $0.promptTitle,
+                    caller: $0.caller,
                     scopeLine: $0.serverDefaultScopeLine,
                 )
             },
             onDecide: { requestID in
                 self.decideQueuedRequest(requestID)
+            },
+            onApproveAll: { note in
+                Task { await self.answerQueueWithDefaults(note: note) }
             },
             onDenyAll: { note in
                 Task { await self.denyAllQueued(note: note) }

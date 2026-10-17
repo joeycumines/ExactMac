@@ -264,7 +264,163 @@ public enum Capability: String, Sendable, CaseIterable, Hashable {
         case .localEcho: "Read back input this server was already given"
         }
     }
+
+    public var group: CapabilityGroup? {
+        switch self {
+        case .windowObserve, .accessibilityTraverse, .screenObserve, .observationStream:
+            .windowsAndScreen
+        case .clipboardRead, .clipboardWrite:
+            .clipboard
+        case .inputSynthesize, .windowManage, .applicationControl,
+             .fileDialogAutomate, .macroExecute, .transactionManage,
+             .sessionManage, .operationsManage, .authorizationManage:
+            .appsAndInput
+        case .scriptExecute:
+            .scriptsAndTerminal
+        case .displayRead, .localEcho:
+            nil
+        }
+    }
 }
+
+// MARK: - Capability Groups & Default Access
+
+/// The four operator-facing capability groups that organize default access.
+public enum CapabilityGroup: String, Sendable, CaseIterable, Hashable, Codable {
+    case windowsAndScreen = "windows_and_screen"
+    case clipboard = "clipboard"
+    case appsAndInput = "apps_and_input"
+    case scriptsAndTerminal = "scripts_and_terminal"
+
+    public var title: String {
+        switch self {
+        case .windowsAndScreen: "Inspect windows and screen"
+        case .clipboard: "Read and write clipboard"
+        case .appsAndInput: "Control apps and input"
+        case .scriptsAndTerminal: "Run scripts and shell commands"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .windowsAndScreen: "List apps and windows, read accessibility trees, and capture screenshots."
+        case .clipboard: "Read, replace, or clear the system pasteboard and clipboard history."
+        case .appsAndInput: "Click, type, move or close windows, open or quit apps, drive file dialogs, and run macros."
+        case .scriptsAndTerminal: "Execute shell commands, AppleScript, or JavaScript for Automation."
+        }
+    }
+
+    public var capabilities: Set<Capability> {
+        switch self {
+        case .windowsAndScreen:
+            [.windowObserve, .accessibilityTraverse, .screenObserve, .observationStream]
+        case .clipboard:
+            [.clipboardRead, .clipboardWrite]
+        case .appsAndInput:
+            [
+                .inputSynthesize, .windowManage, .applicationControl,
+                .fileDialogAutomate, .macroExecute, .transactionManage,
+                .sessionManage, .operationsManage, .authorizationManage,
+            ]
+        case .scriptsAndTerminal:
+            [.scriptExecute]
+        }
+    }
+}
+
+/// The operator's default action for a capability group.
+public enum AccessLevel: String, Sendable, CaseIterable, Hashable, Codable {
+    case ask = "ask"
+    case allow = "allow"
+
+    public var label: String {
+        switch self {
+        case .ask: "Ask"
+        case .allow: "Allow"
+        }
+    }
+}
+
+/// Standing default access policy across the four capability groups.
+public struct DefaultAccessPolicy: Sendable, Equatable, Hashable, Codable {
+    private var levels: [CapabilityGroup: AccessLevel]
+
+    public static let standard = DefaultAccessPolicy(levels: [
+        .windowsAndScreen: .allow,
+        .clipboard: .ask,
+        .appsAndInput: .ask,
+        .scriptsAndTerminal: .ask,
+    ])
+
+    public init(levels: [CapabilityGroup: AccessLevel] = [:]) {
+        var merged = Self.standardLevels
+        for (group, level) in levels {
+            merged[group] = level
+        }
+        self.levels = merged
+    }
+
+    private static let standardLevels: [CapabilityGroup: AccessLevel] = [
+        .windowsAndScreen: .allow,
+        .clipboard: .ask,
+        .appsAndInput: .ask,
+        .scriptsAndTerminal: .ask,
+    ]
+
+    public func accessLevel(for group: CapabilityGroup) -> AccessLevel {
+        levels[group] ?? Self.standardLevels[group] ?? .ask
+    }
+
+    public mutating func setAccessLevel(_ level: AccessLevel, for group: CapabilityGroup) {
+        levels[group] = level
+    }
+
+    public var isAllowingAll: Bool {
+        CapabilityGroup.allCases.allSatisfy { accessLevel(for: $0) == .allow }
+    }
+
+    public var isDefault: Bool {
+        CapabilityGroup.allCases.allSatisfy { accessLevel(for: $0) == Self.standardLevels[$0] }
+    }
+
+    public mutating func allowAll() {
+        for group in CapabilityGroup.allCases {
+            levels[group] = .allow
+        }
+    }
+
+    public mutating func resetToDefaults() {
+        levels = Self.standardLevels
+    }
+}
+
+/// Standing Touch ID rules chosen by the operator.
+public struct TouchIDRules: Sendable, Equatable, Hashable, Codable {
+    public var scriptsAndTerminal: Bool
+    public var broadApprovals: Bool
+    public var unsignedCallers: Bool
+    public var consoleOpen: Bool
+
+    public static let standard = TouchIDRules(
+        scriptsAndTerminal: true,
+        broadApprovals: true,
+        unsignedCallers: true,
+        consoleOpen: true,
+    )
+
+    public init(
+        scriptsAndTerminal: Bool = true,
+        broadApprovals: Bool = true,
+        unsignedCallers: Bool = true,
+        consoleOpen: Bool = true,
+    ) {
+        self.scriptsAndTerminal = scriptsAndTerminal
+        self.broadApprovals = broadApprovals
+        self.unsignedCallers = unsignedCallers
+        self.consoleOpen = consoleOpen
+    }
+}
+
 
 // MARK: - Scope
 
@@ -837,6 +993,8 @@ public enum BiometricRequirement: Sendable, Hashable {
 public enum DecisionBasis: Sendable, Equatable {
     /// No consent is required for this capability at all.
     case noConsentRequired
+    /// Permitted by the operator's standing default access policy.
+    case defaultAccess(group: CapabilityGroup)
     case grant(id: String)
     case envelope(id: String)
     /// Consent is required and the operator must be asked.

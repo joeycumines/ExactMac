@@ -810,21 +810,25 @@ struct RemainingRenderTests {
             items: [
                 .init(
                     id: "q1",
-                    title: "Read the clipboard and its history",
-                    scopeLine: "this exact request  ·  expires when it completes",
+                    title: "Read the clipboard in TextEdit",
+                    caller: "exactmac-mcp",
+                    scopeLine: "this request only",
                 ),
                 .init(
                     id: "q2",
-                    title: "Read the accessibility tree of an app",
-                    scopeLine: "one application  ·  for 15 minutes",
+                    title: "Type into the focused field",
+                    caller: "exactmac-mcp",
+                    scopeLine: "TextEdit  ·  for 15 minutes",
                 ),
                 .init(
                     id: "q3",
-                    title: "Take a screenshot of the screen",
-                    scopeLine: "one application  ·  for 8 hours",
+                    title: "List windows of Finder",
+                    caller: "codex",
+                    scopeLine: "Finder  ·  for 8 hours",
                 ),
             ],
             onDecide: { _ in },
+            onApproveAll: { _ in },
             onDenyAll: { _ in },
             onBack: {},
         )

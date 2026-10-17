@@ -524,6 +524,8 @@ public final class ServerInspectionService: @unchecked Sendable {
                 basisText = "Allowed by standing grant"
             } else if entry.basis.hasPrefix("envelope:") {
                 basisText = "Allowed inside pre-authorization envelope"
+            } else if entry.basis.hasPrefix("defaultAccess:") {
+                basisText = "Allowed by default access"
             } else if entry.basis == "noConsentRequired" {
                 basisText = "Allowed by policy (no consent required)"
             } else if entry.basis == "promptRequired" {

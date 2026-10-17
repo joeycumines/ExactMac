@@ -3,9 +3,9 @@
 <!-- impeccable:design-schema 1 -->
 
 This document is the written design authority for the ExactMac consent console. `docs/design.fig`
-is the drawn contract (2,869 nodes across four pages, verified by `openpencil`); this file states
-the world it implements and where the artifact deviates from the declared tokens. Where they
-disagree, fix whichever is wrong and update both — never let a code change land that neither
+is the drawn contract (3,054 nodes across four pages, verified by `openpencil info`); this file states
+the world it implements and how tokens, components, screens, and operational sequences map to behavior.
+Where they disagree, fix whichever is wrong and update both — never let a code change land that neither
 authorizes (AGENTS.md invariant 16).
 
 ## Platform
@@ -17,8 +17,9 @@ values under one name.
 ## Mode
 
 Operate. The approval prompt is a high-stakes single-decision surface; Grants, Activity, and
-Settings are management surfaces. Nothing here is marketing. The design's job is disclosure:
-the operator reads a request well enough to decide it.
+Settings are management surfaces. Nothing here is marketing. The design's job is disclosure and
+control: the operator reads a request well enough to decide it, and every setting directly changes
+runtime enforcement.
 
 ## World
 
@@ -41,21 +42,76 @@ The macOS system's own consent and instrumentation grammar. The direction contra
   caption; system-derived text gets none of the three; unknown facts (errors, fail-closed bands)
   get a grey rule. Amber means "someone else wrote this"; grey means "we cannot tell you this".
   Color is never the only carrier of any of these meanings.
+- Plain-English invariant (Standing Invariant 17): no operator-facing string exposes an internal
+  capability identifier (`clipboard.read`, `script.execute`, `observation.ax`, `input.synthesize`),
+  an enum `rawValue`, or an RPC name. Every surface names the human-verifiable consequence and reach.
 
-## Palette
+## Permission Model and Behavioral Mapping
 
-25 hardcoded literals in the .fig, and they are the tokens: `Console/Sources/ExactMacConsole/Resources/tokens.json`
-is the single source of truth and the .fig's literals match it one-for-one (verified by
-`openpencil analyze colors` on 2026-10-09). The .fig holds zero variables — a known toolchain
-limit, recorded in tokens.json — so the JSON is authoritative and the .fig is the rendered proof.
+Rather than an opaque global posture mode (`Ask every time / Balanced / Locked down`) or read-only
+"Enforced" rows, Settings organizes enforcement around what local agents are allowed to do by
+default, when Touch ID is required, how unattended prompts behave, and how to reset state:
 
-Roles, light/dark:
+1. **Default Access (4 capability groups + Allow all + Reset defaults)**
+   - Summary bar (`AccessSummaryBar/default` and `AccessSummaryBar/allowing-all`): states whether
+     ExactMac is asking before new capabilities or allowing all local requests, with one-click
+     **Allow all** (flips all 4 groups to `Allow`; Touch ID confirms when broad-approval Touch ID
+     is enabled) and **Reset defaults** (restores all 4 groups to `Ask`).
+   - Every gRPC RPC in `RPCAuthorizationMap` maps to one of four operator-facing capability groups,
+     each controlled by an `Ask | Allow` segmented control (`CapabilityAccessRow`):
+     - **Inspect windows and screen** — `observation.window` (`windowObserve`), `observation.ax`
+       (`accessibilityTraverse`), `observation.screen` (`screenObserve`), `observation.stream`
+       (`observationStream`) (read-only discovery and capture; `local.echo` and `display.read`
+       remain non-consent capabilities and never prompt).
+     - **Read and write clipboard** — `clipboard.read` (`clipboardRead`), `clipboard.write`
+       (`clipboardWrite`).
+     - **Control apps and input** — `input.synthesize` (`inputSynthesize`), `window.manage`
+       (`windowManage`), `application.control` (`applicationControl`), `file.automate`
+       (`fileDialogAutomate`), `macro.execute` (`macroExecute`), `transaction.manage`
+       (`transactionManage`), `session.manage` (`sessionManage`), `operations.manage`
+       (`operationsManage`), `authorization.manage` (`authorizationManage`).
+     - **Run scripts and shell commands** — `script.execute` (`scriptExecute`).
+   - When a group is set to `Ask` (the default), any request without a matching code-identity grant
+     or active pre-authorization envelope opens the approval prompt. When set to `Allow`, local
+     Unix-socket requests in that group execute without prompting and are still recorded in the
+     hash-chained decision audit log (`audit.log`).
+
+2. **Touch ID Rules (4 operable toggles)**
+   - Every Touch ID row is a live toggle (`SettingRow/toggle-on`, `SettingRow/toggle-off`) that the
+     operator can turn on or off; turning any Touch ID rule off requires one final Touch ID
+     confirmation so a same-UID process cannot silently disarm biometric checks:
+     - **Run scripts or shell commands** (default On): require Touch ID before running shell,
+       AppleScript, or JavaScript commands.
+     - **All-application and multi-hour approvals** (default On): require Touch ID for grants
+       across all apps, pre-authorized sessions, and Allow all.
+     - **Unsigned or unverified callers** (default On): require Touch ID when the calling binary
+       has no valid code signature.
+     - **Open Grants and Activity** (default On): require Touch ID to inspect active grants or the
+       decision log.
+
+3. **Unattended & System**
+   - **Unanswered prompts** (`TimeoutSettingRow/90s`, `60s | 90s | 3m`, default `90s`): when a
+     prompt goes unanswered or the screen locks, the server denies the pending request when the
+     timer expires while active grants and pre-authorized sessions continue uninterrupted.
+   - **Start ExactMac at login** (`SettingRow/login`, default On): launches the menu-bar console and
+     local Unix socket when the operator signs in. Turning the service off in the menu-bar popover
+     stops the listener immediately without revoking existing grants.
+
+4. **Reset**
+   - **Reset to defaults** (`SettingRow/destructive`, `Reset ExactMac`): revokes all active grants
+     and restores default access (`Ask`) and Touch ID rules (all On), while preserving `audit.log`.
+
+## Palette and Design Token Variables
+
+`Console/Sources/ExactMacConsole/Resources/tokens.json` and `docs/design.fig` carry the same 26
+design tokens across 3 variable collections (`color` with `light` and `dark` modes, `Space`, and
+`Radius`, verified by `openpencil variables docs/design.fig`):
 
 | Token | Light | Dark | Job |
 |---|---|---|---|
 | surface | #FFFFFF | #1C1C1E | card, rows, fields at rest |
-| surface-raised | #F5F5F7 | #2C2C2E | chips, selected rows, default option |
-| surface-sunken | #EBEBF0 | #141416 | payload blocks, scroll regions, strips |
+| surface-raised | #F5F5F7 | #2C2C2E | chips, summary bar, selected rows, default option |
+| surface-sunken | #EBEBF0 | #141416 | payload blocks, segmented tracks, scroll regions, strips |
 | separator | #D2D2D7 | #3A3A3C | hairlines (decorative; deliberately under 3:1) |
 | control-border | #8A8A8F | #5C5C61 | interactive edges; must be perceivable |
 | text-primary | #1D1D1F | #F5F5F7 | prose and load-bearing lines |
@@ -74,69 +130,73 @@ against tokens.json — do not retune values without re-running them.
 
 ## Type
 
-One face: Inter, weights Regular and SemiBold only. The declared scale is title 22, heading 15,
-body 13, caption 11, mono 12 — and the artifact uses four more roles than it declares:
-10/600 (the eyebrow carrying every security caption, 123 nodes), 12/600, 14/600, and 9/400
-(the clipboard fine print). Weight spelling is load-bearing: only "SemiBold" renders; any other
-spelling silently downgrades to Regular (verified by `openpencil fonts`).
+One face: Inter, weights Regular (400) and Semi Bold (600) only. The declared scale is title 22,
+heading 15, body 13, caption 11, mono 12 — plus 17/600 (section headings), 14/600, 12/600, 10/600
+(security captions and section labels), and 9/400 (clipboard fine print). In OpenPencil (`render`
+and `set_font`), weight spelling is `"Semi Bold"` (with a space).
 
 The production app maps Inter → SF Pro for prose and Menlo for machine text (payloads, pids,
-identifiers). The .fig cannot render Menlo and substitutes everything to Inter, so in the design
-the code/prose distinction is carried by fill, rule, and caption instead of typeface. The app
-renders both signals.
+identifiers). The .fig substitutes Menlo to Inter, so in the design the code/prose distinction is
+carried by fill, rule, and caption in addition to layout. The app renders both signals.
 
 ## Space and radius
 
-Declared grid is 4pt; the artifact's de-facto rhythm is 2, 3, 5, 6, 9, 10, 13, 14 — 10pt is the
-component padding throughout, 6pt the intra-row gap, 12pt the section gap, 16pt the card
-padding. Off-grid flags from `openpencil analyze spacing` are the design's real values, not
-violations to fix. Radii: 4 small (fields, strips), 6 medium (rows, buttons), 10 large (window
-and popover shells only), pill for dots-in-capsule chrome.
+Declared grid is 4pt (`space-1`=4, `space-2`=8, `space-3`=12, `space-4`=16, `space-5`=20,
+`space-6`=24, `space-8`=32, `space-10`=40); component padding uses 10–14pt, intra-row gap 6–8pt,
+section gap 12–16pt, and window padding 16pt. Radii (`Radius` collection): `radius-sm`=4 (fields,
+strips, settings rows), `radius-md`=6 (buttons, inner segments), `radius-lg`=10 (window and popover
+shells), `radius-pill`=999 (dots-in-capsule chrome and toggle tracks).
 
 ## Layout
 
 - Approval prompt: 420pt wide, three regions — hugging header (system-derived facts only),
-  fixed 348pt scrolling disclosure (cut on purpose, with a visible 4pt scroll rail), hugging
-  footer (the decision). Measured 755pt in its tallest state against a 1008pt window ceiling.
-- Popover: 360pt, content-hugging, flat (no shadow; a 1pt hairline does the separation).
-- Window surfaces (Grants, Activity, Settings): 720pt wide, 688pt content column that never
-  varies; a row's internal split is the only columnar structure.
+  fixed 348pt scrolling disclosure (with a visible 4pt scroll rail), hugging footer (the decision).
+  Measured 755pt in its tallest state against a 1008pt window ceiling.
+- Popover: 360pt, content-hugging, flat (1pt hairline border).
+- Window surfaces (Grants, Activity, Settings): 720pt wide, 688pt content column (`SettingsWindow`
+  is 720×866pt in both schemes).
 - The agent's reason is capped at 96pt of growth and scrolls inside its own box; nothing is
   ever truncated or elided.
 
 ## Components
 
-From the Components page (509 COMPONENT nodes): SignatureBadge (6 states, dot-plus-word, no
-chrome), IdentityRow, CallerTree, UntrustedField/SystemField pair, RiskChip, ConsoleButton
-(primary/secondary/caution/deny/quiet), OptionRow (six grant kinds, destructive marked by red
-title ink only), NoteField, biometric strip, PayloadBlock, MenuBarItem, StatusPill/StatusDot,
-ServiceToggle, FailClosedBand (two fail-closed presentations), PendingNotice, menu rows,
-CountdownChip, GrantRow, ActivityRow, IntegrityBadge, PostureControl, SettingRow, TargetChip,
-EmptyState, ErrorState, LoadingSkeleton, ScrollRail.
+From the Components page (`0:4`, 552 `COMPONENT` nodes across the document): `SignatureBadge` (6
+states, dot-plus-word, no chrome), `IdentityRow`, `ProcessTree` (`deep`, `direct`, `deep-seven`),
+`UntrustedField`/`SystemField` pair, `RiskChip`, `Button` (`primary`, `secondary`, `caution`,
+`deny`, `quiet`), `OptionRow` (six grant kinds, destructive marked by red title ink only),
+`NoteField`, `BiometricState`, `PayloadBlock`, `MenuBarItem`, `StatusPill`/`StatusDot`,
+`ServiceToggle`, `FailClosedBand` (two fail-closed presentations), `PendingNotice`, menu rows,
+`CountdownChip`, `GrantRow`, `ActivityRow`, `IntegrityBadge`, `AccessSummaryBar` (`default` and
+`allowing-all`), `CapabilityAccessRow` (`ask` and `allow` with `SegmentedAccess`), `SettingRow`
+(`toggle-on`, `toggle-off`, `destructive`), `TimeoutSettingRow` (`90s` with `SegmentedTimeout`),
+`EmptyState`, `ErrorState`, `LoadingSkeleton`, `ScrollRail`.
 
-## Screens
+## Screens and Flows
 
-From the Screens page, each in light and dark where drawn: the approval prompt pair, the
-expanded prompt, the settled states (denied/expired/unreachable), the no-reason variant, the
-menu-bar item and popover, both fail-closed presentations, Grants (populated, empty, loading,
-error), Activity (populated, chain-broken, empty, loading, error), Settings pair, the
-pre-authorization envelope pair, and the trust escalation screen. The Flows page draws the
-three consent sequences and the lane rules.
+From the Screens page (`0:5`), each in light and dark where drawn: the approval prompt pair
+(`scr/pair`), the expanded prompt (`scr/expanded`), the settled states (`scr/states`: denied,
+expired, unreachable), the no-reason variant (`scr/noreason`), the menu-bar item (`scr/menubar`)
+and popover (`scr/popover`), both fail-closed presentations (`scr/failclosed`,
+`scr/failclosed-dark`), Grants (`scr/grants-pair`, empty, loading, error), Activity
+(`scr/activity-pair`, chain-broken, empty, loading, error), Settings pair (`scr/settings-pair`,
+`SettingsWindow/normal` and `SettingsWindow/dark`), the pre-authorization envelope pair
+(`scr/envelope-pair`), the trust-ordered non-scrolling header study (`scr/trust`), and the queue
+review surface (`scr/queue-review`, `QueueReview/default` and `QueueReview/dark`, plus
+`QueueIndicator` in both schemes).
+
+The Flows page (`0:6`, frame `flows`) draws five operational sequences:
+1. A single request prompts once (capability group default `Ask`/`Allow` and code-identity grants).
+2. A pre-authorized envelope, and the silence inside it (bounded capability set and duration).
+3. Revocation is immediate and total (service toggle vs grant revocation).
+4. Concurrent agents and sandboxed helper ancestry (per-peer Unix socket credentials, parent-chain
+   walk, FIFO consent queue with caller attribution and starvation-free timer reset).
+5. Unanswered prompts, locked screen, and remote TCP callers (timeout auto-deny, screen-lock
+   fail-closed for interactive prompts while active grants continue, and TCP consent denial).
 
 ## Known gaps (design must grow before code)
 
-Recorded 2026-10-09 during the UI-redesign replan. These are real operator needs with no drawn
-surface yet; each gets a design first, then code (invariant 16):
-
-1. Queue affordance — RESOLVED 2026-10-09 (drawn on the Screens page as `scr/queue-review`).
-   The design now draws both halves: a queue-indicator band at the top of the active prompt's
-   footer whenever requests wait behind it (hidden once the options expand or the prompt
-   settles), and the QueueReview sheet — full-bleed band with a Back link, the waiting count,
-   one row per queued request carrying its consequence, its server-default scope and a Decide
-   link that promotes it to the full prompt, then Approve all as default, the note, Deny all,
-   and the invariant line "Each request receives its own decision. No blanket grant is
-   created." The code implements exactly this: `QueueReview.swift` and the
-   `queuedCount`/`onReviewQueue` affordances on `ApprovalPrompt`.
+1. Queue affordance — RESOLVED (drawn on the Screens page as `scr/queue-review` with per-agent
+   caller attribution on each queued row, `Approve all as default`, and `Deny all`).
 2. Notification: the app has no notification center integration. The drawn attention mechanism
    is the window surfacing plus the menu-bar state change; the design does not yet specify what
    happens when the operator is full-screen elsewhere.
@@ -145,8 +205,6 @@ surface yet; each gets a design first, then code (invariant 16):
 
 ## Deviations
 
-- The .fig carries zero variables and hardcoded literals: recorded toolchain limit, JSON is the
-  token authority.
 - Inter-only in the .fig, SF Pro + Menlo in production: recorded, deliberate, both signals
   (typeface in the app, fill/rule/caption in the .fig) carry the same distinction.
 - Off-grid spacing: the de-facto values above are the design's real rhythm; the 4pt grid is the

@@ -120,8 +120,8 @@ enum ServiceState: String, Equatable, CaseIterable, Sendable {
 
     var headline: String {
         switch self {
-        case .running: "Balanced — prompts when requests require authorization"
-        case .pending: "Balanced — 1 request waiting for review"
+        case .running: "Prompts when requests require authorization"
+        case .pending: "1 request waiting for review"
         case .unreachable: "Every request that requires consent is denied"
         case .degraded: "Requests cannot be processed while the service is down"
         case .reduced: "TCP listener: no approvals and no identity"

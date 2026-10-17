@@ -325,6 +325,7 @@ struct ConsoleButton: View {
 
     let title: String
     let kind: Kind
+    var height: CGFloat? = nil
     var shortcut: KeyboardShortcut?
     /// NO DEFAULT: a button whose action defaults to a no-op is a control that absorbs
     /// clicks and does nothing — the exact dead-button shape this redesign exists to end.
@@ -336,11 +337,13 @@ struct ConsoleButton: View {
     init(
         title: String,
         kind: Kind,
+        height: CGFloat? = nil,
         shortcut: KeyboardShortcut? = nil,
         action: @escaping () -> Void,
     ) {
         self.title = title
         self.kind = kind
+        self.height = height
         self.shortcut = shortcut
         self.action = action
     }
@@ -376,7 +379,7 @@ struct ConsoleButton: View {
                 .font(.system(size: 13, weight: kind == .secondary || kind == .quiet ? .regular : .semibold))
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity)
-                .frame(height: kind.height)
+                .frame(height: height ?? kind.height)
                 .background(
                     RoundedRectangle(cornerRadius: Design.Radius.medium, style: .continuous)
                         .fill(fill),

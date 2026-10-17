@@ -258,6 +258,7 @@ struct EnvelopeReview: View {
 /// reads is a text field that absorbs keystrokes and discards them.
 struct EnvelopeNoteField: View {
     @Binding var text: String
+    var placeholder: String = "Reason for audit log (optional)"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.tight) {
@@ -265,7 +266,7 @@ struct EnvelopeNoteField: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Design.Ink.textSecondary)
             TextField(
-                "Reason for audit log (optional)",
+                placeholder,
                 text: $text,
                 axis: .vertical,
             )

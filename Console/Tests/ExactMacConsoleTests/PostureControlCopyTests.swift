@@ -111,6 +111,49 @@ struct PostureControlCopyTests {
     }
 
     @Test
+    func `settings default access copy matches design and exposes no internal identifiers`() {
+        let forbidden = [
+            "localEcho", "displayRead", "local.echo", "display.read",
+            "script.execute", "clipboard.read", "clipboard.write",
+            "observation.ax", "observation.window", "observation.screen", "observation.stream",
+            "input.synthesize", "window.manage", "application.control",
+            "lockedDown", "locked_down", "allowOnce", "allowTargetApplication",
+            "allowSession", "preAuthorizeEnvelope", "allowGlobalPersistent",
+            "promptRequired", "postureLockedDown", "honoursStandingGrants",
+            "requiresConsent", "nonConsentRequiring", "exactmac.v1",
+        ]
+        for group in CapabilityGroup.allCases {
+            let text = group.title + " " + group.detail
+            for token in forbidden {
+                #expect(
+                    !text.lowercased().contains(token.lowercased()),
+                    "\(token) must not reach the operator in \(group.rawValue) (invariant 17)",
+                )
+            }
+        }
+    }
+
+    @Test
+    func `settings touch id rules copy exposes no internal identifiers`() {
+        let forbidden = [
+            "localEcho", "displayRead", "local.echo", "display.read",
+            "script.execute", "clipboard.read", "clipboard.write",
+            "observation.ax", "observation.window", "observation.screen", "observation.stream",
+            "input.synthesize", "window.manage", "application.control",
+            "lockedDown", "locked_down", "exactmac.v1",
+        ]
+        for rule in TouchIDRuleKind.allCases {
+            let text = rule.displayName
+            for token in forbidden {
+                #expect(
+                    !text.lowercased().contains(token.lowercased()),
+                    "\(token) must not reach the operator in Touch ID rule \(rule.rawValue) (invariant 17)",
+                )
+            }
+        }
+    }
+
+    @Test
     func `the settings window renders the explanation block in both schemes`() throws {
         // Renders the REAL window so the block is verified as drawn, not merely as a
         // string — and the artefacts land in the committed render directory, where a

@@ -241,33 +241,20 @@ struct BiometricGateTests {
         #expect(model.windows.isPresented(.grants))
     }
 
-    // MARK: The row cannot contradict the locked rows
+    // MARK: Operable Touch ID rules
 
     @Test
-    func `the settings row displays the gate and the locked rows stay locked`() {
+    func `the settings window displays the gate and operable touch id rules`() {
         let model = makeTestConsoleModel()
         model.adoptBiometricGateHandle(HostedBiometricGateHandle(source: BiometricGateSource()))
         let window = SettingsWindow(model: model)
         _ = window
 
         #expect(model.displayedBiometricGate == true)
-
-        let rows = SettingsWindow.biometricRows(model: model)
-        #expect(rows.count == 5)
-        for row in rows {
-            #expect(row.isLocked, "capability biometric row \(row.id) must be locked")
-        }
-
-        let rowMap = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
-        #expect(rowMap["script"]?.isOn == true)
-        #expect(rowMap["global"]?.isOn == true)
-        #expect(rowMap["observe"]?.isOn == true)
-        #expect(rowMap["revokeAll"]?.isOn == true)
-        #expect(rowMap["allowOnce"]?.isOn == false)
-        #expect(
-            rowMap["allowOnce"]?.lockedCaption
-                == "Fixed — the bar is set by what each request is, not by a switch here",
-        )
+        #expect(model.touchIDRules.scriptsAndTerminal == true)
+        #expect(model.touchIDRules.broadApprovals == true)
+        #expect(model.touchIDRules.unsignedCallers == true)
+        #expect(model.touchIDRules.consoleOpen == true)
     }
 
     // MARK: Non-strict stored posture Touch ID confirmation

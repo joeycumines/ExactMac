@@ -11,7 +11,25 @@ struct QueueReview: View {
     struct Item: Equatable, Identifiable {
         var id: String
         var title: String
+        var caller: String
         var scopeLine: String
+
+        init(id: String, title: String, caller: String = "", scopeLine: String) {
+            self.id = id
+            self.title = title
+            self.caller = caller
+            self.scopeLine = scopeLine
+        }
+
+        var attributionLine: String {
+            if caller.isEmpty {
+                return scopeLine
+            }
+            if scopeLine.isEmpty {
+                return caller
+            }
+            return "\(caller)  ·  \(scopeLine)"
+        }
     }
 
     let items: [Item]
@@ -19,6 +37,8 @@ struct QueueReview: View {
     /// its full disclosure. NO DEFAULT: a Decide link that defaults to a no-op is a row
     /// that absorbs the click and decides nothing.
     var onDecide: (String) -> Void
+    /// Approves each waiting request at its server-marked default scope.
+    var onApproveAll: (String) -> Void
     /// Denies every waiting request, one decision each.
     var onDenyAll: (String) -> Void
     /// Returns to the active prompt without deciding anything here.
@@ -57,10 +77,10 @@ struct QueueReview: View {
             )
 
             VStack(alignment: .leading, spacing: Design.Space.one) {
-                Text("\(items.count) requests waiting")
+                Text(items.count == 1 ? "1 request waiting" : "\(items.count) requests waiting")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Design.Ink.textPrimary)
-                Text("Review requests individually, or deny all.")
+                Text("Review individually, approve each at its default scope, or deny all.")
                     .font(.system(size: 11))
                     .foregroundStyle(Design.Ink.textTertiary)
             }
@@ -68,7 +88,7 @@ struct QueueReview: View {
             .padding(.horizontal, Design.Space.frame)
             .padding(.bottom, 14)
 
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: Design.Space.chip) {
                     ForEach(items) { item in
                         HStack(alignment: .center, spacing: Design.Space.chip) {
@@ -77,7 +97,7 @@ struct QueueReview: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(Design.Ink.textPrimary)
                                     .fixedSize(horizontal: false, vertical: true)
-                                Text(item.scopeLine)
+                                Text(item.attributionLine)
                                     .font(.system(size: 10))
                                     .foregroundStyle(Design.Ink.textTertiary)
                             }
@@ -100,13 +120,22 @@ struct QueueReview: View {
             .background(Design.Ink.surfaceSunken)
 
             VStack(alignment: .leading, spacing: Design.Space.component) {
-                EnvelopeNoteField(text: $operatorNote)
+                EnvelopeNoteField(
+                    text: $operatorNote,
+                    placeholder: "Why are you deciding this way? The agent sees this."
+                )
 
-                HStack {
+                HStack(alignment: .center, spacing: Design.Space.leading) {
+                    ConsoleButton(title: "Approve all as default", kind: .primary) {
+                        onApproveAll(operatorNote)
+                    }
+                    .frame(width: 156)
+
                     ConsoleButton(title: "Deny all", kind: .deny) {
                         onDenyAll(operatorNote)
                     }
                     .frame(width: 96)
+
                     Spacer(minLength: 0)
                 }
 

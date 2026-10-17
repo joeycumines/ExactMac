@@ -26,7 +26,9 @@ enum AuthorizationPolicy {
         identity: CallerIdentity,
         grants: [Grant],
         envelopes: [PreAuthorizationEnvelope],
-        posture: Posture,
+        defaultAccess: DefaultAccessPolicy? = nil,
+        touchIDRules: TouchIDRules = .standard,
+        posture: Posture = .balanced,
         context: AuthorizationContext,
         now: MonotonicInstant,
     ) -> AuthorizationDecision {
@@ -125,6 +127,21 @@ enum AuthorizationPolicy {
         }
 
         if posture.honoursStandingGrants {
+            // Standing default access: if the operator configured this capability group to Allow,
+            // local authenticated Unix socket requests execute without prompting and write to audit.log.
+            if let defaultAccess, let group = request.capability.group, defaultAccess.accessLevel(for: group) == .allow {
+                return AuthorizationDecision(
+                    outcome: .allow,
+                    basis: .defaultAccess(group: group),
+                    effectiveCapabilities: effective,
+                    blastRadius: askedRadius,
+                    riskClass: askedRisk,
+                    biometric: .notRequired,
+                    offeredDecisions: [],
+                    expiresAt: nil,
+                )
+            }
+
             // A live grant, and then an envelope. Both bind to CODE IDENTITY, so a
             // different binary running as the same user does not inherit them, and
             // neither is ever matched on a pid. An envelope is additionally re-checked
@@ -176,6 +193,7 @@ enum AuthorizationPolicy {
             signature: effectiveSignature,
             agentGaveReason: hasReason(request.agentReason),
             originIsKnown: request.origin != .unknown,
+            touchIDRules: touchIDRules,
         )
         // The decision's own requirement is the requirement of the option that holds
         // focus, because that is the one a hurried operator is about to accept.
@@ -358,6 +376,7 @@ enum AuthorizationPolicy {
         riskClass: RiskClass = .routine,
         targetIsHighConsequence: Bool = false,
         signature: SignatureState = .signedAndValid,
+        rules: TouchIDRules = .standard,
         isRevokeAll: Bool = false,
     ) -> BiometricRequirement {
         if isRevokeAll {
@@ -368,7 +387,7 @@ enum AuthorizationPolicy {
         // that must never be overridable: an UNSIGNED caller asking for one narrow thing
         // got no ceremony — the case where the operator has least reason to be wary and
         // most to be given — and a SCRIPT asked for once got none either.
-        if signature == .unsigned || signature == .invalid || signature == .unresolved {
+        if rules.unsignedCallers, (signature == .unsigned || signature == .invalid || signature == .unresolved) {
             // NOT `\(signature.rawValue)`. The operator reads this sentence on the prompt
             // while Touch ID is waiting, and a raw enum there reads "unsigned" or
             // "unresolved" as though those were the finding. They are the finding, but they
@@ -379,7 +398,7 @@ enum AuthorizationPolicy {
                 reason: "this caller is not signed by a developer you can identify",
             )
         }
-        if capability == .scriptExecute {
+        if rules.scriptsAndTerminal, capability == .scriptExecute {
             // "everything this Mac can do" was here and it is FALSE: a shell is bounded by
             // the sandbox, by TCC and by SIP, and a claim the operator can disprove is a
             // claim they will stop believing. What is true is the part that matters for
@@ -397,7 +416,7 @@ enum AuthorizationPolicy {
         // three-way conjunction, so adding a window or an operation count switched the
         // whole rule off while the grant still covered every application — the design's
         // rule is about breadth and persistence, and breadth here is the application axis.
-        if scope.application.isGlobal, duration.isPersistent {
+        if rules.broadApprovals, scope.application.isGlobal, duration.isPersistent {
             return .required(
                 reason: "a standing permission over every application until you revoke it",
             )
@@ -405,7 +424,7 @@ enum AuthorizationPolicy {
         if targetIsHighConsequence {
             return .required(reason: "this application is on your high-consequence list")
         }
-        if riskClass == .high {
+        if rules.broadApprovals, riskClass == .high {
             // "this grant would permit a lot" was here. It is an English OPINION where the
             // operator is being asked to authorise something, and it is the one sentence in
             // this function that says nothing checkable — no capability, no scope, no
@@ -433,6 +452,7 @@ enum AuthorizationPolicy {
         signature: SignatureState = .signedAndValid,
         agentGaveReason: Bool = true,
         originIsKnown: Bool = true,
+        touchIDRules: TouchIDRules = .standard,
     ) -> [OfferedDecision] {
         let target = request.scope.application
         let signatureQuality = signature.quality
@@ -469,6 +489,7 @@ enum AuthorizationPolicy {
                     riskClass: (agentGaveReason && originIsKnown) ? radius.riskClass : .high,
                     targetIsHighConsequence: targetIsHighConsequence,
                     signature: signature,
+                    rules: touchIDRules,
                 ),
                 isDestructive: isDestructive,
                 isDefault: isDefault,

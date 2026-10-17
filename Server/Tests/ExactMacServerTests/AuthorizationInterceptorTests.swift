@@ -602,6 +602,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
             isConsoleReachable: true,
             peerEvidence: .fixed(Self.thisProcess),
         )
+        runtime.postureSource.setDefaultAccessPreference(DefaultAccessPolicy(levels: [.windowsAndScreen: .ask]))
         runtime.consent = recorder.answering
         let counters = AuthorizationCounters()
 

@@ -589,13 +589,15 @@ struct AuthorizationInterceptor: ServerInterceptor {
             identity: identity,
             grants: context.peerAuthenticated ? snapshot.grants : [],
             envelopes: context.peerAuthenticated ? snapshot.envelopes : [],
+            defaultAccess: runtime.postureSource.defaultAccess,
+            touchIDRules: runtime.postureSource.touchIDRules,
             posture: runtime.postureSource.current,
             context: context,
             now: now,
         )
 
         switch decision.basis {
-        case .noConsentRequired:
+        case .noConsentRequired, .defaultAccess:
             return try recorded(decision, for: request, identity: identity)
         case .grant, .envelope:
             // A COUNT THE SCOPE DECLARED IS SPENT HERE, or the count was decoration: the
@@ -614,7 +616,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
                     await runtime.grants.consume(id, operations: declared)
                 case let .envelope(id):
                     await runtime.grants.consumeEnvelope(id, operations: declared)
-                case .noConsentRequired, .promptRequired, .denied:
+                case .noConsentRequired, .defaultAccess, .promptRequired, .denied:
                     true
                 }
                 guard spent else {
@@ -980,6 +982,7 @@ struct AuthorizationInterceptor: ServerInterceptor {
     private static func describe(_ basis: DecisionBasis) -> String {
         switch basis {
         case .noConsentRequired: "noConsentRequired"
+        case .defaultAccess: "defaultAccess"
         case .grant: "grant"
         case .envelope: "envelope"
         case .promptRequired: "promptRequired"

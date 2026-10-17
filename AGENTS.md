@@ -12,7 +12,7 @@ ExactMac is a macOS accessibility automation framework consisting of:
 
 ## Build Interface
 
-`gmake help` is the authoritative catalog of available targets and their behavior. A bare `gmake` selects `check`: the complete `all` build/check path followed by permission-dependent macOS integration tests. Read the help output before choosing specialized targets; do not duplicate its recipes here.
+`gmake help | head -n 150` is the authoritative catalog of available targets and their behavior (pipe through `head` or `cat` to prevent paging pauses). A bare `gmake` selects `check`: the complete `all` build/check path followed by permission-dependent macOS integration tests. Read the help output before choosing specialized targets; do not duplicate its recipes here.
 
 ## Codebase Stewardship
 

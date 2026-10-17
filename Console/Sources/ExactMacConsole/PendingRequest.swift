@@ -138,6 +138,7 @@ struct PendingRequest: Equatable {
         request: AuthorizationRequest,
         identity: CallerIdentity,
         decision: AuthorizationDecision,
+        timeoutSeconds: Int? = nil,
         createdAt: Date = Date(),
     ) {
         requestID = request.id.rawValue
@@ -171,7 +172,8 @@ struct PendingRequest: Equatable {
         requiresBiometric = decision.biometric.reason != nil
         biometricReason = decision.biometric.reason
         let envTimeout = ProcessInfo.processInfo.environment["EXACTMAC_CONSENT_TIMEOUT_SECONDS"].flatMap(Int.init)
-        consentTimeoutSeconds = (envTimeout != nil && envTimeout! > 0) ? envTimeout! : ServerConfig.defaultConsentTimeoutSeconds
+        consentTimeoutSeconds = timeoutSeconds
+            ?? ((envTimeout != nil && envTimeout! > 0) ? envTimeout! : ServerConfig.defaultConsentTimeoutSeconds)
         self.createdAt = createdAt
         isRevokeAll = false
         offered = decision.offeredDecisions.map { option in
@@ -289,9 +291,7 @@ struct PendingRequest: Equatable {
 
     /// The body text shown on the popover's pending notice card, matching Figma node 0:1326.
     var popoverNoticeBody: String {
-        let caller = !executablePath.isEmpty
-            ? URL(fileURLWithPath: executablePath).lastPathComponent
-            : (bundleIdentifier ?? "An application")
+        let caller = self.caller
         var action = consequence.prefix(1).lowercased() + consequence.dropFirst()
         if action.hasSuffix(" and its history") {
             action = String(action.dropLast(" and its history".count))
@@ -305,11 +305,16 @@ struct PendingRequest: Equatable {
         }
     }
 
-    /// Who is asking for the pre-authorization.
-    var envelopeRequester: String {
+    /// The calling process or agent identity.
+    var caller: String {
         !executablePath.isEmpty
             ? URL(fileURLWithPath: executablePath).lastPathComponent
             : (bundleIdentifier ?? "An application")
+    }
+
+    /// Who is asking for the pre-authorization.
+    var envelopeRequester: String {
+        caller
     }
 
     /// What the envelope would permit, one row per capability.

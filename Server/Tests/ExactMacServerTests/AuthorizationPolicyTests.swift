@@ -115,6 +115,8 @@ final class AuthorizationPolicyTests: XCTestCase {
         identity: CallerIdentity? = nil,
         grants: [Grant] = [],
         envelopes: [PreAuthorizationEnvelope] = [],
+        defaultAccess: DefaultAccessPolicy? = nil,
+        touchIDRules: TouchIDRules? = nil,
         posture: Posture = .balanced,
         context: AuthorizationContext = .unixSocket(),
         at instant: MonotonicInstant? = nil,
@@ -124,6 +126,8 @@ final class AuthorizationPolicyTests: XCTestCase {
             identity: identity ?? peerIdentity(),
             grants: grants,
             envelopes: envelopes,
+            defaultAccess: defaultAccess,
+            touchIDRules: touchIDRules ?? .standard,
             posture: posture,
             context: context,
             now: instant ?? now,
@@ -1759,5 +1763,182 @@ final class AuthorizationPolicySecondReviewRegressionTests: XCTestCase {
             tally[option, default: 0] += 1
         }
         XCTAssertEqual(tally.count, options.count)
+    }
+
+    // MARK: - Default Access Policy and Touch ID Rules
+
+    func testDefaultAccessPolicyAllowsSpecifiedGroupWithoutPrompt() {
+        let policy = DefaultAccessPolicy(levels: [
+            .windowsAndScreen: .allow,
+            .clipboard: .ask,
+            .appsAndInput: .allow,
+            .scriptsAndTerminal: .ask,
+        ])
+
+        // Windows and screen capability allowed with defaultAccess basis
+        let windowDecision = AuthorizationPolicy.evaluate(
+            request: request(.windowObserve),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: policy,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: .unixSocket(),
+            now: now,
+        )
+        XCTAssertEqual(windowDecision.outcome, .allow)
+        XCTAssertEqual(windowDecision.basis, .defaultAccess(group: .windowsAndScreen))
+
+        // Apps and input capability allowed with defaultAccess basis
+        let inputDecision = AuthorizationPolicy.evaluate(
+            request: request(.inputSynthesize),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: policy,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: .unixSocket(),
+            now: now,
+        )
+        XCTAssertEqual(inputDecision.outcome, .allow)
+        XCTAssertEqual(inputDecision.basis, .defaultAccess(group: .appsAndInput))
+
+        // Clipboard is set to ask -> promptRequired
+        let clipDecision = AuthorizationPolicy.evaluate(
+            request: request(.clipboardRead),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: policy,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: .unixSocket(),
+            now: now,
+        )
+        XCTAssertEqual(clipDecision.outcome, .deny)
+        XCTAssertEqual(clipDecision.basis, .promptRequired)
+
+        // Script execution is set to ask -> promptRequired
+        let scriptDecision = AuthorizationPolicy.evaluate(
+            request: request(.scriptExecute),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: policy,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: .unixSocket(),
+            now: now,
+        )
+        XCTAssertEqual(scriptDecision.outcome, .deny)
+        XCTAssertEqual(scriptDecision.basis, .promptRequired)
+    }
+
+    func testDefaultAccessPolicyTCPAlwaysDeniesEvenWithAllowAll() {
+        var allowAll = DefaultAccessPolicy()
+        for group in CapabilityGroup.allCases {
+            allowAll.setAccessLevel(.allow, for: group)
+        }
+        XCTAssertTrue(allowAll.isAllowingAll)
+
+        // Invariant 8: A TCP transport never enters consent/allow paths and always denies consent capabilities
+        let tcpContext = AuthorizationContext(
+            transport: .tcp,
+            isConsoleReachable: false,
+            peerAuthenticated: false,
+            biometric: .unavailable(reason: "tcp"),
+            store: .intact,
+            highConsequenceTargets: [],
+        )
+        let tcpDecision = AuthorizationPolicy.evaluate(
+            request: request(.windowObserve),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: allowAll,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: tcpContext,
+            now: now,
+        )
+        XCTAssertEqual(tcpDecision.outcome, .deny)
+        XCTAssertEqual(tcpDecision.basis, .denied(.reducedUnauthenticatedPosture))
+    }
+
+    func testDefaultAccessPolicyUnauthenticatedPeerDeniesEvenWithAllowAll() {
+        var allowAll = DefaultAccessPolicy()
+        for group in CapabilityGroup.allCases {
+            allowAll.setAccessLevel(.allow, for: group)
+        }
+
+        // Invariant 2: Unauthenticated peer fails closed
+        let unauthContext = AuthorizationContext(
+            transport: .unixSocket,
+            isConsoleReachable: true,
+            peerAuthenticated: false,
+            biometric: .available,
+            store: .intact,
+            highConsequenceTargets: [],
+        )
+        let unauthDecision = AuthorizationPolicy.evaluate(
+            request: request(.windowObserve),
+            identity: peerIdentity(),
+            grants: [],
+            envelopes: [],
+            defaultAccess: allowAll,
+            touchIDRules: .standard,
+            posture: .balanced,
+            context: unauthContext,
+            now: now,
+        )
+        XCTAssertEqual(unauthDecision.outcome, .deny)
+        XCTAssertEqual(unauthDecision.basis, .denied(.unauthenticatedPeer))
+    }
+
+    func testTouchIDRulesControlBiometricRequirement() {
+        // Standard rules: all true
+        let standard = TouchIDRules.standard
+        XCTAssertTrue(standard.scriptsAndTerminal)
+        XCTAssertTrue(standard.broadApprovals)
+        XCTAssertTrue(standard.unsignedCallers)
+        XCTAssertTrue(standard.consoleOpen)
+
+        // With standard rules, scripts require biometric
+        let scriptReq = AuthorizationPolicy.biometricRequirement(
+            capability: .scriptExecute,
+            scope: AuthorizationScope(),
+            rules: standard,
+        )
+        XCTAssertTrue(scriptReq.isRequired)
+
+        // Relaxed rules: scriptsAndTerminal disabled
+        var relaxed = standard
+        relaxed.scriptsAndTerminal = false
+        let relaxedScriptReq = AuthorizationPolicy.biometricRequirement(
+            capability: .scriptExecute,
+            scope: AuthorizationScope(),
+            rules: relaxed,
+        )
+        XCTAssertFalse(relaxedScriptReq.isRequired)
+
+        // Broad approval rule controls long-duration all-app envelopes
+        let broadReq = AuthorizationPolicy.biometricRequirement(
+            capability: .clipboardRead,
+            scope: AuthorizationScope(), // all applications
+            duration: .monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds),
+            rules: standard,
+        )
+        XCTAssertTrue(broadReq.isRequired)
+
+        relaxed.broadApprovals = false
+        let relaxedBroadReq = AuthorizationPolicy.biometricRequirement(
+            capability: .clipboardRead,
+            scope: AuthorizationScope(),
+            duration: .monotonicSeconds(AuthorizationPolicy.maximumEnvelopeSeconds),
+            rules: relaxed,
+        )
+        XCTAssertFalse(relaxedBroadReq.isRequired)
     }
 }

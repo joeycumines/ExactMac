@@ -416,12 +416,78 @@ public struct HostedPostureHandle {
         }
     }
 
-    /// Whether interactive Touch ID confirmation is needed to activate a stored non-strict posture.
+    /// Standing default access policy actually in force.
+    public var defaultAccess: DefaultAccessPolicy {
+        source.defaultAccess
+    }
+
+    /// Standing Touch ID rules actually in force.
+    public var touchIDRules: TouchIDRules {
+        source.touchIDRules
+    }
+
+    /// Current prompt timeout in seconds.
+    public var consentTimeoutSeconds: Int {
+        source.consentTimeoutSeconds
+    }
+
+    /// Sets and persists the operator's default access policy.
+    public func setDefaultAccessPreference(
+        _ policy: DefaultAccessPolicy,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
+        source.setDefaultAccessPreference(policy)
+        do {
+            try source.persist(environment: environment)
+        } catch {
+            ExactMacServerLogger.posturePersistFailed(error)
+        }
+    }
+
+    /// Sets and persists the operator's Touch ID rules.
+    public func setTouchIDRulesPreference(
+        _ rules: TouchIDRules,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
+        source.setTouchIDRulesPreference(rules)
+        do {
+            try source.persist(environment: environment)
+        } catch {
+            ExactMacServerLogger.posturePersistFailed(error)
+        }
+    }
+
+    /// Sets and persists the operator's consent timeout seconds preference.
+    public func setConsentTimeoutSecondsPreference(
+        _ seconds: Int,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
+        source.setConsentTimeoutSecondsPreference(seconds)
+        do {
+            try source.persist(environment: environment)
+        } catch {
+            ExactMacServerLogger.posturePersistFailed(error)
+        }
+    }
+
+    /// Resets all settings to factory defaults.
+    public func resetToDefaults(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+    ) {
+        source.resetToDefaults()
+        do {
+            try source.persist(environment: environment)
+        } catch {
+            ExactMacServerLogger.posturePersistFailed(error)
+        }
+    }
+
+    /// Whether interactive Touch ID confirmation is needed to activate a stored non-strict posture or permissive settings.
     public var needsConfirmation: Bool {
         source.needsConfirmation
     }
 
-    /// Confirms the stored non-strict posture after an interactive Touch ID check.
+    /// Confirms stored preferences after an interactive Touch ID check.
     public func confirmStoredPreference() {
         source.confirmStoredPreference()
     }
