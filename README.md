@@ -25,7 +25,7 @@ Most macOS MCP servers wrap AppleScript (scriptable apps only), loop screenshots
 
 ## Setup
 
-Build from source with [CONTRIBUTING.md](CONTRIBUTING.md) (prerequisites, first build, tests). Run the backend as a background service with [DEPLOYMENT.md](DEPLOYMENT.md) (app bundle, LaunchAgent, Unix socket, signing).
+Build from source with [CONTRIBUTING.md](CONTRIBUTING.md) (prerequisites, first build, tests). Deploy the menu-bar app and MCP server with [DEPLOYMENT.md](DEPLOYMENT.md) (app bundle, Unix socket, signing).
 
 Point the proxy at the Swift backend with `EXACTMAC_SERVER_ADDR` (default `localhost:50051`; the socket deployment in [DEPLOYMENT.md](DEPLOYMENT.md) avoids TCP entirely).
 
@@ -55,7 +55,7 @@ For repeatable GUI work, load the agent skill in `skills/exactmac/` (Claude Code
 |----------|-------------|
 | [AI Tool Integration](docs/ai-artifacts/08-ai-tool-integration.md) | Per-client setup with snippets and verification steps |
 | [Agent Skill](skills/exactmac/SKILL.md) | Workflow, recovery, and troubleshooting reference for agents |
-| [Deployment Guide](DEPLOYMENT.md) | Local single-user deployment: app bundle, LaunchAgent, Unix socket, signing, TCC grants |
+| [Deployment Guide](DEPLOYMENT.md) | Local single-user deployment: app bundle, Unix socket, signing, TCC grants |
 | [MCP Integration](docs/ai-artifacts/05-mcp-integration.md) | Protocol version, transports, security, tooling |
 | [MCP Server Design](docs/ai-artifacts/11-mcp-server-design-for-computer-use-agents.md) | Design notes for the MCP surface |
 | [Tool Design Review](docs/ai-artifacts/07-mcp-tool-design-review.md) | Tool surface review and rationale |

@@ -76,6 +76,12 @@ the app type before deciding on your interaction strategy:
    - **Caveat: Address Bar & Web Input.** Direct AX mutation (`type_element(input_method="ax")`)
      may be restricted on web address bars. Click the address bar and use physical
      `type(target, text)` followed by `keypress(target, keys=["enter"])`.
+   - **Caveat: Secure Password Inputs & `EnableSecureEventInput`.** When an `<input type="password">`
+     or `AXSecureTextField` receives focus, macOS activates Secure Event Input, suppressing
+     all `CGEventTap` hooks from observing keystrokes. Physical `type` / `keypress` time out
+     waiting for routed tokens, and AX direct mutation reports non-editable. Mitigate by setting
+     the clipboard with `clipboard(action="set")`, clicking the field to focus, and pasting
+     via MCP `run(type="applescript")` (see [references/mcp-reliability-recommendations.md](references/mcp-reliability-recommendations.md) §14).
 3. **Java / Swing / JetBrains Runtime (GoLand, IntelliJ, PyCharm, WebStorm):**
    - **Default: Accessibility API Disabled.** JetBrains Runtime disables the Java
      Accessibility Bridge (JAB) by default to reduce overhead. Direct AX queries fail
@@ -331,6 +337,8 @@ Before declaring a desktop automation task complete, verify:
 | Destination label exists but navigation is uncertain | A matching row or button can exist before navigation; canvas state may be visual-only | Compare a pre-action baseline with post-action state; require two destination signals, with at least one proving a change. If already selected, report that no navigation action was needed. |
 | Browser shows wrong screen after launch | Chrome Profile Picker is waiting for profile selection | Inspect AX tree for `Open Person 1 profile` or `Guest mode` and click it before attempting browser navigation. |
 | Address bar doesn't navigate on `type_element` | Browser security blocks direct AX text mutation in URL bar | Click the address bar to focus it, use physical `type(target=window, text=url)`, then send `keypress(target=window, keys=["enter"])`. |
+| `Timed out waiting for routed input token` | Secure password input has focus, activating macOS `EnableSecureEventInput` which blocks `CGEventTap` hooks | Set secret on clipboard with `clipboard(action="set")`, click field to focus, and paste/submit via MCP `run(type="applescript")`. |
+| `Element is not editable. Role: AXTextField (secure text field)` | WebKit/Cocoa marks `kAXValueAttribute` non-settable on password fields | Do not use `type_element(input_method="ax")`; use clipboard + AppleScript paste/submit. |
 | Click misses target on secondary monitor | Origin calculation ignored display coordinate offset | Use Global Display Coordinates: $\text{global} = \text{window origin} + \text{local coordinate}$. Secondary displays often have negative origins. |
 
 ---

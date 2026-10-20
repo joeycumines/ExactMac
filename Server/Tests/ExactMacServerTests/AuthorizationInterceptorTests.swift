@@ -644,7 +644,7 @@ final class AuthorizationInterceptorTests: XCTestCase {
     /// ignored — the first run of these tests failed for exactly that reason, and it was
     /// the engine being right about strict, not the test being right about the grant.
     private static func balancedSource() -> PostureSource {
-        let source = PostureSource(override: nil)
+        let source = PostureSource(override: nil, store: InMemoryPreferencesStore())
         source.setStoredPreference(.balanced)
         return source
     }

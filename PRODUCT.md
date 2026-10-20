@@ -73,7 +73,7 @@ isolation.
 
 ## Operating Context
 
-A single macOS login session. The server runs as a per-user LaunchAgent holding the user's ambient
+A single macOS login session. The server runs inside the menu-bar app holding the user's ambient
 authority through two independent TCC grants: Accessibility, for the accessibility tree and input synthesis, and
 Screen Recording, for ScreenCaptureKit capture. Losing either degrades the product partially and silently.
 

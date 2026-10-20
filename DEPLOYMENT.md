@@ -46,10 +46,10 @@ Two executables, three processes' worth of work:
   log, and the window that asks the operator for consent. It runs as a
   menu-bar accessory with no Dock icon.
 - **`exactmac`** is the Go MCP proxy. It speaks MCP to the agent host and gRPC
-  to the app over `~/Library/Caches/exactmac.sock`. It needs neither
+  to the app over `~/Library/Application Support/ExactMac/exactmac.sock`. It needs neither
   Accessibility nor Screen Recording.
 
-The socket is owner-only (`srw-------`) and lives in the user's cache
+The socket is owner-only (`srw-------`) and lives in the user's Application Support
 directory. No TCP listener is used.
 
 ## Prerequisites
@@ -73,12 +73,12 @@ layout.
 gmake exactmac.console-install
 ```
 
-One command, because an upgrade that needs a second command is an upgrade
-someone does not finish. It builds the release binary, assembles and signs the
-bundle, verifies the bundle, copies it to `~/Applications/ExactMacConsole.app`,
-verifies the **installed** copy, registers it with LaunchServices, creates the
-state directory at `0700`, and retires any superseded LaunchAgents left by an
-older installation.
+One command installs the whole deployment. It builds `ExactMacConsole.app` and
+the Go MCP proxy (`exactmac`), signs and verifies the bundle, copies it to
+`~/Applications/ExactMacConsole.app`, verifies the installed app, installs the
+`exactmac` binary to `$(go env GOBIN)/exactmac`, registers the app with
+LaunchServices, creates `~/Library/Application Support/ExactMac/` at `0700`,
+and retires legacy LaunchAgents.
 
 Then launch it. It appears in the menu bar.
 
@@ -150,9 +150,10 @@ The console application targets build, package, sign, and install the menu-bar a
 | `gmake exactmac.console-build` | Builds the release binary at `Console/.build/release/ExactMacConsole`. |
 | `gmake exactmac.console-app` | Packages `ExactMacConsole.app`, copies SwiftPM resource bundles, writes `Info.plist`, and installs icons and glyphs into `Contents/Resources`. |
 | `gmake exactmac.console-sign` | Signs the bundle ad-hoc (or with `MACOS_SIGN_IDENTITY`) and runs `codesign --verify --deep --strict`. |
-| `gmake exactmac.console-install` | Runs the full build, package, sign, verify, and install sequence to `~/Applications/ExactMacConsole.app`, registers with `lsregister -f`, sets up `~/Library/Application Support/ExactMac/`, and removes legacy LaunchAgents. |
-| `gmake exactmac.console-stop` | Terminates running `ExactMacConsole` instances via `pkill -x ExactMacConsole`. |
-| `gmake exactmac.console-uninstall` | Stops the running app, removes `~/Applications/ExactMacConsole.app`, and deletes the socket. |
+| `gmake exactmac.console-install` | Builds, signs, and installs `ExactMacConsole.app` and the `exactmac` MCP binary, registers with `lsregister -f`, sets up `~/Library/Application Support/ExactMac/`, and removes legacy LaunchAgents. |
+| `gmake exactmac.console-stop` | Quits running `ExactMacConsole` instances gracefully. |
+| `gmake exactmac.console-uninstall` | Stops the running app, removes `~/Applications/ExactMacConsole.app`, removes the `exactmac` MCP binary, and deletes the socket. |
+| `gmake exactmac.console-status` | Reports the console app, bundle ID, socket, signature, App Support directory, and MCP binary status. |
 
 ### Icon and Asset Pipeline
 
@@ -185,11 +186,11 @@ audit trail, and silently widening it would be the wrong repair.
 
 ## Connecting an agent
 
-Build the Go proxy and point the agent host at it:
+`gmake exactmac.console-install` installs the Go MCP proxy binary to
+`$(go env GOBIN)/exactmac`. Rebuild only the Go proxy with `gmake exactmac.build-mcp`
+when editing MCP code without reinstalling the app.
 
-```sh
-gmake exactmac.build-mcp
-```
+Point the agent host at the installed binary:
 
 ```jsonc
 {
@@ -200,7 +201,7 @@ gmake exactmac.build-mcp
       "command": ["/Users/YOU/go/bin/exactmac", "mcp"],
       "enabled": true,
       "environment": {
-        "EXACTMAC_SERVER_SOCKET_PATH": "/Users/YOU/Library/Caches/exactmac.sock"
+        "EXACTMAC_SERVER_SOCKET_PATH": "/Users/YOU/Library/Application Support/ExactMac/exactmac.sock"
       },
       "timeout": 10000
     }
@@ -220,7 +221,7 @@ per-request timeout is `EXACTMAC_REQUEST_TIMEOUT`, in seconds.
 ## Runtime configuration
 
 The app reads no environment variables in normal use. It sets its own socket
-path to `~/Library/Caches/exactmac.sock` when one is not already set, and
+path to `~/Library/Application Support/ExactMac/exactmac.sock` when one is not already set, and
 leaves an existing `GRPC_UNIX_SOCKET` alone so a diagnostic run can point it
 elsewhere.
 
@@ -284,14 +285,14 @@ from the old installation.
 gmake exactmac.console-uninstall
 ```
 
-Stops the app, unregisters the bundle, and removes the app and the socket. It
-deliberately leaves two things and says so:
+Stops the app, unregisters the bundle, and removes the app, the `exactmac` MCP
+binary, and the socket. It deliberately leaves two items:
 
 - **The Application Support directory**, `~/Library/Application Support/ExactMac/`, which holds your
-  decision history. Remove it deliberately if you mean to:
+  decision history. Remove it deliberately if intended:
   `rm -rf ~/Library/Application\ Support/ExactMac/`.
 - **The login item**, which belongs to the bundle that registered it. macOS
-  removes it with the bundle; it can also be turned off in System Settings →
+  removes it with the bundle; turn it off in System Settings →
   General → Login Items.
 
 `gmake exactmac.uninstall` also removes the old server bundle, its plist, the
@@ -319,7 +320,7 @@ launch it again rather than re-running the install:
 
 ```sh
 pkill -x ExactMacConsole
-rm -f ~/Library/Caches/exactmac.sock ~/Library/Caches/exactmac.sock.owner
+rm -f ~/Library/Application\ Support/ExactMac/exactmac.sock ~/Library/Application\ Support/ExactMac/exactmac.sock.owner
 open -a ~/Applications/ExactMacConsole.app
 ```
 

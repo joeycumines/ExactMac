@@ -909,18 +909,18 @@ exactmac.console-register: ## Register the signed console .app with LaunchServic
 	if ! "$(EXACTMAC_LSREGISTER)" -f "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: console LaunchServices registration failed.' >&2; exit 1; fi; \
 	printf 'Registered %s (%s) with LaunchServices.\n' "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_BUNDLE_ID)"
 
-##@ [Console] LaunchAgent
+##@ [Console] Install and lifecycle
 
 .NOTPARALLEL: exactmac.console-install
 .PHONY: exactmac.console-install
-exactmac.console-install: ## Build, sign, install and register the app, then retire the superseded LaunchAgents.
+exactmac.console-install: ## Build, sign, install and register the app, install the MCP server, and retire superseded LaunchAgents.
 	@# ONE ACTION, BECAUSE AN UPGRADE THAT NEEDS A SECOND COMMAND IS AN UPGRADE SOMEONE DOES
-	@# NOT FINISH. The old two-process install left a plist in ~/Library/LaunchAgents and a
-	@# job in the launchd domain, and the app has to take over from it: building the bundle
-	@# and leaving the old agent running leaves two processes contending for
-	@# ~/Library/Caches/exactmac.sock, and the second to arrive loses the pathname claim and
-	@# exits with a refusal an operator reads as a broken install.
+	@# NOT FINISH. The app hosts the gRPC server and exactmac provides the Go MCP CLI. Installing
+	@# both in one target ensures the complete system is immediately runnable. The old two-process
+	@# install left a plist in ~/Library/LaunchAgents and a job in the launchd domain, which the
+	@# retirement step cleans up.
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory macos.all
+	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.build-mcp
 	@set -u; \
 	if ! codesign --verify --deep --strict "$(MACOS_BUNDLE_DIR)"; then printf '%s\n' 'ERROR: the assembled bundle failed signature verification.' >&2; exit 1; fi; \
 	if ! mkdir -p "$(dir $(EXACTMAC_CONSOLE_APP_DIR))"; then printf '%s\n' 'ERROR: could not create the applications directory.' >&2; exit 1; fi; \
@@ -928,8 +928,10 @@ exactmac.console-install: ## Build, sign, install and register the app, then ret
 	if ! ditto "$(MACOS_BUNDLE_DIR)" "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: failed to copy the app into Applications.' >&2; exit 1; fi; \
 	if ! codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: the installed bundle failed signature verification.' >&2; exit 1; fi; \
 	if ! "$(EXACTMAC_LSREGISTER)" -f "$(EXACTMAC_CONSOLE_APP_DIR)"; then printf '%s\n' 'ERROR: LaunchServices registration failed.' >&2; exit 1; fi; \
+	if [ ! -x "$(EXACTMAC_MCP_BIN)" ]; then printf 'ERROR: MCP binary is missing or not executable: %s\n' "$(EXACTMAC_MCP_BIN)" >&2; exit 1; fi; \
 	mkdir -p "$(EXACTMAC_APP_SUPPORT_DIR)"; chmod 700 "$(EXACTMAC_APP_SUPPORT_DIR)"; \
-	printf 'Installed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"
+	printf 'Installed app: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	printf 'Installed MCP: %s\n' "$(EXACTMAC_MCP_BIN)"
 	+@$(MAKE) -C "$(PROJECT_ROOT)" --no-print-directory exactmac.retire-launchagents
 	@printf '%s\n' ''
 	@printf '%s\n' 'Launch it from Applications. To have it start at login, turn on the toggle in'
@@ -967,35 +969,45 @@ exactmac.console-start: ## Retired: refuses to start a console LaunchAgent.
 	exit 1
 
 .PHONY: exactmac.console-stop
-exactmac.console-stop: ## Stop the console service, keeping the bundle and the plist.
+exactmac.console-stop: ## Stop running ExactMacConsole instances.
 	@set -u; \
-	console_service_absent() { output=$$(launchctl print "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" 2>&1); status=$$?; [ "$$status" -ne 0 ] && printf '%s\n' "$$output" | grep -Eq 'Could not find service|No such process|service does not exist'; }; \
-	if launchctl bootout "$(EXACTMAC_CONSOLE_SERVICE_TARGET)" >/dev/null 2>&1; then \
-		printf 'Console service stopped: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
-	elif console_service_absent; then \
-		printf 'Console service is not loaded: %s\n' "$(EXACTMAC_CONSOLE_SERVICE_TARGET)"; \
+	if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1; then \
+		osascript -e 'quit app "$(EXACTMAC_CONSOLE_APP_NAME)"' >/dev/null 2>&1 || true; \
+		attempt=0; \
+		while (pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1) && [ "$$attempt" -lt 5 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
+		if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1; then \
+			pkill -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1 || true; \
+		fi; \
+		printf 'Console stopped: %s\n' "$(EXACTMAC_CONSOLE_APP_NAME)"; \
 	else \
-		printf '%s\n' 'ERROR: could not confirm console bootout.' >&2; \
-		exit 1; \
+		printf 'Console is not running: %s\n' "$(EXACTMAC_CONSOLE_APP_NAME)"; \
 	fi
 
 .PHONY: exactmac.console-uninstall
-exactmac.console-uninstall: ## Remove the installed app and the socket. The state directory is left.
+exactmac.console-uninstall: ## Remove the installed app, the MCP binary, and the socket. The state directory is left.
 	@# THE APP IS STOPPED FIRST, because it holds the socket pathname under a lock the kernel
 	@# releases only when it dies. Removing a claimed node underneath a live server leaves the
 	@# next start refusing to bind, and the refusal names a socket that is not there.
 	@set -u; \
-	if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1; then \
+	if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1; then \
 		osascript -e 'quit app "$(EXACTMAC_CONSOLE_APP_NAME)"' >/dev/null 2>&1 || true; \
 		attempt=0; \
-		while pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 && [ "$$attempt" -lt 5 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
-		if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1; then printf '%s\n' 'ERROR: the app is still running; quit it and run this again.' >&2; exit 1; fi; \
+		while (pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1) && [ "$$attempt" -lt 5 ]; do sleep 1; attempt=$$((attempt + 1)); done; \
+		if pgrep -f "$(EXACTMAC_CONSOLE_APP_DIR)/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$(EXACTMAC_CONSOLE_APP_NAME)" >/dev/null 2>&1; then \
+			printf '%s\n' 'ERROR: the app is still running; quit it and run this again.' >&2; exit 1; \
+		fi; \
 	fi; \
 	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then "$(EXACTMAC_LSREGISTER)" -u "$(EXACTMAC_CONSOLE_APP_DIR)" >/dev/null 2>&1 || true; fi; \
 	rm -rf "$(EXACTMAC_CONSOLE_APP_DIR)" "$(EXACTMAC_CONSOLE_STAGING_DIR)"; \
 	rm -f "$(EXACTMAC_SOCKET)" "$(EXACTMAC_SOCKET).owner"; \
 	rm -f "$(EXACTMAC_CONSOLE_STDOUT_LOG)" "$(EXACTMAC_CONSOLE_STDERR_LOG)"; \
+	rm -f "$(EXACTMAC_MCP_BIN)"; \
 	printf 'Removed: %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
+	printf 'Removed: %s\n' "$(EXACTMAC_MCP_BIN)"; \
+	pids=$$(pgrep -f "exactmac mcp" || true); \
+	if [ -n "$$pids" ]; then \
+		printf 'Note: running "exactmac mcp" processes detected; restart your MCP host or terminate them.\n'; \
+	fi; \
 	printf '%s\n' ''; \
 	printf '%s\n' 'NOT removed: the login item the app registered for itself. It belongs to the'; \
 	printf '%s\n' 'bundle that created it and macOS removes it when the bundle goes, but it can'; \
@@ -1012,17 +1024,19 @@ exactmac.console-uninstall: ## Remove the installed app and the socket. The stat
 # Reporting "Service: not loaded" every time would have described a service that cannot
 # exist, and would have sent nobody looking for the thing that actually decides it — the
 # login-item registration, which lives inside the app and is visible in System Settings.
-exactmac.console-status: ## Report the console's bundle, signature, and server socket.
+exactmac.console-status: ## Report the console bundle, signature, server socket, and MCP binary.
 	@set -u; \
 	printf '  App:           %s\n' "$(EXACTMAC_CONSOLE_APP_DIR)"; \
 	printf '  Bundle ID:     %s\n' "$(EXACTMAC_CONSOLE_BUNDLE_ID)"; \
 	printf '  Server socket: %s\n' "$(EXACTMAC_SOCKET)"; \
 	printf '  App Support:   %s\n' "$(EXACTMAC_APP_SUPPORT_DIR)"; \
 	if [ -d "$(EXACTMAC_CONSOLE_APP_DIR)" ]; then \
-		if codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)" 2>/dev/null; then printf '  Signature: verified\n'; else printf '  Signature: MISSING OR INVALID\n'; fi; \
+		if codesign --verify --deep --strict "$(EXACTMAC_CONSOLE_APP_DIR)" 2>/dev/null; then printf '  Signature:     verified\n'; else printf '  Signature:     MISSING OR INVALID\n'; fi; \
 		ls -ld "$(EXACTMAC_CONSOLE_APP_DIR)"; \
-	else printf '  Bundle:    not installed\n'; fi; \
-	printf '  Start at login:  ask the app, or System Settings > General > Login Items\n'
+	else printf '  Bundle:        not installed\n'; fi; \
+	printf '  MCP binary:    %s\n' "$(EXACTMAC_MCP_BIN)"; \
+	if [ -x "$(EXACTMAC_MCP_BIN)" ]; then printf '  MCP status:    executable\n'; else printf '  MCP status:    not installed\n'; fi; \
+	printf '  Start at login: ask the app, or System Settings > General > Login Items\n'
 
 ##@ [Console] LaunchAgent Retirement
 

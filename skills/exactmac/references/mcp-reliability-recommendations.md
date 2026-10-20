@@ -169,6 +169,57 @@ plus destination-specific content or a before/after screenshot. If the baseline 
 shows the requested destination selected, report that no navigation action was needed.
 If neither signal changes or identifies the destination, report navigation as unverified.
 
+## 14. Secure Text Input Fields (`AXSecureTextField` / `EnableSecureEventInput`) and WebKit/DOM Password Inputs — **Empirical Finding**
+
+When an `<input type="password">` or native `NSSecureTextField` acquires focus, macOS
+automatically activates system-wide **Secure Event Input** (`EnableSecureEventInput`).
+This introduces distinct architectural barriers across ExactMac input mechanisms:
+
+1. **`CGEventTap` Delivery Observation Timeout (`timed out waiting for routed input token`):**
+   - ExactMac physical input tools (`type`, `keypress`) and macro input actions (`keyPress`, `textInput`)
+     use `CoreGraphicsInputRouteObserver`, creating a `CGEventTap` via `CGEvent.tapCreate` /
+     `CGEvent.tapCreateForPid` with `.listenOnly`.
+   - Under macOS Secure Event Input, the operating system intentionally blocks and suppresses
+     all `CGEventTap` callbacks for keyboard events (`kCGEventKeyDown`, `kCGEventKeyUp`) to
+     prevent keylogging malware.
+   - Because the event tap callback never fires, `ledger.isAttemptObserved(token)` remains
+     false, and `waitForAttempt` times out after 5 seconds with:
+     `type failed: timed out waiting for routed input token <token>`.
+2. **AX Direct Mutation Failure (`isAXAttributeSettable == false`):**
+   - Calling `type_element(input_method="ax")` on a secure password field fails with:
+     `Element is not editable. Role: AXTextField (secure text field)`.
+   - In WebKit, Chromium, and native Cocoa, `kAXValueAttribute` on secure text fields is
+     explicitly marked non-settable (`AXError -25205`) for security.
+3. **Keystroke AX Typing Verification Failure (`Error in type_element: Unknown - `):**
+   - Calling `type_element(input_method="keystrokes")` sends keys but executes
+     `waitForAXValueConvergence` checking if `kAXValueAttribute == expectedText`.
+   - Because secure fields mask text with bullets (`••••`), readback never matches the
+     plaintext payload, timing out after 10 seconds.
+4. **Mouse Clicks Remain Functional:**
+   - Physical mouse clicks are NOT blocked by `EnableSecureEventInput`. Only keyboard
+     event taps are suppressed.
+
+**Mitigations:**
+
+1. **Clipboard + Target-Scoped AppleScript Dispatch:**
+   - Set the clipboard with the desired secret: `clipboard(action="set", text="<secret>")`.
+   - Click the secure text field via `click_element` or coordinate `click` to acquire focus.
+   - Dispatch paste and submission via MCP `run(type="applescript")` targeting System Events:
+     ```applescript
+     tell application "System Events"
+         keystroke "v" using command down
+         delay 0.2
+         key code 36 -- return
+     end tell
+     ```
+     This bypasses `CGEventTap` observation token requirements while operating cleanly
+     through macOS event injection.
+2. **Server-Side Consideration:**
+   - In server-side macro execution (`MacroExecutor.swift`), when `IsSecureEventInputEnabled()`
+     is true or the target is known to be an `AXSecureTextField`, the server should relax the
+     mandatory `routedDeliveryObserved` check for keyboard events, falling back to delivery
+     commitment without requiring event-tap roundtrip tokens.
+
 ---
 
 ## Priority & Impact Summary
@@ -188,3 +239,5 @@ If neither signal changes or identifies the destination, report navigation as un
 | 11| Installed bundle recovery | Empirical Finding | Recovers from launch-resource mismatches without inventing IDs |
 | 12| Background Space/process selection | Empirical Finding | Avoids targeting helpers or inaccessible windows |
 | 13| Two-signal navigation verification | Empirical Finding | Prevents false completion on matching labels |
+| 14| Secure text input & password fields | Empirical Finding | Avoids CGEventTap token timeouts & AX non-settable errors |
+
