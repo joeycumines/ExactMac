@@ -18,8 +18,7 @@ supplied.
 Answered by the existing codebase, not delegated. ExactMac is a Swift package repository with three Swift
 packages and a Go module: the root `Package.swift` (the `ExactMac` SDK), `Server/Package.swift` (the gRPC
 server), and a `Console/Package.swift` to be added for the consent app. SwiftUI, AppKit, and LocalAuthentication.
-Swift 6, macOS 15 deployment target for the server, macOS 12 for the SDK. gRPC over HTTP/2 on a Unix socket the server binds itself,
-Unix socket, with a Go MCP proxy in front for agent access.
+Swift 6, macOS 15 deployment target for the server, macOS 12 for the SDK. gRPC over HTTP/2 on an owner-only Unix socket the server binds itself, with a Go MCP proxy in front for agent access.
 
 ## Users
 

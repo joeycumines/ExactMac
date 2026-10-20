@@ -27,7 +27,7 @@ Most macOS MCP servers wrap AppleScript (scriptable apps only), loop screenshots
 
 Build from source with [CONTRIBUTING.md](CONTRIBUTING.md) (prerequisites, first build, tests). Deploy the menu-bar app and MCP server with [DEPLOYMENT.md](DEPLOYMENT.md) (app bundle, Unix socket, signing).
 
-Point the proxy at the Swift backend with `EXACTMAC_SERVER_ADDR` (default `localhost:50051`; the socket deployment in [DEPLOYMENT.md](DEPLOYMENT.md) avoids TCP entirely).
+The proxy connects automatically to the Swift backend over the owner-only Unix socket (`~/Library/Application Support/ExactMac/exactmac.sock`), avoiding TCP entirely; point it at a network backend with `EXACTMAC_SERVER_ADDR` when testing TCP.
 
 Register it in the AI tool (snippets and checks for every client: [AI Tool Integration](docs/ai-artifacts/08-ai-tool-integration.md)):
 
