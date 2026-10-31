@@ -1,5 +1,5 @@
-cloud.google.com/go/longrunning v1.2.0 h1:WjYH3YHBGCxGJP9M4dWGHBfXr/cFIjMkNgWcJj7/iMM=
-cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
+cloud.google.com/go/longrunning v1.4.0 h1:l53OXv/ZAQCvATPqdYIqxruIUa1+eeX3Ckg0EBMpZLM=
+cloud.google.com/go/longrunning v1.4.0/go.mod h1:HAJuq0kD9eDyV6DtaN+0b6niPzFFFf9QMMHkHD7DvMc=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
